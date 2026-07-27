@@ -93,6 +93,11 @@ src/
     state.rs
     stick.rs
 
+  diagnostics/
+    mod.rs
+    event.rs
+    status.rs
+
   protocol/
     mod.rs
     input_report.rs
@@ -215,7 +220,7 @@ public controller が所有するもの:
 - validated immutable `ControllerConfig`
 - worker command sender
 - worker join handle
-- lock-freeまたは短時間 read lock の status snapshot
+- lock-free または短時間 read lock の status snapshot
 - lifecycle client-side guard
 - controller kind marker
 - reporting mode marker
@@ -731,7 +736,7 @@ Bumble は [source-baseline.md](source-baseline.md) の exact revision に固定
 1. correctness を確認
 2. build time / binary size / license inventory を測定
 3. upstream の feature gate 可否を確認
-4.必要なら USB + ExternalHost を小さい crate へ切り出す upstream PR を作る
+4. 必要なら USB + ExternalHost を小さい crate へ切り出す upstream PR を作る
 5. fork を常態化させない
 
 local patch が必要な場合:
@@ -761,7 +766,7 @@ future async API のために現在の public method を generic future にし�
 - `ExternalHost` activity と swbt command を低 jitter で同時待機できるか
 - `Device` API だけで SDP / HID accepted channel を完全に駆動できるか
 - `bumble-hid::DeviceRuntime` が Switch の HIDP control sequence を追加実装なしで処理できるか
-- Classic pairing link key JSON が Python Bumble と byte-level互換か
+- Classic pairing link key JSON が Python Bumble と byte-level 互換か
 - Windows 11 / CSR8510 A10 / WinUSB で bumble-rs USB transport が同じ接続順を通るか
 - Switch 2 firmware 22.1.0 以外の実機
 - Linux libusb permission / driver detach
