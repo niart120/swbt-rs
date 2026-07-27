@@ -139,6 +139,7 @@ Direct controller は利用者入力用の周期 report loop を持たない。`
 ```rust
 pub trait SwitchGamepad: private::Sealed {
     fn open(&mut self) -> Result<()>;
+    fn create_profile(&mut self, options: CreateProfileOptions) -> Result<()>;
     fn pair(&mut self, timeout: Duration) -> Result<()>;
     fn reconnect(&mut self, timeout: Duration) -> Result<()>;
     fn connect(&mut self, options: ConnectOptions) -> Result<ConnectionPath>;
