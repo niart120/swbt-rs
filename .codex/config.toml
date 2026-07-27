@@ -1,0 +1,4 @@
+# Project-scoped Codex configuration.
+#
+# `rules/default.rules` permits the Rust quality gates and read-only Git
+# operations that this trusted repository uses repeatedly.

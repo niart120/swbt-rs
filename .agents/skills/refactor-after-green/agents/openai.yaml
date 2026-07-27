@@ -1,0 +1,4 @@
+interface:
+  display_name: "Refactor After Green"
+  short_description: "Refactor after a passing test"
+  default_prompt: "Improve structure after the relevant behavior is green without changing observable behavior."

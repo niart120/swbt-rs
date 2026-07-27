@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR Merge Cleanup"
+  short_description: "Merge a pull request and clean up"
+  default_prompt: "Use the connected GitHub plugin to create and merge the PR, then synchronize the default branch."

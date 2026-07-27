@@ -1,0 +1,4 @@
+interface:
+  display_name: "crates.io Release"
+  short_description: "Plan and run a crates.io release"
+  default_prompt: "Prepare or execute the next crates.io release using the repository release runbook."

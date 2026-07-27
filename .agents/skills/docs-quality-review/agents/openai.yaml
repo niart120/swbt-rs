@@ -1,0 +1,4 @@
+interface:
+  display_name: "Documentation Quality Review"
+  short_description: "Review documentation evidence"
+  default_prompt: "Review changed documentation for accuracy, evidence, scope, and mechanical contracts."

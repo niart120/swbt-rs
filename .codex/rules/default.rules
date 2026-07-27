@@ -1,0 +1,137 @@
+# Allow deterministic local quality gates without an approval prompt when this
+# repository is trusted. Keep each prefix narrow: remote writes, destructive
+# Git commands, shell entry points, and arbitrary program execution
+# intentionally remain subject to approval.
+
+prefix_rule(
+    pattern = ["cargo", "fmt", "--check"],
+    justification = "Check Rust formatting without modifying source files.",
+    match = ["cargo fmt --check"],
+    not_match = ["cargo fmt"],
+)
+
+prefix_rule(
+    pattern = ["cargo", "clippy", "--all-targets", "--all-features", "--", "-D", "warnings"],
+    justification = "Run the repository's strict Clippy gate.",
+    match = ["cargo clippy --all-targets --all-features -- -D warnings"],
+    not_match = ["cargo clippy --fix"],
+)
+
+prefix_rule(
+    pattern = ["cargo", "test", "--all-features"],
+    justification = "Run the repository's all-features test suite.",
+    match = ["cargo test --all-features"],
+)
+
+prefix_rule(
+    pattern = ["cargo", "build", "--all-features"],
+    justification = "Build the repository with all features enabled.",
+    match = ["cargo build --all-features"],
+    not_match = ["cargo install"],
+)
+
+prefix_rule(
+    pattern = ["cargo", "test"],
+    justification = "Run the default-feature Rust test suite.",
+    match = ["cargo test"],
+)
+
+prefix_rule(
+    pattern = ["cargo", "build"],
+    justification = "Build the default-feature Rust binary.",
+    match = ["cargo build"],
+    not_match = ["cargo install"],
+)
+
+prefix_rule(
+    pattern = ["cargo", "package"],
+    justification = "Assemble and verify the local Cargo package without publishing it.",
+    match = ["cargo package"],
+    not_match = ["cargo publish"],
+)
+
+prefix_rule(
+    pattern = ["rg"],
+    justification = "Search tracked project text during review and investigation.",
+    match = ["rg -n \"TODO|TBD\" ."],
+    not_match = ["git grep TODO"],
+)
+
+prefix_rule(
+    pattern = ["git", ["status", "diff", "log", "show"]],
+    justification = "Inspect local repository state and history.",
+    match = ["git status --short --branch", "git diff --check", "git log --oneline -5"],
+    not_match = ["git reset --hard"],
+)
+
+prefix_rule(
+    pattern = ["git", "branch", ["--show-current", "--list"]],
+    justification = "Inspect the current or listed local branches.",
+    match = ["git branch --show-current", "git branch --list"],
+    not_match = ["git branch -D obsolete-branch"],
+)
+
+prefix_rule(
+    pattern = ["git", "remote", "get-url"],
+    justification = "Read the configured remote URL before PR work.",
+    match = ["git remote get-url origin"],
+    not_match = ["git remote set-url origin https://example.invalid/repo.git"],
+)
+
+prefix_rule(
+    pattern = ["git", "ls-remote"],
+    justification = "Read remote references without changing the remote.",
+    match = ["git ls-remote --heads origin"],
+    not_match = ["git push origin main"],
+)
+
+prefix_rule(
+    pattern = ["git", "fetch"],
+    justification = "Read remote references into local remote-tracking refs.",
+    match = ["git fetch --prune origin"],
+    not_match = ["git push --delete origin obsolete-branch"],
+)
+
+prefix_rule(
+    pattern = ["git", "pull", "--ff-only"],
+    justification = "Synchronize a clean local branch without creating a merge commit.",
+    match = ["git pull --ff-only origin main"],
+    not_match = ["git pull origin main"],
+)
+
+prefix_rule(
+    pattern = ["gh", "auth", "status"],
+    justification = "Inspect GitHub CLI authentication without changing remote state.",
+    match = ["gh auth status"],
+    not_match = ["gh auth logout"],
+)
+
+prefix_rule(
+    pattern = ["gh", "repo", "view"],
+    justification = "Inspect GitHub repository metadata without changing remote state.",
+    match = ["gh repo view --json nameWithOwner,visibility,url,defaultBranchRef"],
+    not_match = ["gh repo delete niart120/swbt-rs"],
+)
+
+prefix_rule(
+    pattern = ["gh", "pr", ["view", "list", "checks", "diff"]],
+    justification = "Inspect pull requests and their checks without changing remote state.",
+    match = [
+        "gh pr view 1",
+        "gh pr list --state open",
+        "gh pr checks 1",
+        "gh pr diff 1",
+    ],
+    not_match = ["gh pr merge 1"],
+)
+
+prefix_rule(
+    pattern = ["gh", "run", ["view", "list", "watch"]],
+    justification = "Inspect or wait for GitHub Actions runs without changing them.",
+    match = [
+        "gh run view 1",
+        "gh run list --branch main",
+        "gh run watch 1",
+    ],
+    not_match = ["gh run cancel 1"],
+)

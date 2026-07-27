@@ -1,0 +1,4 @@
+interface:
+  display_name: "TDD Test List"
+  short_description: "Create behavior-based test items"
+  default_prompt: "Create or update a behavior-based TDD test list from the relevant specification."

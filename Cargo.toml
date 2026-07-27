@@ -1,0 +1,8 @@
+[package]
+name = "swbt-rs"
+version = "0.1.0"
+edition = "2024"
+description = "Rust port of swbt-python for an NX-compatible virtual Bluetooth HID input device."
+repository = "https://github.com/niart120/swbt-rs"
+
+[dependencies]

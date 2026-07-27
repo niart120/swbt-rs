@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tidy First"
+  short_description: "Separate structural changes"
+  default_prompt: "Separate structural changes from behavior changes before implementing the next change."

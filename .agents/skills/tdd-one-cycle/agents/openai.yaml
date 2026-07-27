@@ -1,0 +1,4 @@
+interface:
+  display_name: "TDD One Cycle"
+  short_description: "Complete one TDD item"
+  default_prompt: "Complete exactly one test-list item through red, green, and any needed refactor."

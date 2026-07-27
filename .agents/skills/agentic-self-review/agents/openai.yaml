@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentic Self Review"
+  short_description: "Review change readiness"
+  default_prompt: "Review the current changes, quality gates, and remaining risks before handoff or a PR."

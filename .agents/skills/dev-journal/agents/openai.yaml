@@ -1,0 +1,4 @@
+interface:
+  display_name: "Development Journal"
+  short_description: "Record small observations"
+  default_prompt: "Record a small observation or deferred decision in the development journal."

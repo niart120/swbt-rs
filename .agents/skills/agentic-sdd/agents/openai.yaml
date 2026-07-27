@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentic SDD"
+  short_description: "Plan and execute a work unit"
+  default_prompt: "Read the agent guide and initial specifications, then select and execute the next work unit."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Diagnosing Bugs"
+  short_description: "Investigate a defect"
+  default_prompt: "Reproduce the defect, form hypotheses, collect evidence, and add a regression test."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust API Boundary Review"
+  short_description: "Review Rust public API boundaries"
+  default_prompt: "Review the current Rust API, ownership, error, async, and feature boundaries."

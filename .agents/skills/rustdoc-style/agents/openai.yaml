@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rustdoc Style"
+  short_description: "Review public Rust documentation"
+  default_prompt: "Review the current public Rust API documentation for contract accuracy and doctest coverage."

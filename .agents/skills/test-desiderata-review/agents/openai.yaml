@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Desiderata Review"
+  short_description: "Review test value"
+  default_prompt: "Review a proposed test for value, cost, and maintenance trade-offs."
