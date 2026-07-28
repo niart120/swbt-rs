@@ -11,11 +11,12 @@ use super::{
     TransportEvent, TransportPort, TransportResult,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::runtime) enum ScriptedSendOutcome {
     Accepted,
     Rejected,
     AcceptedThenDisconnect { reason: Option<u8> },
+    AcceptedThenEvent(TransportEvent),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -347,30 +348,28 @@ impl Shared {
         let outcome = lock(&self.send_script)
             .pop_front()
             .unwrap_or(ScriptedSendOutcome::Accepted);
-        match outcome {
+        let event = match outcome {
             ScriptedSendOutcome::Rejected => {
-                Err(TransportError::new(TransportErrorKind::SendRejected))
+                return Err(TransportError::new(TransportErrorKind::SendRejected));
             }
-            ScriptedSendOutcome::Accepted => {
-                lock(&self.accepted_interrupts).push(Box::from(payload));
-                Ok(SendAcceptance::ACCEPTED)
-            }
+            ScriptedSendOutcome::Accepted => None,
             ScriptedSendOutcome::AcceptedThenDisconnect { reason } => {
-                lock(&self.accepted_interrupts).push(Box::from(payload));
-                match self
-                    .events
-                    .try_send(QueuedEvent::Event(TransportEvent::Disconnected { reason }))
-                {
-                    Ok(()) => Self::notify(&lifecycle),
-                    Err(TrySendError::Full(_)) => {
-                        *terminal = Some(Terminal::EventQueueOverflow);
-                        Self::notify(&lifecycle);
-                    }
-                    Err(TrySendError::Disconnected(_)) => {}
+                Some(TransportEvent::Disconnected { reason })
+            }
+            ScriptedSendOutcome::AcceptedThenEvent(event) => Some(event),
+        };
+        lock(&self.accepted_interrupts).push(Box::from(payload));
+        if let Some(event) = event {
+            match self.events.try_send(QueuedEvent::Event(event)) {
+                Ok(()) => Self::notify(&lifecycle),
+                Err(TrySendError::Full(_)) => {
+                    *terminal = Some(Terminal::EventQueueOverflow);
+                    Self::notify(&lifecycle);
                 }
-                Ok(SendAcceptance::ACCEPTED)
+                Err(TrySendError::Disconnected(_)) => {}
             }
         }
+        Ok(SendAcceptance::ACCEPTED)
     }
 
     fn disconnect_if_active(&self) -> TransportResult<()> {

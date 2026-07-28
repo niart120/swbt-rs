@@ -117,8 +117,10 @@ pub(crate) fn handle_output<M: ControllerModel>(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use crate::{
-        input::InputState,
+        input::{ImuFrame, InputState},
         model::Pro,
         protocol::{DeviceInfoBluetoothAddress, ProtocolError, SwitchHidProtocol},
         runtime::{
@@ -129,7 +131,7 @@ mod tests {
             },
             sender::ReportSender,
             transport::{
-                HidChannel, TransportErrorKind, TransportPort, activity_channel,
+                HidChannel, TransportErrorKind, TransportEvent, TransportPort, activity_channel,
                 fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
             },
         },
@@ -233,6 +235,69 @@ mod tests {
             assert_eq!(harness.sender.session(), initial_session);
             assert!(harness.control.accepted_interrupts().is_empty());
         }
+    }
+
+    #[test]
+    fn in_flight_old_mode_input_finishes_before_accepted_imu_ack_and_new_mode_input() {
+        let mut harness = Harness::new();
+        let imu_request = subcommand_report(0x40, &[0x02]);
+        harness.control.script_sends([
+            ScriptedSendOutcome::AcceptedThenEvent(TransportEvent::HidOutput {
+                channel: HidChannel::Interrupt,
+                payload: imu_request.into_boxed_slice(),
+            }),
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Accepted,
+        ]);
+        let imu_frame = ImuFrame::raw([0, 0, 4096], [0, 0, 0]);
+        harness.state = InputState::neutral().with_imu([imu_frame; 3]);
+
+        harness
+            .sender
+            .send_input(&harness.protocol, &harness.state, 0, &mut harness.transport)
+            .expect("in-flight old-mode input accepted");
+        assert_eq!(harness.sender.timer(), 1);
+        assert!(!harness.sender.session().imu_enabled());
+
+        let events = harness
+            .transport
+            .poll(Duration::ZERO)
+            .expect("output queued while old-mode input was in flight");
+        let [TransportEvent::HidOutput { channel, payload }] = events.as_slice() else {
+            panic!("one HID output event must follow the accepted input");
+        };
+        let handled = harness
+            .handle(*channel, payload)
+            .expect("IMU mode acknowledgement accepted");
+        assert!(matches!(handled, OutputHandling::ReplyAccepted(_)));
+        assert_eq!(harness.sender.timer(), 2);
+        assert!(harness.sender.session().imu_enabled());
+
+        harness
+            .sender
+            .send_input(&harness.protocol, &harness.state, 0, &mut harness.transport)
+            .expect("first new-mode input accepted");
+
+        let accepted = harness.control.accepted_interrupts();
+        assert_eq!(
+            accepted
+                .iter()
+                .map(|report| (report[0], report[1]))
+                .collect::<Vec<_>>(),
+            [(0x30, 0), (0x21, 1), (0x30, 2)]
+        );
+        assert_eq!(&accepted[0][13..], &[0; 36]);
+        assert_eq!(accepted[1][14], 0x40);
+        assert_ne!(&accepted[2][13..], &accepted[0][13..]);
+        assert_eq!(harness.sender.timer(), 3);
+        assert_eq!(
+            harness
+                .sender
+                .session()
+                .imu_encoding_state()
+                .previous_report_ns(),
+            Some(0)
+        );
     }
 
     struct Harness {
