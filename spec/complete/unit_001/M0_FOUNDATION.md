@@ -125,7 +125,7 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | `.github/workflows/ci.yml` | new | MSRV/stable gate |
 | `README.md` | modify | 実装状態と利用入口 |
 | `spec/initial/source-baseline.md` | modify | MIT 採用済み状態へ同期 |
-| `spec/wip/unit_001/M0_FOUNDATION.md` | new / modify | 作業仕様と検証記録 |
+| `spec/complete/unit_001/M0_FOUNDATION.md` | new / modify | 完了済み作業仕様と検証記録 |
 
 ## 9. 検証
 
@@ -143,22 +143,23 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | `cargo metadata --locked --no-deps --format-version 1` の Bumble dependency 検査 | pass | direct `bumble` は基準 SHA の git source 1 件 |
 | `cargo build --all-features --locked` | pass | git 版 `bumble 0.1.0` を含めて build 成功 |
 | `cargo +1.87 build --all-features --locked` | pass | Rust 1.87.0 で git 版 Bumble を含めて build 成功 |
-| `cargo package --allow-dirty` | fail | git dependency に version がないため拒否。crates.io の同名別 package を使う偽の成功を避けるため `publish = false` |
+| `cargo package --allow-dirty` | fail | 実装途中の確認。git dependency に version がないため拒否。crates.io の同名別 package を使う偽の成功を避けるため `publish = false` |
 | `.github/workflows/ci.yml` の PyYAML parse | pass | 隔離した `uvx --with pyyaml` 環境で構文検査 |
-| `cargo +1.87 check --all-targets --all-features --locked` | pass | CI `check-msrv` と同一 |
-| CI stable commands | pass | fmt / check / clippy / test / doc を workflow と同じ引数で実行 |
 | `cargo metadata --no-deps --format-version 1` の package contract 検査 | pass | `rust_version=1.87`、`license=MIT`、library `swbt` が 1 件、binary が 0 件 |
 | `cargo check --example type_model --locked` | pass | red は example target 不在。恒久名へ整理後に compile 成功 |
-| `cargo test --doc --all-features --locked` | pass | crate-level example 1 passed |
-| `cargo doc --no-deps --all-features --locked` | pass | missing-docs warning なし |
-| `cargo fmt --check` | not run | 実装後に実行 |
-| `cargo +1.87 check --all-targets --all-features` | not run | MSRV |
-| `cargo check --all-targets --all-features` | not run | stable/current toolchain |
-| `cargo clippy --all-targets --all-features -- -D warnings` | not run | static gate |
-| `cargo test --all-features` | not run | unit / integration / doctest |
-| `cargo build --all-features` | not run | public API / metadata gate |
-| `cargo package` | not run | package 内容と metadata |
-| `git diff --check` | not run | whitespace |
+| `cargo fmt --all --check` | pass | 最終状態で差分なし |
+| `cargo +1.87 check --all-targets --all-features --locked` | pass | Rust 1.87.0。CI `check-msrv` と同一 |
+| `cargo check --all-targets --all-features --locked` | pass | current stable。CI `check-stable` と同一 |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | warning なし |
+| `cargo test --all-targets --all-features --locked` | pass | unit / integration 21 passed、example target も compile |
+| `cargo test --doc --all-features --locked` | pass | crate-level example 1 passed。CI `doc` に同じ command を追加 |
+| `cargo test --locked` | pass | default features で unit / integration 21 件と doctest 1 件が pass |
+| `cargo build --all-features --locked` | pass | all-features の通常 build |
+| `cargo build --locked` | pass | default features の通常 build |
+| `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked` | pass | missing-docs を含む warning なし |
+| `cargo package` | fail | clean worktree で実行。git dependency に version 要件がなく拒否。M0 は `publish = false` で package artifact を完了条件に含めず、M9 の release blocker として追跡 |
+| `git diff --check` / `git diff --check main...HEAD` | pass | whitespace error なし |
+| API / docs / test self-review | pass after fixes | `Controller` の非 `Sync` marker、通常 build の wire lookup、README の現状説明、CI doctest、gate 記録を修正 |
 | GitHub required checks | not run | PR 作成後に確認 |
 
 ## 10. 先送り事項
@@ -172,6 +173,6 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 ## 11. チェックリスト
 
 - [x] 対象範囲と対象外を確認した
-- [ ] TDD Test List を更新した
-- [ ] 検証結果または未実行理由を記録した
+- [x] TDD Test List を更新した
+- [x] 検証結果または未実行理由を記録した
 - [x] package / release / public API に触れる場合の gate を記録した
