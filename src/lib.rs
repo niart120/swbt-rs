@@ -13,7 +13,8 @@ pub mod reporting;
 
 pub use error::{Error, ErrorKind, Result};
 pub use input::{
-    Button, ButtonKind, ImuFrame, ImuSamples, JoyConLButton, JoyConRButton, ProButton, Stick,
+    Button, ButtonKind, ImuFrame, ImuSamples, InputState, JoyConLButton, JoyConLInputState,
+    JoyConRButton, JoyConRInputState, ProButton, ProInputState, Stick,
 };
 pub use model::{ControllerModel, HasDualSticks, HasLeftStick, HasRightStick};
 pub use profile::ControllerKind;

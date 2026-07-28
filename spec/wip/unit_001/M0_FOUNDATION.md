@@ -93,7 +93,7 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | refactor-done | 全 supported button が Python 基準 commit と一致する byte index / mask を持ち、非対応組み合わせに mapping がない | characterization | unit | red: mapping type/function 不在。green: 2 passed。M0 の accessor を test build に絞り、同じ mapping を動的変換にも使用 |
 | refactor-done | `Stick` が 12-bit raw 値と非対称 normalized 変換を保持し、不正値を拒否する | new | unit | red: Stick/capability trait 不在。green: 5 passed。model の stick bool を capability 宣言へ統合 |
 | refactor-skipped | `ImuFrame` と `ImuSamples` が signed 16-bit 六軸値と 1/3 frame の順序を保持する | new | unit | red: IMU 型不在。green: 3 passed。追加の構造変更なし。物理単位と wire conversion は M1 |
-| todo | `InputState<M>` が model-valid button、stick 能力、3 IMU frame を含む neutral / replacement state を保持する | new | unit | model ごとの共通 harness |
+| refactor-skipped | `InputState<M>` が model-valid button、stick 能力、3 IMU frame を含む neutral / replacement state を保持する | new | unit | red: state alias 不在。green: 3 passed。private 完全状態で不正な public constructor なし |
 | todo | `Controller<M, R>`、`ControllerBuilder<M, R>` と 6 alias を公開 API から参照できる | new | integration | build/open/send/apply は対象外 |
 | todo | Cargo が Bumble 基準 commit の direct dependency を単一 revision で解決し、lockfile に固定する | new | package | `cargo tree` と lockfile を監査 |
 | todo | M0 の公開 example と rustdoc が通常の build で compile する | new | integration | 不正コードの compile-fail fixture は作らない |
@@ -138,6 +138,7 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | `cargo test --test stick_contract` | pass | red は Stick/capability trait 不在。green は 5 passed |
 | `cargo +1.87 test --test stick_contract` | pass | Rust 1.87.0 で 5 passed |
 | `cargo test --test imu_contract` | pass | red は IMU 型不在。green は 3 passed |
+| `cargo test --test input_state_contract` | pass | red は state alias 不在。green は 3 passed |
 | `cargo metadata --no-deps --format-version 1` の package contract 検査 | pass | `rust_version=1.87`、`license=MIT`、library `swbt` が 1 件、binary が 0 件 |
 | `cargo test --doc --all-features` | pass | 0 doctests、crate-level rustdoc は compile 成功 |
 | `cargo fmt --check` | not run | 実装後に実行 |
