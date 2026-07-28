@@ -41,5 +41,5 @@ pub use input::{
     JoyConRButton, JoyConRInputState, ProButton, ProInputState, Stick,
 };
 pub use model::{ControllerModel, HasDualSticks, HasLeftStick, HasRightStick};
-pub use profile::ControllerKind;
+pub use profile::{ControllerColors, ControllerKind, Rgb24};
 pub use reporting::{ReportingKind, ReportingMode};
