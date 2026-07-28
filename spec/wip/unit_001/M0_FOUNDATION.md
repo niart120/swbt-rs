@@ -95,7 +95,7 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | refactor-skipped | `ImuFrame` と `ImuSamples` が signed 16-bit 六軸値と 1/3 frame の順序を保持する | new | unit | red: IMU 型不在。green: 3 passed。追加の構造変更なし。物理単位と wire conversion は M1 |
 | refactor-skipped | `InputState<M>` が model-valid button、stick 能力、3 IMU frame を含む neutral / replacement state を保持する | new | unit | red: state alias 不在。green: 3 passed。private 完全状態で不正な public constructor なし |
 | refactor-skipped | `Controller<M, R>`、`ControllerBuilder<M, R>` と 6 alias を公開 API から参照できる | new | integration | red: controller surface 不在。green: 2 passed。runtime method/field は M2 のまま |
-| todo | Cargo が Bumble 基準 commit の direct dependency を単一 revision で解決し、lockfile に固定する | new | package | `cargo tree` と lockfile を監査 |
+| refactor-done | Cargo が Bumble 基準 commit の direct dependency を単一 revision で解決し、lockfile に固定する | new | package | red: direct dependency 不在。green: metadata/lock/build。crates.io 同名 package との衝突を検出し publish を無効化 |
 | todo | M0 の公開 example と rustdoc が通常の build で compile する | new | integration | 不正コードの compile-fail fixture は作らない |
 | todo | GitHub Actions が MSRV/stable の fmt、clippy、test、doc、build gate を定義する | new | package | workflow 構文と実行結果を確認する |
 
@@ -140,6 +140,10 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | `cargo test --test imu_contract` | pass | red は IMU 型不在。green は 3 passed |
 | `cargo test --test input_state_contract` | pass | red は state alias 不在。green は 3 passed |
 | `cargo test --test controller_type_contract` | pass | red は controller surface 不在。green は 2 passed |
+| `cargo metadata --locked --no-deps --format-version 1` の Bumble dependency 検査 | pass | direct `bumble` は基準 SHA の git source 1 件 |
+| `cargo build --all-features --locked` | pass | git 版 `bumble 0.1.0` を含めて build 成功 |
+| `cargo +1.87 build --all-features --locked` | pass | Rust 1.87.0 で git 版 Bumble を含めて build 成功 |
+| `cargo package --allow-dirty` | fail | git dependency に version がないため拒否。crates.io の同名別 package を使う偽の成功を避けるため `publish = false` |
 | `cargo metadata --no-deps --format-version 1` の package contract 検査 | pass | `rust_version=1.87`、`license=MIT`、library `swbt` が 1 件、binary が 0 件 |
 | `cargo test --doc --all-features` | pass | 0 doctests、crate-level rustdoc は compile 成功 |
 | `cargo fmt --check` | not run | 実装後に実行 |
@@ -158,6 +162,7 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 - Python fixture generator と byte-for-byte protocol fixtureは M1。
 - worker、builder の build/create-profile behavior、runtime semantics は M2。
 - Bumble external HCI と adapter-only 検証は M3。
+- Bumble git dependency の crates.io package 名衝突は `spec/dev-journal.md` に記録し、M9 の package / release 前に仕様化する。
 - roadmap 主鎖と alpha.2 の diagnostics/probe 順序の不整合は `spec/dev-journal.md` に記録し、M6 完了前に仕様化する。
 
 ## 11. チェックリスト

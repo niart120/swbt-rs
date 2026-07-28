@@ -11,7 +11,8 @@ Bluetooth stack には
 仕様・テスト・品質確認を作業単位ごとに進めます。
 
 - Bluetooth transport、HID protocol、controller API は未実装です。
-- `bumble-rs` の依存追加と commit 固定は未実施です。
+- core `bumble` は基準 commit `bbac2a6803b8cab0920ab725a23aa408fc4fed85` に固定しています。
+- transport 用の Bumble crate と統合処理は未実装です。
 - Bluetooth adapter や対象機器を使う実機検証は未実施です。
 
 ## 開発
