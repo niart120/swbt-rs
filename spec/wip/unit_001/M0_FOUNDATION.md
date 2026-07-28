@@ -97,7 +97,7 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | refactor-skipped | `Controller<M, R>`、`ControllerBuilder<M, R>` と 6 alias を公開 API から参照できる | new | integration | red: controller surface 不在。green: 2 passed。runtime method/field は M2 のまま |
 | refactor-done | Cargo が Bumble 基準 commit の direct dependency を単一 revision で解決し、lockfile に固定する | new | package | red: direct dependency 不在。green: metadata/lock/build。crates.io 同名 package との衝突を検出し publish を無効化 |
 | refactor-done | M0 の公開 example と rustdoc が通常の build で compile する | new | integration | red: example target 不在。green: example/doc/doctest。公開文面から milestone 内部語を除去 |
-| todo | GitHub Actions が MSRV/stable の fmt、clippy、test、doc、build gate を定義する | new | package | workflow 構文と実行結果を確認する |
+| refactor-skipped | GitHub Actions が MSRV/stable の fmt、clippy、test、doc、build gate を定義する | new | package | red: workflow 不在。green: YAML と同一 local commands。remote run は PR 後 |
 
 ## 7. 設計メモ
 
@@ -144,6 +144,9 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | `cargo build --all-features --locked` | pass | git 版 `bumble 0.1.0` を含めて build 成功 |
 | `cargo +1.87 build --all-features --locked` | pass | Rust 1.87.0 で git 版 Bumble を含めて build 成功 |
 | `cargo package --allow-dirty` | fail | git dependency に version がないため拒否。crates.io の同名別 package を使う偽の成功を避けるため `publish = false` |
+| `.github/workflows/ci.yml` の PyYAML parse | pass | 隔離した `uvx --with pyyaml` 環境で構文検査 |
+| `cargo +1.87 check --all-targets --all-features --locked` | pass | CI `check-msrv` と同一 |
+| CI stable commands | pass | fmt / check / clippy / test / doc を workflow と同じ引数で実行 |
 | `cargo metadata --no-deps --format-version 1` の package contract 検査 | pass | `rust_version=1.87`、`license=MIT`、library `swbt` が 1 件、binary が 0 件 |
 | `cargo check --example type_model --locked` | pass | red は example target 不在。恒久名へ整理後に compile 成功 |
 | `cargo test --doc --all-features --locked` | pass | crate-level example 1 passed |
