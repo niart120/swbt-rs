@@ -15,6 +15,14 @@ mod error;
         reason = "M1 builds this module before M2 runtime integration"
     )
 )]
+mod facade;
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "M1 builds this module before M2 runtime integration"
+    )
+)]
 mod imu;
 #[cfg_attr(
     not(test),

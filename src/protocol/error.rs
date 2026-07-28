@@ -42,6 +42,9 @@ pub(crate) enum ProtocolError {
     InvalidVibrationValue {
         requested: u8,
     },
+    UnsupportedSubcommand {
+        subcommand_id: u8,
+    },
 }
 
 impl fmt::Display for ProtocolError {
@@ -120,6 +123,9 @@ impl fmt::Display for ProtocolError {
             }
             Self::InvalidVibrationValue { .. } => {
                 formatter.write_str("enable vibration subcommand argument must be 0x00 or 0x01")
+            }
+            Self::UnsupportedSubcommand { subcommand_id } => {
+                write!(formatter, "unsupported subcommand: 0x{subcommand_id:02x}")
             }
         }
     }
