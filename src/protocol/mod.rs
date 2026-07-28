@@ -31,6 +31,14 @@ mod input_report;
         reason = "M1 builds this module before M2 runtime integration"
     )
 )]
+mod output_report;
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "M1 builds this module before M2 runtime integration"
+    )
+)]
 mod spi;
 
 #[cfg(test)]
