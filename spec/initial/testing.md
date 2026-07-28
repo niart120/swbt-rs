@@ -6,28 +6,28 @@
 - architecture: [architecture.md](architecture.md)
 - roadmap gate: [roadmap.md](roadmap.md)
 
-この文書は、コンパイル時の能力制約、Python 基準断面との wire 差分、generic runtime、Bumble 仮想統合、adapter-only test、Switch 実機 test、CI の必須条件を定義する。
+この文書は、コンパイル時の能力制約、Python 基準断面との wire 差分、typed runtime、profile lifecycle、Bumble 仮想統合、adapter-only test、Switch 実機 test、CI の必須条件を定義する。
 
 ## 1. テスト分類
 
-| 分類 | Switch 実機 | USB adapter | Bumble | 目的 |
+| 分類 | Switch実機 | USB adapter | Bumble | 目的 |
 |---|---:|---:|---:|---|
-| UI compile-pass/fail | 不要 | 不要 | 不要 | `Controller<M, R>` の型能力を固定 |
-| Pure unit | 不要 | 不要 | 不要 | 値型、model 宣言、parser、encoder、profile validation |
-| Golden differential | 不要 | 不要 | 不要 | Python v0.6.0 と wire / data behavior を比較 |
-| Runtime integration | 不要 | 不要 | 不要 | typed worker、scheduler、Direct transaction、cleanup |
-| Transport contract | 不要 | 不要 | fake または Bumble | transport の意味と failure mapping |
-| Bumble virtual integration | 不要 | 不要 | 必要 | Classic、pairing、SDP、HID を software controller で統合 |
+| UI compile-pass/fail | 不要 | 不要 | 不要 | `Controller<M, R>`の型能力 |
+| Pure unit | 不要 | 不要 | 不要 | 値型、model宣言、parser、encoder、profile |
+| Golden differential | 不要 | 不要 | 不要 | Python v0.6.0とのwire/data比較 |
+| Runtime integration | 不要 | 不要 | 不要 | typed worker、scheduler、Direct、cleanup |
+| Transport contract | 不要 | 不要 | fakeまたはBumble | transport意味とfailure mapping |
+| Bumble virtual | 不要 | 不要 | 必要 | Classic、pairing、SDP、HID統合 |
 | Adapter-only | 不要 | 必要 | 必要 | USB open、HCI init、close、unplug |
-| Hardware | 必要 | 必要 | 必要 | pairing、reconnect、subcommand、入力反映 |
+| Hardware | 必要 | 必要 | 必要 | pairing、reconnect、input反映 |
 | Fuzz / model | 不要 | 不要 | 原則不要 | malformed input、state machine、race |
-| Packaging | 不要 | 不要 | build 時に必要 | MSRV、docs、crate、license、examples |
+| Packaging | 不要 | 不要 | build時に必要 | MSRV、docs、crate、license、examples |
 
-Default CI は UI、Pure、Golden、Runtime、Transport contract、Bumble virtual、Packaging を必須にする。Adapter-only と Hardware は専用 runner または developer machine で実行する。
+Default CIはUI、Pure、Golden、Runtime、Transport contract、Bumble virtual、Packagingを必須にする。
 
-## 2. 型制約の UI test
+## 2. 型制約のUI test
 
-`trybuild` または同等の compiler UI harness を使う。rustdoc の `compile_fail` だけを唯一の証拠にしない。
+`trybuild`または同等のcompiler UI harnessを使う。
 
 ```text
 tests/ui/
@@ -47,54 +47,51 @@ tests/ui/
     periodic_has_no_send.rs
     pro_state_to_joycon.rs
     direct_builder_has_no_report_period.rs
+    typed_builder_has_no_kind_setter.rs
 ```
 
-必須 compile-pass:
+compile-pass:
 
-- `ProButton::A` を `ProController` に渡せる
-- `JoyConRButton::A` を `JoyConR` に渡せる
-- 同じ `ImuFrame` を Pro、Joy-Con L、Joy-Con R の `InputState<M>` に使える
-- Pro に `left_stick()`、`right_stick()`、`sticks()` がある
-- Joy-Con L に `left_stick()` がある
-- Joy-Con R に `right_stick()` がある
-- Periodic に `apply(InputState<M>)` がある
-- Direct に `send(InputState<M>)` がある
+- `ProButton::A`を`ProController`に渡せる
+- `JoyConRButton::A`を`JoyConR`に渡せる
+- 同じ`ImuFrame`を全modelの`InputState<M>`に使える
+- Proにleft/right/dual stick methodがある
+- Joy-Con Lにleft stick、Joy-Con Rにright stickがある
+- Periodicに`apply(InputState<M>)`
+- Directに`send(InputState<M>)`
 
-必須 compile-fail:
+compile-fail:
 
-- `JoyConLButton::A` が存在しない
-- `ProButton::A` を Joy-Con L controller に渡せない
-- Joy-Con L に `right_stick()` がない
-- Joy-Con R に `left_stick()` がない
-- 片側 Joy-Con に `sticks(left, right)` がない
-- Direct に `apply()` がない
-- Periodic に `send()` がない
-- `InputState<model::Pro>` を Joy-Con L/R に渡せない
-- Direct builder に `report_period()` がない
-- `ControllerKind` を typed builder へ指定できない
+- `JoyConLButton::A`が存在しない
+- `ProButton::A`をJoy-Con Lへ渡せない
+- Joy-Con Lに`right_stick()`がない
+- Joy-Con Rに`left_stick()`がない
+- 片側Joy-Conに`sticks()`がない
+- Directに`apply()`がない
+- Periodicに`send()`がない
+- `InputState<Pro>`をJoy-Conへ渡せない
+- Direct builderに`report_period()`がない
+- typed builderに`ControllerKind` setterがない
 
-compiler stderr の全文を不必要に固定せず、対象 error が意図した型不一致または method absence であることをレビューする。Rust version 更新による文言差と API 退行を区別する。
+compiler stderr全文を不必要に固定せず、意図した型不一致またはmethod absenceであることをレビューする。
 
-## 3. model 宣言 audit
+## 3. model宣言audit
 
-model 宣言を単一正本に保つため、生成物または projection の整合を検査する。
-
-- marker type ごとに `ControllerModel::KIND` が一意
-- `ControllerKind` variant と profile 文字列が一対一
-- model の supported button 集合に重複がない
-- `Button<M>` associated constant が supported 集合と一致
-- `TryFrom<ButtonKind> for Button<M>` の成功集合が associated constant と一致
-- `HasLeftStick` / `HasRightStick` / `HasDualSticks` が model 表と一致
+- markerごとに`ControllerModel::KIND`が一意
+- `ControllerKind`とprofile文字列が一対一
+- supported button集合に重複なし
+- `Button<M>` associated constantsとsupported集合が一致
+- `TryFrom<ButtonKind>`成功集合が一致
+- stick capability trait実装がmodel表と一致
 - `M::SPEC.kind == M::KIND`
 - `M::SPEC.profile_name == M::PROFILE_NAME`
-- 全 supported button に wire mapping がある
-- unsupported button に wire mappingが存在しても public `Button<M>` を生成できない
+- 全supported buttonにwire mappingあり
 
-macro expansion の文字列 snapshot だけを品質根拠にしない。生成結果を型と値の両方から検査する。
+macro文字列snapshotだけを根拠にせず、型と値の両方で検査する。
 
-## 4. fixture の原則
+## 4. fixture原則
 
-全 golden fixture に provenance を記録する。
+全golden fixtureにprovenanceを記録する。
 
 ```json
 {
@@ -107,161 +104,189 @@ macro expansion の文字列 snapshot だけを品質根拠にしない。生成
 }
 ```
 
-fixture generator は次を固定する。
+fixture generatorが固定するもの:
 
-- Python dependency lock と Python version
+- Python dependency lock / version
 - source commit
 - controller kind
-- reporting semantics に必要な state
 - colors
-- typed inputを構成する元の論理 button / stick / IMU
+- logical button / stick / IMU input
 - timer byte
 - report mode / IMU mode
-- monotonic timestamp input
+- monotonic timestamp
 - output report / subcommand payload
 
-Python は Rust test 実行時の必須 dependency にしない。CI は commit 済み fixture を読む。
+PythonをRust test実行時の必須dependencyにしない。
 
 ## 5. Pure unit tests
 
 ### 5.1 `ButtonKind`
 
 - explicit discriminant `0x00..=0x13`
-- discriminant の重複なし
-- `ButtonKind` の logical order
-- numeric code が NX wire bit と暗黙同一視されていないこと
-- `(ControllerKind, ButtonKind)` wire mapping table
-- reserved bit / unsupported mapping policy
-- arbitrary numeric code からの parse error
+- 重複なし
+- logical order
+- numeric codeとNX wire bitを別契約として検査
+- `(ControllerKind, ButtonKind)` mapping
+- arbitrary numeric code parse error
 
-`ButtonKind as u8` を report offset に使う実装を source audit または API review で拒否する。wire mapping test は byte index と bit mask を明示する。
+`ButtonKind as u8`をreport offsetに使う実装をreviewで拒否する。
 
 ### 5.2 `Button<M>`
 
-- Pro の supported set
-- Joy-Con L の supported set
-- Joy-Con R の supported set
-- `kind()` が対応する `ButtonKind` を返す
-- dynamic `TryFrom` が supported だけ成功
-- `Debug` が model と論理名を識別できる
-- model 間の変換を提供していない
-- duplicate input の bitset 正規化
-- stable logical iteration order
+- Pro / Joy-Con L / Joy-Con Rのsupported set
+- `kind()` projection
+- dynamic `TryFrom` supportedのみ成功
+- model間変換なし
+- duplicate normalization
+- stable logical iteration
 
 ### 5.3 `Stick`
 
-- raw `0` / `2048` / `4095`
-- out-of-range error
-- normalized `-1.0` / `0.0` / `1.0`
-- Python と同じ asymmetric center conversion
-- half-way rounding
-- amount `0.0` / `1.0`
-- NaN / infinity reject
-- diagonal `tilt(1.0, 1.0)`
-- direction helper sign
+- raw 0 / 2048 / 4095
+- out-of-range
+- normalized -1 / 0 / 1
+- Pythonと同じasymmetric conversion
+- rounding
+- amount boundary
+- NaN / infinity
+- diagonal tilt
 
-`Stick` のテストを model ごとに複製しない。capability の有無は UI test で検査する。
+値型testをmodelごとに複製しない。能力有無はUI testで検査する。
 
 ### 5.4 `ImuFrame` / `ImuSamples`
 
-- raw i16 min / max
+- i16 boundary
 - neutral
-- accel / gyro partial constructor
-- with-method が反対側を保持
-- `0.070 dps/raw` の rad/s round-trip
-- `1/4096 G/raw` の G round-trip
-- non-finite / conversion overflow
-- `ImuSamples::Repeat` が 3 frame へ展開
-- `ImuSamples::Frames` が順序を保持
-- slice 長 0 / 2 / 4 を受ける API が存在しない
-
-共通 `ImuFrame` が全 model の state に使えることは compile-pass test で固定する。model 固有の wire encoding 差だけを model 別 golden test に置く。
+- partial constructor / with-method
+- `0.070 dps/raw` round-trip
+- `1/4096 G/raw` round-trip
+- non-finite / overflow
+- Repeatが3frameへ展開
+- Framesが順序保持
+- invalid slice lengthを受けるAPIがない
 
 ### 5.5 `InputState<M>`
 
-各 model について:
+各model:
 
-- neutral buttons / sticks / IMU
-- model-specific button set
+- neutral
+- model-specific buttons
 - complete replacement
-- semantic candidate generation
+- semantic candidate
 - clone / equality
 - new session neutral reset
-- model 間変換がない
-- stable serialization が public contract でない
+- model間変換なし
 
-Pro:
+Proはdual sticks、Joy-Con Lはleft only、Joy-Con Rはright only。
 
-- left / right / dual stick builder
+### 5.6 colors / SPI
 
-Joy-Con L:
-
-- left stick state だけを保持
-
-Joy-Con R:
-
-- right stick state だけを保持
-
-内部に unsupported stick の `Option` を持つ場合でも、public API と invariant test から不正値を構築不能にする。推奨は model associated `StickState` で不正状態を表現不能にすること。
-
-### 5.6 `ControllerColors` / SPI
-
-- default values
-- 24-bit boundary
+- default
+- RGB24 boundary
 - `0x6050` bytes
 - custom colors
-- model profile 固有 range
-- color mutation が `InputState<M>` に影響しない
+- model profile range
+- input state非干渉
 
 ### 5.7 input report `0x30`
 
-- total 49 bytes
-- report id
-- timer
+- 49 bytes
+- report ID / timer
 - battery / connection nibble
 - typed button bytes
 - model-specific stick packing
 - vibrator byte
 - 36-byte IMU block
 - reserved bytes
-- Pro / Joy-Con L / Joy-Con R 差
-- disabled / standard / quaternion IMU mode
-- deterministic explicit time
+- model差
+- IMU mode
+- deterministic time
 - next encoding state
 - timer wrap
 
-### 5.8 output report parser / responder
+### 5.8 parser / responder
 
-- `0x01` packet id / rumble / subcommand
-- `0x10` rumble-only
-- malformed short packet
-- arbitrary bytes never panic
+- `0x01` / `0x10`
+- malformed packet
+- arbitrary bytes no panic
 - raw rumble preservation
 - subcommand `0x02` / `0x03` / `0x04` / `0x08` / `0x10` / `0x21` / `0x30` / `0x40` / `0x48`
-- model-specific device info / SPI / elapsed button mapping
-- report mode + non-zero lights readiness
-- unsupported command が session を壊さない
-- reply state prefix を sender が typed state から取得
+- model-specific device info / SPI / elapsed button
+- readiness effects
+- unsupported command session不変
+- reply prefixをtyped stateから取得
 
-### 5.9 profile document
+### 5.9 profile document / typed profile
 
-- exact `format`
-- schema v2 only
+- exact format / schema v2
 - identity variants
-- controller kind strings
+- kind strings
 - namespace shape
 - malformed UTF-8 / JSON
 - address validation
-- multiple current peer rejection
-- key field parse
+- multiple peer rejection
+- key parse
 - secret-safe Debug
-- deterministic normalized JSON
-- `PairingProfile<M>` が `M::KIND` mismatch を拒否
-- typed profile を別 model controller へ渡す API がない
+- deterministic JSON
+- `PairingProfile<M>`のkind mismatch
+- typed profileを別modelへ渡すAPIがない
 
-## 6. Golden differential tests
+## 6. builderとprofile lifecycle tests
 
-fixture set:
+### 6.1 `build()`
+
+- `profile_path=None`でephemeral controller
+- existing matching profileでconfigured controller
+- existing mismatched profileをadapter open前に拒否
+- nonexistent pathは`ProfileNotFound`
+- `build()`でadapter / worker / USBを作らない
+- Direct configにperiod fieldが存在しない
+
+### 6.2 `create_profile()`
+
+fake filesystemとfake transportを使い、順序をevent logで検査する。
+
+必須順序:
+
+```text
+profile_validate_target
+profile_create_empty
+profile_reopen_typed
+transport_open
+pairing_start
+protocol_ready
+return_controller
+```
+
+検証:
+
+- profile path未指定は`ProfilePathRequired`
+- target existingは`ProfileAlreadyExists`、上書きなし
+- invalid identityはtransport open前に失敗
+- empty envelope persistenceがtransport openより先
+- envelopeのcontroller kindが`M::KIND`
+- pairing failureでもvalid empty envelopeが残る
+- failure時にworker / transportをcleanup
+- success時のreturn controllerは`Ready`
+- success後にtyped button operationを即時実行可能
+- `Controller<M,R>`に`create_profile()` methodが存在しない
+- existing empty profileのretryはbuild→open→pairで行う
+
+explicit local addressが未対応の間は、`UnsupportedCapability`を返しadapter identity変更eventがないことを検査する。
+
+### 6.3 persistence failure
+
+- parent create failure
+- temp create / write / flush / sync failure
+- create-new race
+- atomic replace failure
+- lock contention
+- orphan temp cleanup
+- Windows rename semantics
+
+自動backup testは作らない。更新中断では旧または新fileのどちらかがvalidであることを検査する。
+
+## 7. Golden differential tests
 
 ```text
 tests/fixtures/python-v0.6.0/
@@ -291,21 +316,21 @@ tests/fixtures/python-v0.6.0/
     joycon-r.*
 ```
 
-wire bytes 以外に次を fixture 化する。
+semantic fixture:
 
-- Stick normalized result
-- IMU physical conversion
+- Stick conversion
+- IMU conversion
 - model supported button matrix
 - stick capability matrix
 - readiness effect
-- profile normalized JSON
+- profile JSON
 - PairingKeys field names
 
-差分時は offset、expected、actual、field decode、model を表示する。
+差分時はoffset、expected、actual、field decode、modelを表示する。
 
-## 7. Runtime integration tests
+## 8. Runtime integration tests
 
-fake transport と fake clock を使い、wall clock wait を避ける。最低限、`ControllerWorker<M, R>` の次の組み合わせを通す。
+fake transport / fake clockで、次の6組を共通harnessに通す。
 
 ```text
 Pro × Periodic
@@ -316,153 +341,130 @@ JoyConR × Periodic
 JoyConR × Direct
 ```
 
-同じ generic contract を macro または共通 harness で実行し、6 組の test body を手作業で複製しない。
+### 8.1 lifecycle
 
-### 7.1 lifecycle
-
-- build で adapter を開かない
-- existing typed profile validation
-- absent profile path を create target として保持
 - open / repeated open
 - close / repeated close
 - close without neutral
 - reopen
 - open failure
-- worker panic
-- command termination
-- Drop best-effort と explicit close の差
-- close 中 input reject
+- worker panic / command termination
+- Drop vs explicit close
+- close中input reject
 
-### 7.2 handshake
+### 8.2 handshake
 
-- link だけでは connect 完了しない
-- control / interrupt の両 channel
-- bootstrap neutral と 1 秒 retry
-- valid subcommand 後 retry 停止
-- supported `0x03 30`
-- non-zero player lights
-- reply acceptance failure
-- ready 前 disconnect
+- linkだけではconnect完了しない
+- control / interrupt両channel
+- bootstrap neutral / retry
+- valid subcommand後retry停止
+- supported report mode
+- non-zero lights
+- acceptance failure
+- ready前disconnect
 - timeout
-- stale session reject
+- stale session
 - Periodic holdoff
-- Direct no-holdoff / no-confirmation-report
+- Direct no-holdoff
 
-### 7.3 sender ordering
+### 8.3 sender ordering
 
-- reply と input の単一 sequence
-- timer acceptance 後更新
-- failed send で timer 不変
-- IMU state acceptance 後更新
-- reply prefix の typed state
+- reply / input単一sequence
+- timer acceptance後更新
+- failed sendでtimer不変
+- IMU state acceptance後更新
+- reply prefix typed state
 - `0x40` ACK ordering
-- close neutral と pending reply
-- disconnect と queued send
+- close neutral / pending reply
 
-### 7.4 Periodic
+### 8.4 Periodic
 
 - state commit
-- exact deadline progression
-- overrun skip
-- no burst catch-up
+- deadline progression
+- overrun skip / no burst
 - latest state
 - holdoff
 - disconnect pause
-- new session epoch
-- 8 ms default
-- fake clock 長時間 run
+- new session
+- 8ms default
 
-### 7.5 Direct
+### 8.5 Direct
 
 - no periodic user input
-- send success commit
-- validation / transport rejection no commit
-- accepted then disconnect は commit 済み
-- semantic helper report 1 件
-- tap press / release transaction
-- release failure retains pressed state
-- pre-existing buttons preserved
+- success commit
+- validation / rejection no commit
+- accepted then disconnectはcommit済み
+- semantic helper report 1件
+- tap transaction
+- release failure retains pressed
 
-### 7.6 typed command invariant
+### 8.6 typed command invariant
 
-- Periodic worker command typeに `Send` がない
-- Direct worker command typeに `Apply` がない
-- command payload が `Button<M>` / `InputState<M>` を保持
-- model 無し raw button vector を worker command に渡さない
-- status kind は `M::KIND` / `R::KIND` から導出
+- Periodic command型にSendなし
+- Direct command型にApplyなし
+- command payloadが`Button<M>` / `InputState<M>`
+- worker commandにprofile create-newなし
+- runtime coreにuntyped button vectorなし
+- status kindを`M::KIND` / `R::KIND`から導出
 
-## 8. Transport contract tests
+## 9. Transport contract tests
 
-fake と Bumble adapter が共有する model-independent contract suite を作る。
+model-independent suite:
 
-- open 前 send reject
-- repeated open policy
+- open前send reject
+- repeated open
 - poll timeout
 - control / interrupt routing
-- send acceptance の意味
+- acceptance意味
 - disconnect exactly once
 - close idempotence
 - terminal source
 - bounded queue
-- no key in Debug
+- key非出力
 
-transport contract に `Button<M>` や controller-specific入力を入れない。typed state は protocol encoderより上で検証済みとする。
+transport contractに`Button<M>`やcontroller-specific stateを入れない。
 
-## 9. Bumble virtual integration
+## 10. Bumble virtual integration
 
 ```text
 ControllerWorker<M, R>
       ↕ TransportPort
-Bumble Device + LocalLink / software controller
+Bumble Device + LocalLink
       ↕
 Switch test peer
 ```
 
-physical HCI transportを使わず、Classic、pairing、SDP、HIDP、NX handshakeを通す。
-
-- inquiry / connection request / role
+- inquiry / connection / role
 - authentication / encryption
 - stored link key reconnect
-- SDP PSM `0x0001`
-- HID control `0x0011` / interrupt `0x0013`
-- reverse channel open order
+- SDP `0x0001`
+- HID `0x0011` / `0x0013`
+- reverse channel order
 - malformed SDP / HIDP
 - model-specific service record
-- typed inputから生成した report
+- typed report
 - disconnect cleanup
 
-全 model × reporting mode を通す。pairingやSDPが reporting modeに依存しないこと、input schedulingだけが modeに依存することを確認する。
+6組を通し、pairing / SDPがreporting modeに依存しないことを確認する。
 
-## 10. Adapter-only tests
+## 11. Adapter-only tests
 
 ```text
 cargo test --features adapter-tests --test adapter_open -- --ignored
 ```
 
-環境変数:
-
-```text
-SWBT_ADAPTER=usb:0
-SWBT_ADAPTER_RUNS=100
-```
-
-検証:
-
 - no-open discovery
-- primary selector / aliases
+- selector / aliases
 - USB claim
-- HCI reset / capability query
+- HCI reset / capabilities
 - local address
 - Classic capability
-- repeated open / close
+- repeated 100 runs
 - unplug
-- permission denied
-- wrong driver
-- process exit後の再open
+- permission / driver error
+- process exit後再open
 
-model型はadapter-only testの結果を変えない。必要なlocal name等は `M::SPEC` からtransport configへ投影する単体testで確認する。
-
-## 11. Hardware tests
+## 12. Hardware tests
 
 初期matrix:
 
@@ -476,56 +478,43 @@ model型はadapter-only testの結果を変えない。必要なlocal name等は
 stages:
 
 1. adapter open
-2. discoverability
-3. pairing
-4. HID channels
-5. subcommand readiness
-6. model-supported button
-7. model-supported stick
-8. IMU
-9. neutral
-10. close
-11. reconnect
-12. Direct
-
-ProとJoy-Con RのAは別typed APIから同じ論理入力を生成する。実機では両方を個別に確認する。Joy-Con LでAを試すhardware testは作らず、compile-failとdynamic conversion rejectionで保証する。
+2. profile create-newまたはexisting load
+3. discoverability
+4. pairing
+5. HID channels
+6. subcommand readiness
+7. model-supported button
+8. model-supported stick
+9. IMU
+10. neutral
+11. close
+12. reconnect
+13. Direct
 
 「report accepted」と「Switch UI反映」を区別する。
 
-## 12. Profile compatibility tests
+## 13. Profile compatibility tests
 
 | writer | reader | expectation |
 |---|---|---|
-| Python v0.6.0 | Rust `PairingProfile<M>` | matching modelだけ成功 |
+| Python v0.6.0 | Rust `PairingProfile<M>` | matching modelのみ成功 |
 | Rust | Python v0.6.0 | same kind / identity / keys |
 | Rust | Rust | stable normalized JSON |
 | future schema | current Rust | explicit unsupported error |
 
-filesystem failure:
+actual hardware keyをfixtureにcommitしない。
 
-- target exists on create
-- parent absent
-- temp create / write / sync failure
-- atomic replace failure
-- lock contention
-- process kill point simulation
-- read-only / permission
-- Windows rename semantics
-- orphan temp cleanup
+## 14. Fuzz / concurrency
 
-自動backupのtestは作らない。更新中断では更新前または更新後のvalid fileが残ることを検査する。
+fuzz:
 
-## 13. Fuzz / model testing
-
-fuzz target:
-
-- output report parser
-- HIDP message parser adapter
+- output parser
+- HIDP adapter
 - SDP boundary
-- profile JSON parser
-- PairingKeys hex conversion
+- profile JSON
+- PairingKeys hex
 - SPI range
-- `ButtonKind` dynamic parser
+- ButtonKind parser
 
 invariant:
 
@@ -533,7 +522,6 @@ invariant:
 - no unbounded allocation
 - deterministic error category
 - no secret echo
-- parser out-of-boundsなし
 - unsupported dynamic buttonから`Button<M>`を生成しない
 
 concurrency model:
@@ -545,23 +533,23 @@ concurrency model:
 - status update vs worker exit
 - Drop vs explicit close
 
-## 14. timing test
+## 15. timing
 
-実時間testは専用jobに分ける。
+専用jobで測定:
 
-- 8 ms period
+- 8ms period
 - accepted timestamp
 - p50 / p95 / p99 / max jitter
-- overrun count
+- overrun
 - command / reply latency
 - idle CPU
 - shutdown latency
 
-Default CIはfake clock invariantを必須にし、CI VMのhard timing thresholdは使わない。
+Default CIはfake clock invariantを必須にする。
 
-## 15. CI
+## 16. CI
 
-required jobs:
+required:
 
 ```text
 fmt
@@ -582,8 +570,6 @@ fixture-audit
 model-audit
 ```
 
-代表command:
-
 ```bash
 cargo fmt --all --check
 cargo +1.87 check --all-targets
@@ -594,7 +580,7 @@ cargo doc --no-deps
 cargo deny check
 ```
 
-optional jobs:
+optional:
 
 ```text
 adapter-windows
@@ -604,22 +590,21 @@ fuzz-nightly
 linux-experimental
 ```
 
-## 16. release evidence
-
-release candidateごとに保存する。
+## 17. release evidence
 
 - source commit
 - Bumble revision
 - Cargo.lock hash
 - CI run
-- UI type test result
+- UI test result
 - model declaration audit
-- fixture provenance audit
+- fixture provenance
+- profile creation ordering test
 - hardware matrix
 - adapter-only run
 - known failures
 - license report
 - crate checksum
-- profile round-trip result
+- profile round-trip
 
-compile successだけでmodel capabilityを保証したと扱わない。意図した不正コードがコンパイル不能であることをrelease gateに含める。
+compile successだけで型能力を保証した扱いにしない。意図した不正コードがコンパイル不能であることをrelease gateに含める。
