@@ -144,7 +144,7 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | refactor-done | `0x10` SPI reply が request prefix と requested data を返し、session を変更しない | new | protocol unit | red: SPI subcommand handler / short-request error 不在。green: fixture、長さ0..4、余剰無視、最大read/padding、address error伝播を含む 5 passed、MSRV pass。`VirtualSpiFlash<M>` へ型付けし、model mismatch を排除。handler は session を受け取らない |
 | refactor-skipped | `0x03/30/40/48` が valid candidate state を返し、invalid payloadでは current state を保つ | new | protocol unit | red: stateful handler / reply 型 / error variant 不在。green: Python fixture 5件、全 model × IMU 6 mode、readiness、同一 mode reset、非中立 prefix、timer、余剰無視、error 表示を含む 11 passed、MSRV pass。immutable な current と `PreparedSessionReply` の候補値に収まり追加の構造変更なし。commit は M2 の send accept 後 |
 | refactor-done | `SwitchHidProtocol<M>` が `0x01` を reply/effectへ、`0x10` を raw rumble/no-replyへ合成し、I/Oを行わない | new | protocol unit | red: facade / action / unsupported error 不在。green: 全 supported route、Python fixture、rumble-only、config、parse/semantic error、明示 state を含む 8 passed、MSRV pass。parse error と parsed semantic outcome を分離し、未使用の crate-wide re-export を除去。timer/session は所有しない |
-| todo | 全 committed fixture が Rust assertion に消費され、protocol test が Bumble を含まない graph と selected Miri で通る | characterization | package | coverage audit と isolation gate |
+| refactor-done | 全 committed fixture が Rust assertion に消費され、protocol test が Bumble を含まない graph と selected Miri で通る | characterization | package | red: JSON は schema/provenance 検査だけで、no-default graph に Bumble が残り、Miri component は未導入。green: conversion 2 / input 12 / output 6 / SPI 12 / subcommand 13 の全45 caseを expected JSON 全体で比較する 6 passed、no-default protocol 61 passed、Bumble-free graph、Miri 61 passed。model整合、重複検出、byte offset診断を追加し、曖昧な空slice assertionを整理 |
 
 ## 7. 設計メモ
 
@@ -174,7 +174,7 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 
 | path | change | 内容 |
 |---|---|---|
-| `Cargo.toml` / `Cargo.lock` | modify | fixture test dependency、default-off Bumble feature |
+| `Cargo.toml` / `Cargo.lock` | modify / verify | fixture test dependency、default-off Bumble feature。optional 化では lock 変更なし |
 | `src/lib.rs` | modify | public value re-export と private protocol module |
 | `src/input/imu.rs` | modify | physical conversion |
 | `src/model/` | modify | protocol metadata の単一宣言 |
@@ -186,7 +186,7 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | `.github/workflows/ci.yml` | modify | no-default-features protocol gate |
 | `README.md` | modify | M1 の現在面と feature/gate |
 | `spec/dev-journal.md` | modify | M2 接続時に解除する一時的な dead-code 境界 |
-| `spec/wip/unit_002/M1_PROTOCOL.md` | new / modify | 作業仕様と検証記録 |
+| `spec/complete/unit_002/M1_PROTOCOL.md` | new / modify | 完了した作業仕様と検証記録 |
 
 ## 9. 検証
 
@@ -222,19 +222,21 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | TDD item 14 時点。stateful handler は crate-private の immutable candidate 境界で、通常 build と unit test build の双方で警告なし |
 | `cargo +1.87 test --locked --lib protocol::tests::facade` | pass | red は facade / action / unsupported error 不在。green / refactor 後は supported 9 IDs、`0x22`/unknown、rumble-only、parsed context、config、parse/semantic error、明示 state を含む 8 passed |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | TDD item 15 時点。facade は immutable config だけを所有し、通常 build と unit test build の双方で警告なし |
-| TDD item commands | not run | 各 item の red / green / refactor を追記する |
-| `cargo fmt --all --check` | not run | final gate |
-| `cargo +1.87 check --all-targets --all-features --locked` | not run | MSRV |
-| `cargo check --all-targets --all-features --locked` | not run | stable |
-| `cargo clippy --all-targets --all-features --locked -- -D warnings` | not run | static gate |
-| `cargo test --all-targets --all-features --locked` | pass | TDD item 15 時点で unit 58、integration 28、example 0 passed。final gate で再実行する |
-| `cargo test --lib protocol:: --no-default-features --locked` | not run | Bumble-free protocol |
-| `cargo tree --no-default-features --edges normal` | not run | Bumble 不在を検査 |
-| `cargo +nightly miri test --lib protocol::` | not run | selected Miri |
-| `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked` | not run | public docs |
-| `cargo build --locked` / `cargo build --all-features --locked` | not run | feature 組合せ |
-| `cargo package` | not run | M0 から継続する既知の release blocker を再確認 |
-| `git diff --check` | not run | whitespace |
+| `cargo +1.87 test --locked --lib protocol::tests::python_fixture` | pass | 6 tests が exact case set と conversion 2 / input 12 / output 6 / SPI 12 / subcommand 13 の全 expected 項目を直接比較 |
+| `cargo fmt --all --check` | pass | final gate |
+| `cargo +1.87 check --all-targets --all-features --locked` | pass | MSRV 1.87 |
+| `cargo check --all-targets --all-features --locked` | pass | stable |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | static gate、warning 0 |
+| `cargo test --all-targets --all-features --locked` | pass | unit 64、integration 28、example 0 passed |
+| `cargo test --locked` | pass | default feature で unit 64、integration 28、doc 1 passed |
+| `cargo +1.87 test --lib protocol:: --no-default-features --locked` | pass | pure protocol 61 passed、model unit 3 filtered |
+| `cargo tree --no-default-features --edges normal --locked` | pass | 通常依存 graph は root `swbt-rs` だけで Bumble なし |
+| `cargo tree --all-features --edges normal --locked` | pass | Bumble は固定 rev `bbac2a68` で all-features にだけ存在 |
+| `cargo +nightly miri test --lib --no-default-features --locked protocol::` | pass | selected Miri 61 passed、model unit 3 filtered |
+| `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked` | pass | public docs warning 0 |
+| `cargo build --locked` / `cargo +1.87 build --no-default-features --locked` / `cargo build --all-features --locked` | pass | default / Bumble-free / Bumble feature |
+| `cargo package --allow-dirty --locked` | expected fail | git Bumble に version requirement がなく package manifest 検証失敗。M9 blockerを再確認 |
+| `git diff --check` | pass | whitespace error なし |
 | GitHub required checks | not run | PR 作成後 |
 
 ## 10. 先送り事項
@@ -248,7 +250,7 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 ## 11. チェックリスト
 
 - [x] 対象範囲と対象外を確認した
-- [ ] TDD Test List をすべて `refactor-done` または `refactor-skipped` にした
-- [ ] Python fixture の provenance と coverage を確認した
-- [ ] 検証結果または未実行理由を記録した
-- [ ] public API / feature / package gate を記録した
+- [x] TDD Test List をすべて `refactor-done` または `refactor-skipped` にした
+- [x] Python fixture の provenance と coverage を確認した
+- [x] 検証結果または未実行理由を記録した
+- [x] public API / feature / package gate を記録した

@@ -2,6 +2,7 @@ mod facade;
 mod imu;
 mod input_report;
 mod output_report;
+mod python_fixture;
 mod session;
 mod spi;
 mod stateful_subcommand;

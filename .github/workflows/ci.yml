@@ -53,6 +53,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --all-targets --all-features --locked
 
+  protocol-pure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --lib protocol:: --no-default-features --locked
+      - run: cargo build --no-default-features --locked
+      - name: Verify Bumble-free dependency graph
+        shell: bash
+        run: |
+          dependency_tree="$(cargo tree --no-default-features --edges normal --locked)"
+          if grep -q 'bumble v' <<<"${dependency_tree}"; then
+            echo 'Bumble must not be present without the bumble feature.'
+            exit 1
+          fi
+
   doc:
     runs-on: ubuntu-latest
     env:

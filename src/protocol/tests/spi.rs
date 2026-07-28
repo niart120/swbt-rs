@@ -50,7 +50,7 @@ fn virtual_spi_enforces_python_read_boundaries() {
             maximum: MAX_READ_SIZE,
         })
     );
-    assert_eq!(spi.read(0x80000, 0).unwrap().as_slice(), []);
+    assert!(spi.read(0x80000, 0).unwrap().as_slice().is_empty());
     assert_eq!(spi.read(0x7FFFF, 1).unwrap().as_slice(), [0xFF]);
     assert_eq!(
         spi.read(0x7FFFF, 2),
