@@ -192,6 +192,53 @@ pub trait ControllerModel: sealed::Sealed + Send + 'static {
     const SPEC: &'static ModelSpec;
 }
 
+/// Marker trait for controller models with a left stick.
+pub trait HasLeftStick: ControllerModel {}
+
+/// Marker trait for controller models with a right stick.
+pub trait HasRightStick: ControllerModel {}
+
+/// Marker trait for controller models with both sticks.
+pub trait HasDualSticks: HasLeftStick + HasRightStick {}
+
+macro_rules! has_left_stick {
+    () => {
+        false
+    };
+    (left $(, $rest:ident)*) => {
+        true
+    };
+    ($other:ident $(, $rest:ident)*) => {
+        has_left_stick!($($rest),*)
+    };
+}
+
+macro_rules! has_right_stick {
+    () => {
+        false
+    };
+    (right $(, $rest:ident)*) => {
+        true
+    };
+    ($other:ident $(, $rest:ident)*) => {
+        has_right_stick!($($rest),*)
+    };
+}
+
+macro_rules! impl_stick_capabilities {
+    ($model:ident; left, right) => {
+        impl HasLeftStick for $model {}
+        impl HasRightStick for $model {}
+        impl HasDualSticks for $model {}
+    };
+    ($model:ident; left) => {
+        impl HasLeftStick for $model {}
+    };
+    ($model:ident; right) => {
+        impl HasRightStick for $model {}
+    };
+}
+
 macro_rules! controller_models {
     (
         $(
@@ -200,8 +247,7 @@ macro_rules! controller_models {
                 kind: $kind:ident,
                 profile_name: $profile_name:literal,
                 spec: $spec:ident,
-                left_stick: $left_stick:literal,
-                right_stick: $right_stick:literal,
+                sticks: [$($stick:ident),* $(,)?],
                 buttons: [
                     $(
                         $button_kind:ident => $button_const:ident
@@ -250,8 +296,8 @@ macro_rules! controller_models {
             static $spec: ModelSpec = ModelSpec::new(
                 ControllerKind::$kind,
                 $profile_name,
-                $left_stick,
-                $right_stick,
+                has_left_stick!($($stick),*),
+                has_right_stick!($($stick),*),
                 &[$(ButtonKind::$button_kind),*],
                 &[
                     $(
@@ -270,6 +316,8 @@ macro_rules! controller_models {
                 const PROFILE_NAME: &'static str = $profile_name;
                 const SPEC: &'static ModelSpec = &$spec;
             }
+
+            impl_stick_capabilities!($model; $($stick),*);
 
             impl crate::input::Button<$model> {
                 $(
@@ -296,8 +344,7 @@ controller_models! {
         kind: Pro,
         profile_name: "pro",
         spec: PRO_SPEC,
-        left_stick: true,
-        right_stick: true,
+        sticks: [left, right],
         buttons: [
             A => A @ 3 / 0x08,
             B => B @ 3 / 0x04,
@@ -324,8 +371,7 @@ controller_models! {
         kind: JoyConL,
         profile_name: "joycon_l",
         spec: JOYCON_L_SPEC,
-        left_stick: true,
-        right_stick: false,
+        sticks: [left],
         buttons: [
             L => L @ 5 / 0x40,
             ZL => ZL @ 5 / 0x80,
@@ -345,8 +391,7 @@ controller_models! {
         kind: JoyConR,
         profile_name: "joycon_r",
         spec: JOYCON_R_SPEC,
-        left_stick: false,
-        right_stick: true,
+        sticks: [right],
         buttons: [
             A => A @ 3 / 0x08,
             B => B @ 3 / 0x04,

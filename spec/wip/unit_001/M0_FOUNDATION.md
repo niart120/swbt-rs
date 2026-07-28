@@ -91,7 +91,7 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | refactor-done | Pro / JoyConL / JoyConR と Periodic / Direct が sealed trait を通じて一意な kind/spec を投影する | new | unit | red: 公開 module/type 不在。green: 2 passed。model の重複宣言を macro の単一正本へ統合 |
 | refactor-skipped | model ごとの supported `ButtonKind` だけが `Button<M>` へ変換され、`ButtonSet<M>` が重複を除いて論理順に列挙する | new | unit | red: input/error surface 不在。green: 3 passed。model 宣言へ supported 集合と associated constants を集約済み |
 | refactor-done | 全 supported button が Python 基準 commit と一致する byte index / mask を持ち、非対応組み合わせに mapping がない | characterization | unit | red: mapping type/function 不在。green: 2 passed。M0 の accessor を test build に絞り、同じ mapping を動的変換にも使用 |
-| todo | `Stick` が 12-bit raw 値と非対称 normalized 変換を保持し、不正値を拒否する | new | unit | Python の round 規則との差分は M1 fixture でも再確認 |
+| refactor-done | `Stick` が 12-bit raw 値と非対称 normalized 変換を保持し、不正値を拒否する | new | unit | red: Stick/capability trait 不在。green: 5 passed。model の stick bool を capability 宣言へ統合 |
 | todo | `ImuFrame` と `ImuSamples` が signed 16-bit 六軸値と 1/3 frame の順序を保持する | new | unit | 物理単位と wire conversion は M1 |
 | todo | `InputState<M>` が model-valid button、stick 能力、3 IMU frame を含む neutral / replacement state を保持する | new | unit | model ごとの共通 harness |
 | todo | `Controller<M, R>`、`ControllerBuilder<M, R>` と 6 alias を公開 API から参照できる | new | integration | build/open/send/apply は対象外 |
@@ -135,6 +135,8 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | `cargo test --test model_contract` | pass | red は model/reporting module 不在。green と refactor 後は 2 passed |
 | `cargo test --test button_contract` | pass | red は input/error surface 不在。green は 3 passed |
 | `cargo test model::tests` | pass | red は wire mapping type/function 不在。Python `84d2723b` の `src/swbt/protocol/buttons.py` に対して 2 passed |
+| `cargo test --test stick_contract` | pass | red は Stick/capability trait 不在。green は 5 passed |
+| `cargo +1.87 test --test stick_contract` | pass | Rust 1.87.0 で 5 passed |
 | `cargo metadata --no-deps --format-version 1` の package contract 検査 | pass | `rust_version=1.87`、`license=MIT`、library `swbt` が 1 件、binary が 0 件 |
 | `cargo test --doc --all-features` | pass | 0 doctests、crate-level rustdoc は compile 成功 |
 | `cargo fmt --check` | not run | 実装後に実行 |
