@@ -142,7 +142,7 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | refactor-skipped | session が report mode、lights、IMU、vibration、readiness、unsupported mode を接続単位で保持する | new | protocol unit | red: session module / 型不在。green: 初期値、readiness 順序、zero lights、unsupported 保持、IMU epoch reset、接続間分離を含む 5 passed、MSRV pass。矛盾しない report mode enum と immutable candidate に収まり追加の構造変更なし。lifecycle/session ID は M2 |
 | refactor-skipped | `0x21` envelope と `0x02/04/08/21` が model 別 bytes と typed state prefix を生成する | characterization | protocol unit | red: subcommand module / reply 型不在。green: 7 fixture、非中立 prefix、data 上限、後続 handler 分岐、candidate timer を含む 7 passed、MSRV pass。固定長 reply と部分 handler に収まり追加の構造変更なし。session を型境界から除外 |
 | refactor-done | `0x10` SPI reply が request prefix と requested data を返し、session を変更しない | new | protocol unit | red: SPI subcommand handler / short-request error 不在。green: fixture、長さ0..4、余剰無視、最大read/padding、address error伝播を含む 5 passed、MSRV pass。`VirtualSpiFlash<M>` へ型付けし、model mismatch を排除。handler は session を受け取らない |
-| todo | `0x03/30/40/48` が valid candidate state を返し、invalid payloadでは current state を保つ | new | protocol unit | accept 前に commit しない |
+| refactor-skipped | `0x03/30/40/48` が valid candidate state を返し、invalid payloadでは current state を保つ | new | protocol unit | red: stateful handler / reply 型 / error variant 不在。green: Python fixture 5件、全 model × IMU 6 mode、readiness、同一 mode reset、非中立 prefix、timer、余剰無視、error 表示を含む 11 passed、MSRV pass。immutable な current と `PreparedSessionReply` の候補値に収まり追加の構造変更なし。commit は M2 の send accept 後 |
 | todo | `SwitchHidProtocol<M>` が `0x01` を reply/effectへ、`0x10` を raw rumble/no-replyへ合成し、I/Oを行わない | new | protocol unit | protocol facade |
 | todo | 全 committed fixture が Rust assertion に消費され、protocol test が Bumble を含まない graph と selected Miri で通る | characterization | package | coverage audit と isolation gate |
 
@@ -150,8 +150,9 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 
 - `protocol` は `mod protocol;` として crate-private にする。
 - parser は borrowed payload と固定長 rumble を使い、不要な allocation と nullable DTO を避ける。
-- state-changing reply は `PreparedReply { bytes, next_session }` を返す。M2 が送信受理後に
-  next state を commit する。M1 は transport 受理を模擬しない。
+- state-changing reply は `PreparedSessionReply { reply, next_session }` を返す。内包する
+  `PreparedSubcommandReply` が bytes と next timer を保持し、M2 が送信受理後に両方を
+  commit する。M1 は transport 受理を模擬しない。
 - `0x21` reply は `PreparedSubcommandReply { bytes, next_timer }` を返す。M2 が送信受理後に
   共通 report timer を commit する。
 - virtual SPI は `VirtualSpiFlash<M>` とし、typed input / facade と異なる model の flash を
@@ -212,12 +213,14 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | `cargo +1.87 test --locked --lib protocol::tests::subcommand::spi_reply` | pass | red は SPI handler / short-request error 不在。green は exact fixture、長さ0..4、little-endian prefix、余剰無視、size 29、padding、timer wrap、SPI address error伝播を含む 5 passed |
 | `cargo test --lib protocol::tests::spi` | pass | TDD item 13 の型付け refactor 後も model seed、明示色、read境界の既存3 testsが通過 |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | TDD item 13 時点。`VirtualSpiFlash<M>` と typed state の model が一致し、通常 build と unit test build の双方で警告なし |
+| `cargo +1.87 test --locked --lib protocol::tests::stateful_subcommand` | pass | red は stateful handler / reply 型 / error variant 不在。green は exact fixture、candidate session、current 不変、全 model × IMU mode、readiness、同一 mode reset、引数検査、非中立 prefix、timer、Python error 表示を含む 11 passed |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | TDD item 14 時点。stateful handler は crate-private の immutable candidate 境界で、通常 build と unit test build の双方で警告なし |
 | TDD item commands | not run | 各 item の red / green / refactor を追記する |
 | `cargo fmt --all --check` | not run | final gate |
 | `cargo +1.87 check --all-targets --all-features --locked` | not run | MSRV |
 | `cargo check --all-targets --all-features --locked` | not run | stable |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | not run | static gate |
-| `cargo test --all-targets --all-features --locked` | pass | TDD item 13 時点で unit 39、integration 28、example 0 passed。final gate で再実行する |
+| `cargo test --all-targets --all-features --locked` | pass | TDD item 14 時点で unit 50、integration 28、example 0 passed。final gate で再実行する |
 | `cargo test --lib protocol:: --no-default-features --locked` | not run | Bumble-free protocol |
 | `cargo tree --no-default-features --edges normal` | not run | Bumble 不在を検査 |
 | `cargo +nightly miri test --lib protocol::` | not run | selected Miri |

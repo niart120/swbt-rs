@@ -17,6 +17,20 @@ pub(crate) enum ImuMode {
     Quaternion4 = 0x05,
 }
 
+impl ImuMode {
+    pub(crate) const fn from_wire(value: u8) -> Option<Self> {
+        match value {
+            0x00 => Some(Self::Disabled),
+            0x01 => Some(Self::Standard),
+            0x02 => Some(Self::Quaternion1),
+            0x03 => Some(Self::Quaternion2),
+            0x04 => Some(Self::Quaternion3),
+            0x05 => Some(Self::Quaternion4),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ImuEncodingState {
     orientation: [f64; 4],

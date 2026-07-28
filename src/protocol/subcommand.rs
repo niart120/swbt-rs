@@ -7,8 +7,10 @@ use crate::{
 
 use super::{
     error::ProtocolError,
+    imu::ImuMode,
     input_report::encode_0x30,
     output_report::SubcommandRequest,
+    session::ProtocolSession,
     spi::{MAX_READ_SIZE, VirtualSpiFlash},
 };
 
@@ -16,13 +18,18 @@ const SUBCOMMAND_REPLY_SIZE: usize = 50;
 const SUBCOMMAND_REPLY_DATA_SIZE: usize = 35;
 const SUBCOMMAND_REPLY_ID: u8 = 0x21;
 const DEVICE_INFO_SUBCOMMAND: u8 = 0x02;
+const REPORT_MODE_SUBCOMMAND: u8 = 0x03;
 const TRIGGER_ELAPSED_SUBCOMMAND: u8 = 0x04;
 const SIMPLE_ACK_SUBCOMMAND: u8 = 0x08;
 const SPI_READ_SUBCOMMAND: u8 = 0x10;
 const MCU_CONFIG_SUBCOMMAND: u8 = 0x21;
+const PLAYER_LIGHTS_SUBCOMMAND: u8 = 0x30;
+const IMU_MODE_SUBCOMMAND: u8 = 0x40;
+const VIBRATION_SUBCOMMAND: u8 = 0x48;
 const DEVICE_INFO_ACK: u8 = 0x82;
 const TRIGGER_ELAPSED_ACK: u8 = 0x83;
 const SIMPLE_ACK: u8 = 0x80;
+const STATEFUL_ACK: u8 = 0x80;
 const SPI_READ_ACK: u8 = 0x90;
 const MCU_CONFIG_ACK: u8 = 0xA0;
 const SPI_READ_REQUEST_SIZE: usize = 5;
@@ -60,6 +67,29 @@ impl PreparedSubcommandReply {
     #[must_use]
     pub(crate) const fn next_timer(self) -> u8 {
         self.next_timer
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PreparedSessionReply {
+    reply: PreparedSubcommandReply,
+    next_session: ProtocolSession,
+}
+
+impl PreparedSessionReply {
+    #[must_use]
+    pub(crate) const fn bytes(&self) -> &[u8; SUBCOMMAND_REPLY_SIZE] {
+        self.reply.bytes()
+    }
+
+    #[must_use]
+    pub(crate) const fn next_timer(self) -> u8 {
+        self.reply.next_timer()
+    }
+
+    #[must_use]
+    pub(crate) const fn next_session(self) -> ProtocolSession {
+        self.next_session
     }
 }
 
@@ -125,6 +155,57 @@ pub(crate) fn try_prepare_spi_reply<M: ControllerModel>(
         timer,
     )?;
     Ok(Some(reply))
+}
+
+pub(crate) fn try_prepare_stateful_reply<M: ControllerModel>(
+    request: SubcommandRequest<'_>,
+    state: &InputState<M>,
+    timer: u8,
+    current: ProtocolSession,
+) -> Result<Option<PreparedSessionReply>, ProtocolError> {
+    let subcommand_id = request.id();
+    if !matches!(
+        subcommand_id,
+        REPORT_MODE_SUBCOMMAND
+            | PLAYER_LIGHTS_SUBCOMMAND
+            | IMU_MODE_SUBCOMMAND
+            | VIBRATION_SUBCOMMAND
+    ) {
+        return Ok(None);
+    }
+    let requested = request
+        .payload()
+        .first()
+        .copied()
+        .ok_or(ProtocolError::MissingSubcommandArgument { subcommand_id })?;
+    let next_session = match subcommand_id {
+        REPORT_MODE_SUBCOMMAND => current.with_report_mode(requested),
+        PLAYER_LIGHTS_SUBCOMMAND => current.with_player_lights(requested),
+        IMU_MODE_SUBCOMMAND => {
+            let accepted = M::SPEC.protocol.accepted_imu_modes;
+            let mode = if accepted.contains(&requested) {
+                ImuMode::from_wire(requested)
+            } else {
+                None
+            }
+            .ok_or(ProtocolError::UnsupportedImuMode {
+                requested,
+                accepted,
+            })?;
+            current.with_imu_mode(mode)
+        }
+        VIBRATION_SUBCOMMAND => match requested {
+            0x00 => current.with_vibration_enabled(false),
+            0x01 => current.with_vibration_enabled(true),
+            _ => return Err(ProtocolError::InvalidVibrationValue { requested }),
+        },
+        _ => unreachable!("stateful subcommand IDs were checked above"),
+    };
+    let reply = prepare_0x21(subcommand_id, STATEFUL_ACK, &[], state, timer)?;
+    Ok(Some(PreparedSessionReply {
+        reply,
+        next_session,
+    }))
 }
 
 pub(crate) fn prepare_0x21<M: ControllerModel>(

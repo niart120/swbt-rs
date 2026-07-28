@@ -32,6 +32,16 @@ pub(crate) enum ProtocolError {
         minimum: usize,
         actual: usize,
     },
+    MissingSubcommandArgument {
+        subcommand_id: u8,
+    },
+    UnsupportedImuMode {
+        requested: u8,
+        accepted: &'static [u8],
+    },
+    InvalidVibrationValue {
+        requested: u8,
+    },
 }
 
 impl fmt::Display for ProtocolError {
@@ -77,6 +87,39 @@ impl fmt::Display for ProtocolError {
             }
             Self::TruncatedSpiReadRequest { .. } => {
                 formatter.write_str("SPI read subcommand must include address and size")
+            }
+            Self::MissingSubcommandArgument {
+                subcommand_id: 0x03,
+            } => formatter
+                .write_str("set input report mode subcommand must include one argument byte"),
+            Self::MissingSubcommandArgument {
+                subcommand_id: 0x30,
+            } => formatter.write_str("set player lights subcommand must include one argument byte"),
+            Self::MissingSubcommandArgument {
+                subcommand_id: 0x40,
+            } => formatter.write_str("enable IMU subcommand must include one argument byte"),
+            Self::MissingSubcommandArgument {
+                subcommand_id: 0x48,
+            } => formatter.write_str("enable vibration subcommand must include one argument byte"),
+            Self::MissingSubcommandArgument { subcommand_id } => write!(
+                formatter,
+                "subcommand 0x{subcommand_id:02x} must include one argument byte"
+            ),
+            Self::UnsupportedImuMode {
+                requested: _,
+                accepted,
+            } => {
+                formatter.write_str("enable IMU subcommand argument must be one of: ")?;
+                for (index, mode) in accepted.iter().enumerate() {
+                    if index != 0 {
+                        formatter.write_str(", ")?;
+                    }
+                    write!(formatter, "0x{mode:02X}")?;
+                }
+                Ok(())
+            }
+            Self::InvalidVibrationValue { .. } => {
+                formatter.write_str("enable vibration subcommand argument must be 0x00 or 0x01")
             }
         }
     }
