@@ -15,13 +15,6 @@ impl ObservedSubcommands {
     }
 
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T18 uses the empty observation state for handshake retry"
-        )
-    )]
     pub(crate) fn is_empty(&self) -> bool {
         self.words.iter().all(|word| *word == 0)
     }
