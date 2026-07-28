@@ -1,5 +1,6 @@
 //! Typed controller and builder identities.
 
+use std::cell::Cell;
 use std::marker::PhantomData;
 
 use crate::model::{self, ControllerModel};
@@ -8,9 +9,11 @@ use crate::reporting::{self, ReportingMode};
 /// A controller whose model and reporting mode are fixed by its type.
 ///
 /// Runtime construction and lifecycle operations are not exposed in the
-/// current package surface.
+/// current package surface. Controllers are transferable between threads but
+/// intentionally cannot be shared between threads.
 pub struct Controller<M: ControllerModel, R: ReportingMode> {
     _types: PhantomData<fn() -> (M, R)>,
+    _not_sync: PhantomData<Cell<()>>,
 }
 
 /// Immutable construction settings for [`Controller<M, R>`].

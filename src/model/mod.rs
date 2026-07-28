@@ -81,26 +81,13 @@ impl ButtonKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ButtonWirePosition {
-    _byte_index: usize,
-    _mask: u8,
+    pub(crate) byte_index: usize,
+    pub(crate) mask: u8,
 }
 
 impl ButtonWirePosition {
     pub(crate) const fn new(byte_index: usize, mask: u8) -> Self {
-        Self {
-            _byte_index: byte_index,
-            _mask: mask,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn byte_index(self) -> usize {
-        self._byte_index
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn mask(self) -> u8 {
-        self._mask
+        Self { byte_index, mask }
     }
 }
 
@@ -167,12 +154,9 @@ impl ModelSpec {
     /// Returns whether `button` is valid for this model.
     #[must_use]
     pub fn supports_button(self, button: ButtonKind) -> bool {
-        self.button_wire_mapping
-            .iter()
-            .any(|(kind, _)| *kind == button)
+        button_wire_position(self.kind, button).is_some()
     }
 
-    #[cfg(test)]
     fn button_wire_position(self, button: ButtonKind) -> Option<ButtonWirePosition> {
         self.button_wire_mapping
             .iter()
@@ -280,7 +264,6 @@ macro_rules! controller_models {
                 }
             }
 
-            #[cfg(test)]
             pub(crate) const fn spec(self) -> &'static ModelSpec {
                 match self {
                     $(Self::$kind => &$spec,)+
@@ -330,7 +313,6 @@ macro_rules! controller_models {
     };
 }
 
-#[cfg(test)]
 pub(crate) fn button_wire_position(
     controller: ControllerKind,
     button: ButtonKind,

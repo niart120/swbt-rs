@@ -74,8 +74,8 @@ fn wire_positions_use_one_bit_inside_the_button_bytes() {
     for controller in ControllerKind::ALL {
         for button in ButtonKind::ALL {
             if let Some(position) = button_wire_position(*controller, *button) {
-                assert!((3..=5).contains(&position.byte_index()));
-                assert_eq!(position.mask().count_ones(), 1);
+                assert!((3..=5).contains(&position.byte_index));
+                assert_eq!(position.mask.count_ones(), 1);
             }
         }
     }

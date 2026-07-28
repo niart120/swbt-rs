@@ -27,6 +27,12 @@ impl<M: ControllerModel> Button<M> {
     }
 }
 
+/// Converts a model-independent button identity into a model-valid button.
+///
+/// # Errors
+///
+/// Returns [`ErrorKind::UnsupportedInput`] when `kind` is not available on
+/// model `M`.
 impl<M: ControllerModel> TryFrom<ButtonKind> for Button<M> {
     type Error = Error;
 
