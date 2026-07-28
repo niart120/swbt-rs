@@ -24,13 +24,6 @@ impl<M: ControllerModel> InputStateStore<M> {
         self.committed = next;
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T17 resets worker-owned state for each new connection session"
-        )
-    )]
     pub(crate) fn reset_to_neutral(&mut self) {
         self.committed = InputState::neutral();
     }

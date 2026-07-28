@@ -5,5 +5,6 @@ pub(crate) mod output;
 pub(crate) mod periodic;
 pub(crate) mod scheduler;
 pub(crate) mod sender;
+pub(crate) mod session;
 pub(crate) mod state;
 pub(crate) mod transport;

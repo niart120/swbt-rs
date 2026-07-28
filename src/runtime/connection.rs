@@ -26,13 +26,6 @@ impl ObservedSubcommands {
         self.words.iter().all(|word| *word == 0)
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T17 resets observations with each new connection session"
-        )
-    )]
     pub(crate) fn reset(&mut self) {
         *self = Self::default();
     }

@@ -19,7 +19,7 @@ use crate::{
     runtime::transport::{SendAcceptance, TransportPort, TransportResult},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SenderCommit {
     next_timer: u8,
     session: ProtocolSession,
@@ -33,10 +33,7 @@ pub(crate) struct ReportSender<M: ControllerModel> {
 impl<M: ControllerModel> ReportSender<M> {
     pub(crate) fn new() -> Self {
         Self {
-            committed: SenderCommit {
-                next_timer: 0,
-                session: ProtocolSession::default(),
-            },
+            committed: SenderCommit::default(),
             model: PhantomData,
         }
     }
@@ -49,6 +46,10 @@ impl<M: ControllerModel> ReportSender<M> {
     #[must_use]
     pub(crate) const fn session(&self) -> ProtocolSession {
         self.committed.session
+    }
+
+    pub(crate) fn reset_for_new_session(&mut self) {
+        self.committed = SenderCommit::default();
     }
 
     pub(crate) fn prepare_reply(

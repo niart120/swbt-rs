@@ -190,6 +190,10 @@ impl PeriodicPolicy {
         self.reply_holdoff_until
     }
 
+    pub(crate) fn reset_for_new_session(&mut self) {
+        self.reply_holdoff_until = None;
+    }
+
     #[must_use]
     pub(crate) fn next_deadline(&self) -> Duration {
         self.reply_holdoff_until
