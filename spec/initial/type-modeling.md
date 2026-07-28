@@ -4,18 +4,18 @@
 - 公開 API: [api.md](api.md)
 - 内部構造: [architecture.md](architecture.md)
 
-この文書は、コントローラーモデル、送信方式、入力能力を Rust の型で表す規則を定義する。`swbt-rs` の公開 API と内部 runtime は、この文書の型関係を正本として実装する。
+この文書は、controller model、reporting mode、入力能力を Rust の型で表す規則を定義する。公開 API と内部 runtime は、この型関係を正本として実装する。
 
-## 1. モデリング方針
+## 1. 基本方針
 
-`swbt-python` の公開型は、次の 2 軸を 6 個の具象クラスとして表している。
+`swbt-python` の6具象クラスは次の2軸の直積である。
 
 ```text
 Controller model: Pro / JoyConL / JoyConR
 Reporting mode:   Periodic / Direct
 ```
 
-Rust 版では 6 個の独立実装を作らず、次の 1 型を正本とする。
+Rust版の正本:
 
 ```rust
 pub struct Controller<M, R> {
@@ -23,14 +23,12 @@ pub struct Controller<M, R> {
 }
 ```
 
-- `M`: コントローラーモデル。使用可能なボタン、スティック、固定 profile を決める
-- `R`: 送信方式。`apply()` と `send()` のどちらを公開するか、状態確定条件、scheduler 所有を決める
+- `M`: 使用可能button、stick能力、固定profileを決める
+- `R`: `apply()` / `send()`、state commit、scheduler所有を決める
 
-型で表すのは、インスタンス生成後に変化しない性質だけとする。接続状態、report mode、player lights、IMU mode、pairing 状態は runtime state machine に置き、型引数へ追加しない。
+型引数はinstance生成後に変化しない性質だけに使う。接続状態、report mode、player lights、IMU mode、pairing stateはruntime state machineに置く。
 
-## 2. モデル型と送信方式型
-
-### 2.1 モデル型
+## 2. model型
 
 ```rust
 pub mod model {
@@ -46,9 +44,9 @@ pub trait ControllerModel: private::Sealed + Send + 'static {
 }
 ```
 
-モデル型は値を持たない marker type である。利用者が独自モデルを追加できないよう `ControllerModel` は sealed にする。
+marker typeは値を持たない。`ControllerModel`はsealedにする。
 
-### 2.2 送信方式型
+## 3. reporting型
 
 ```rust
 pub mod reporting {
@@ -56,14 +54,20 @@ pub mod reporting {
     pub enum Direct {}
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ReportingKind {
+    Periodic,
+    Direct,
+}
+
 pub trait ReportingMode: private::Sealed + Send + 'static {
     const KIND: ReportingKind;
 }
 ```
 
-`Periodic` と `Direct` は公開 method の集合と状態確定条件を変える。したがって実行時 enum だけではなく、型引数として保持する。
+PeriodicとDirectは公開method集合と状態確定条件を変えるため、実行時enumだけでなく型引数として保持する。
 
-### 2.3 公開 alias
+## 4. 公開alias
 
 ```rust
 pub type ProController = Controller<model::Pro, reporting::Periodic>;
@@ -76,11 +80,9 @@ pub type JoyConR = Controller<model::JoyConR, reporting::Periodic>;
 pub type DirectJoyConR = Controller<model::JoyConR, reporting::Direct>;
 ```
 
-6 個の名前は利用者向けの別名として残す。実装、builder、runtime、入力状態の正本は generic 型であり、6 個の public newtype と forwarding method は作らない。
+6名は利用者向けaliasであり、6個のpublic newtype、builder型、forwarding実装は作らない。
 
-## 3. `ControllerKind` は runtime projection
-
-profile JSON、diagnostics、CLI 引数では、コンパイル時に `M` が決まっていないため実行時表現が必要になる。
+## 5. `ControllerKind`はruntime projection
 
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -91,17 +93,19 @@ pub enum ControllerKind {
 }
 ```
 
-`ControllerKind` とモデル型を独立した 2 つの正本にしない。モデル宣言を 1 箇所に集約し、次を同じ宣言から生成する。
+`ControllerKind`はprofile JSON、diagnostics、CLIで使う実行時表現。model型と独立した正本にしない。
 
-- `model::Pro` / `model::JoyConL` / `model::JoyConR`
+model宣言1箇所から次を生成または検査する。
+
+- model marker
 - `ControllerKind` variant
 - `ControllerModel::KIND`
-- profile 文字列表現
-- 使用可能ボタン集合
-- スティック能力 trait の実装
-- runtime 用 `ModelSpec`
+- profile文字列
+- supported button集合
+- stick capability trait
+- runtime `ModelSpec`
 
-概念上の宣言は次の形とする。
+概念宣言:
 
 ```rust
 controller_models! {
@@ -137,13 +141,9 @@ controller_models! {
 }
 ```
 
-macro の採否は実装詳細だが、同じ情報を手作業の複数表へ重複させないことは仕様とする。`ControllerBuilder<M, R>` は `ControllerKind` を引数や field として受け取らず、必要な値を常に `M::KIND` から導出する。
+macro採否は実装詳細だが、同情報を複数の手書き表へ重複させないことは仕様とする。
 
-## 4. ボタン型
-
-### 4.1 全体集合
-
-全モデルで使われる論理ボタン名は `ButtonKind` に集約する。
+## 6. ボタンの全体集合
 
 ```rust
 #[repr(u8)]
@@ -172,9 +172,9 @@ pub enum ButtonKind {
 }
 ```
 
-明示 discriminant は論理 ID と table index に使う。NX input report の byte / bit 位置そのものとはみなさない。wire mapping は `(ControllerKind, ButtonKind)` から明示的に決め、golden test で固定する。モデルによって同名ボタンの物理配置や意味が異なっても、`ButtonKind` の数値へ暗黙に埋め込まない。
+explicit discriminantは論理IDとtable indexに使う。NX reportのbyte/bit位置とはみなさない。wire mappingは`(ControllerKind, ButtonKind)`から明示的に決める。
 
-### 4.2 モデル付きボタン
+## 7. モデル付きボタン
 
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -182,15 +182,13 @@ pub struct Button<M: ControllerModel> {
     kind: ButtonKind,
     _model: PhantomData<fn() -> M>,
 }
-```
 
-`Button<M>` の自由な constructor は公開しない。各モデルで使用可能な associated constant だけを生成する。
-
-```rust
 pub type ProButton = Button<model::Pro>;
 pub type JoyConLButton = Button<model::JoyConL>;
 pub type JoyConRButton = Button<model::JoyConR>;
 ```
+
+自由なconstructorは公開せず、modelで使用可能なassociated constantだけを生成する。
 
 ```rust
 let pro_a = ProButton::A;
@@ -198,48 +196,43 @@ let right_a = JoyConRButton::A;
 let left_up = JoyConLButton::DPAD_UP;
 ```
 
-`ProButton::A` と `JoyConRButton::A` は同じ `ButtonKind::A` を指すが、型は異なる。これにより、別モデルのボタンを誤って渡せない。
+`ProButton::A`と`JoyConRButton::A`は同じ`ButtonKind::A`を指すが型は異なる。
 
-次はコンパイルエラーにする。
+compile-fail:
 
 ```compile_fail
-let mut left: JoyConL = make_left();
 left.press([ProButton::A])?;
 ```
-
-次も、associated constant 自体が存在しないためコンパイルエラーにする。
 
 ```compile_fail
 let button = JoyConLButton::A;
 ```
 
-動的入力境界では明示変換を使う。
+動的境界:
 
 ```rust
 impl<M: ControllerModel> TryFrom<ButtonKind> for Button<M> {
     type Error = Error;
-
     fn try_from(kind: ButtonKind) -> Result<Self>;
 }
 ```
 
-CLI や設定ファイルから得た `ButtonKind` が対象モデルで使えない場合は `UnsupportedInput` を返す。静的な Rust 呼び出しではモデル付き定数を使い、通常経路を動的検査へ戻さない。
+静的Rustコードはtyped constantを使い、通常経路を動的検査へ戻さない。
 
-## 5. 共通値型とモデル能力
+## 8. 共通値型
 
-### 5.1 共通値型
+model非依存:
 
-次はモデルに依存しない値として、非 generic のまま保持する。
-
-- `Stick`: 12-bit の x / y 座標
-- `ImuFrame`: 加速度 3 軸と角速度 3 軸
-- `ControllerColors`: 24-bit RGB の集合
+- `Stick`: 12-bit x/y座標
+- `ImuFrame`: accel 3軸 + gyro 3軸
+- `ImuSamples`: 1frame反復または3frame
+- `ControllerColors`
 - `Rgb24`
 - `LocalAddress`
 
-Pro Controller と Joy-Con で同じ六軸センサー値を表すために、`ImuFrame<Pro>` と `ImuFrame<JoyConR>` のような別型を作らない。モデル差が wire encoding や校正値にある場合は、値型ではなく model spec と protocol encoder の責務とする。
+ProとJoy-Conで同じ六軸値を表すために`ImuFrame<Pro>`等を作らない。model差は`ModelSpec`とprotocol encoderの責務。
 
-### 5.2 スティック能力
+## 9. stick能力
 
 ```rust
 pub trait HasLeftStick: ControllerModel {}
@@ -247,15 +240,11 @@ pub trait HasRightStick: ControllerModel {}
 pub trait HasDualSticks: HasLeftStick + HasRightStick {}
 ```
 
-実装関係:
-
 ```text
 Pro      : HasLeftStick + HasRightStick + HasDualSticks
 JoyConL  : HasLeftStick
 JoyConR  : HasRightStick
 ```
-
-`Controller<M, R>` と `InputState<M>` のスティック method は能力 trait の境界で公開する。
 
 ```rust
 impl<M: HasLeftStick, R: ReportingMode> Controller<M, R> {
@@ -271,9 +260,9 @@ impl<M: HasDualSticks, R: ReportingMode> Controller<M, R> {
 }
 ```
 
-Joy-Con L には `right_stick()`、Joy-Con R には `left_stick()`、片側 Joy-Con には `sticks()` を公開しない。
+Joy-Con Lにright、Joy-Con Rにleft、片側Joy-Conにdual methodを公開しない。
 
-## 6. モデル付き入力状態
+## 10. モデル付き入力状態
 
 ```rust
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -282,8 +271,6 @@ pub struct InputState<M: ControllerModel> {
 }
 ```
 
-`InputState<M>` は、同じモデルの `Button<M>` と、そのモデルが持つスティックだけから構築できる。
-
 ```rust
 impl<M: ControllerModel> InputState<M> {
     pub fn neutral() -> Self;
@@ -291,19 +278,17 @@ impl<M: ControllerModel> InputState<M> {
         self,
         buttons: impl IntoIterator<Item = Button<M>>,
     ) -> Self;
-    pub fn with_imu(self, frames: [ImuFrame; 3]) -> Self;
+    pub fn with_imu(self, samples: impl Into<ImuSamples>) -> Self;
     pub fn buttons(&self) -> impl Iterator<Item = Button<M>> + '_;
     pub fn imu_frames(&self) -> &[ImuFrame; 3];
 }
 
 impl<M: HasLeftStick> InputState<M> {
     pub fn with_left_stick(self, stick: Stick) -> Self;
-    pub fn left_stick(&self) -> Stick;
 }
 
 impl<M: HasRightStick> InputState<M> {
     pub fn with_right_stick(self, stick: Stick) -> Self;
-    pub fn right_stick(&self) -> Stick;
 }
 
 impl<M: HasDualSticks> InputState<M> {
@@ -311,20 +296,11 @@ impl<M: HasDualSticks> InputState<M> {
 }
 ```
 
-Pro 用状態を Joy-Con へ適用することはできない。
+Pro用stateをJoy-Conへ渡せない。公開constructorで不正な共通stateを作り、send時にkind検査する設計へ戻さない。
 
-```compile_fail
-let state: InputState<model::Pro> = InputState::neutral()
-    .with_buttons([ProButton::A]);
-let mut right: JoyConR = make_right();
-right.apply(state)?;
-```
+## 11. reportingによるmethod制約
 
-内部表現はモデルごとに有効な状態しか構築できない形にする。公開 constructor で一旦不正な共通状態を作り、送信時に controller kind で検査する設計へ戻さない。
-
-## 7. 送信方式による API 制約
-
-共通 method は `Controller<M, R>` に実装する。
+共通:
 
 ```rust
 impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
@@ -335,13 +311,13 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
         buttons: impl IntoIterator<Item = Button<M>>,
         duration: Duration,
     ) -> Result<()>;
-    pub fn imu(&mut self, frames: &[ImuFrame]) -> Result<()>;
+    pub fn imu(&mut self, samples: impl Into<ImuSamples>) -> Result<()>;
     pub fn neutral(&mut self) -> Result<()>;
     pub fn snapshot(&self) -> InputState<M>;
 }
 ```
 
-Periodic 専用:
+Periodic:
 
 ```rust
 impl<M: ControllerModel> Controller<M, reporting::Periodic> {
@@ -350,7 +326,7 @@ impl<M: ControllerModel> Controller<M, reporting::Periodic> {
 }
 ```
 
-Direct 専用:
+Direct:
 
 ```rust
 impl<M: ControllerModel> Controller<M, reporting::Direct> {
@@ -358,17 +334,15 @@ impl<M: ControllerModel> Controller<M, reporting::Direct> {
 }
 ```
 
-Direct に `apply()`、Periodic に `send()` は存在しない。実行時に `UnsupportedOperation` を返す共通 method は作らない。
+Directに`apply()`、Periodicに`send()`は存在しない。
 
-## 8. 共通 builder
+## 12. 共通builder
 
 ```rust
 pub struct ControllerBuilder<M: ControllerModel, R: ReportingMode> {
     // private fields
 }
-```
 
-```rust
 impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     pub fn builder(
         adapter: impl Into<AdapterSelector>,
@@ -376,13 +350,17 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 }
 ```
 
-共通設定は generic builder に 1 度だけ実装する。`report_period()` は Periodic builder にだけ実装する。
-
 ```rust
 impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     pub fn profile_path(self, path: impl Into<PathBuf>) -> Self;
     pub fn controller_colors(self, colors: ControllerColors) -> Self;
+
     pub fn build(self) -> Result<Controller<M, R>>;
+
+    pub fn create_profile(
+        self,
+        options: CreateProfileOptions,
+    ) -> Result<Controller<M, R>>;
 }
 
 impl<M: ControllerModel> ControllerBuilder<M, reporting::Periodic> {
@@ -390,27 +368,40 @@ impl<M: ControllerModel> ControllerBuilder<M, reporting::Periodic> {
 }
 ```
 
-builder は `ControllerKind`、button capability、reporting mode を値として受け取らない。これらは `M` と `R` から決まる。
+builderは`ControllerKind`、button capability、reporting modeを値として受け取らない。
 
-## 9. profile と型の対応
+`build()`:
 
-JSON parser はまず実行時値として `ControllerKind` を読む。typed controller が使用する前に `M::KIND` と照合し、成功した文書を `PairingProfile<M>` として保持する。
+- no profile path → ephemeral controller
+- existing path → `PairingProfile<M>` validation
+- nonexistent path → `ProfileNotFound`
+- I/Oなし
+
+`create_profile()`:
+
+- path必須、target不存在を要求
+- valid empty envelopeをadapter open前にcreate-new
+- typed controllerをopenしてpairing
+- success時Ready controllerを返す
+- failure時envelopeを残し内部resourceをcleanup
+
+`Controller<M,R>`に`create_profile()` methodは置かない。
+
+## 13. typed profile
 
 ```rust
 pub struct PairingProfile<M: ControllerModel> {
     // validated document
 }
-
-impl<M: ControllerModel> PairingProfile<M> {
-    pub fn load(path: &Path) -> Result<Self>;
-}
 ```
 
-`PairingProfile<model::Pro>` を `Controller<model::JoyConR, _>` へ渡す API は作らない。raw profile inspection と CLI の動的選択だけが `ControllerKind` を直接扱う。
+JSON parserは`ControllerKind`を読み、`M::KIND`と照合してtyped profileへ変換する。
 
-## 10. dynamic boundary
+`PairingProfile<model::Pro>`をJoy-Conへ渡すAPIは作らない。raw inspectionとCLIだけが`ControllerKind`を直接扱う。
 
-型が実行時にしか決まらない CLI や設定ファイルでは、境界で 1 度だけ `ControllerKind` を分岐させる。
+## 14. dynamic boundary
+
+modelが実行時に決まるCLIは入口で一度だけ分岐する。
 
 ```rust
 match kind {
@@ -420,62 +411,64 @@ match kind {
 }
 ```
 
-分岐後は generic な typed path を使う。core runtime の各操作で `ControllerKind` を繰り返し `match`し、公開型の保証を失わせない。
+分岐後はtyped pathを使う。core runtimeで`ControllerKind`を繰り返しmatchしない。
 
-異なるモデルを 1 collection に格納する `AnyController` や trait object は初期公開 API に含めない。必要性が明確になった時点で、型消去により失う能力を別仕様で定義する。
+`AnyController`やtrait objectは初期APIに含めない。
 
-## 11. 内部 runtime の境界
+## 15. runtime境界
 
-`ControllerWorker<M, R>`、command、state store、protocol session は可能な範囲で `M` と `R` を保持する。
+`ControllerWorker<M,R>`、command、state store、protocol sessionは可能な範囲で`M`と`R`を保持する。
 
 ```rust
 struct ControllerWorker<M: ControllerModel, R: ReportingMode> {
     state: InputState<M>,
-    // transport and session fields
+    // transport and session
 }
 ```
 
-Bumble transport、HCI、L2CAP、HIDP framing はモデル非依存なので generic にしない。model 固有値が必要な箇所では `M::SPEC` を参照する。
+Bumble transport、HCI、L2CAP、HIDP framingはmodel非依存なのでgenericにしない。model固有値は`M::SPEC`を参照する。
 
-型消去は次の境界だけで許可する。
+型消去を許可する境界:
 
 - profile JSON DTO
-- diagnostics の `ControllerKind`
-- CLI の文字列引数
-- Bumble へ渡す bytes と transport event
+- diagnosticsのkind値
+- CLI文字列
+- Bumbleへ渡すbytes / events
 
-core input state を `ControllerKind + untyped buttons` へ早期変換しない。
+core input stateを早期に`ControllerKind + untyped buttons`へ変換しない。
 
-## 12. 検証規則
+## 16. 検証規則
 
-最低限、次を compile-pass / compile-fail test で固定する。
+compile-pass/failで固定する。
 
-- Pro と Joy-Con R のそれぞれで `A` を使用できる
-- Joy-Con L に `A` constant が存在しない
-- Joy-Con L controller に `ProButton` を渡せない
-- Joy-Con L に `right_stick()` が存在しない
-- Joy-Con R に `left_stick()` が存在しない
-- Direct に `apply()` が存在しない
-- Periodic に `send()` が存在しない
-- `InputState<Pro>` を Joy-Con L/R へ渡せない
-- `ImuFrame` は全モデルで同じ型として使える
-- `ButtonKind` discriminant が重複しない
-- 全 model button が wire mapping table を持つ
-- model 宣言、`ControllerKind`、profile 名、capability table が一致する
+- ProとJoy-Con RでそれぞれAを使用可能
+- Joy-Con LにA constantなし
+- Joy-Con LへProButtonを渡せない
+- Joy-Con Lにright stickなし
+- Joy-Con Rにleft stickなし
+- Directにapplyなし
+- Periodicにsendなし
+- Pro stateをJoy-Conへ渡せない
+- ImuFrameは全model共通
+- Direct builderにreport periodなし
+- controllerにcreate_profile methodなし
+- builder create_profileがtyped controllerを返す
 
-compile-fail test には `trybuild` または同等の UI test harness を使う。rustdoc の `compile_fail` だけを唯一の保証にしない。
+値audit:
 
-## 13. 対象外
+- ButtonKind discriminant重複なし
+- 全model buttonにwire mappingあり
+- model宣言、ControllerKind、profile名、capability一致
 
-初期仕様では次を行わない。
+## 17. 対象外
 
 - lifecycle typestate
-- 利用者定義 model
-- 利用者定義 reporting mode
-- model 間の暗黙変換
-- `InputState<M>` の stable serde format
-- model 非依存の `Button` alias
-- unsupported input を受け付けて実行時に無視する API
-- `AnyController` による型消去された統一操作面
+- 利用者定義model / reporting
+- model間暗黙変換
+- `InputState<M>` stable serde
+- model非依存Button alias
+- unsupported inputのsilent ignore
+- `AnyController`
+- controller methodのprofile create-new
 
-書き味をそろえる目的だけで異なる入力能力を同一型へ戻さない。共通の物理量は共通値型にし、能力差がある操作は型で分ける。
+書き味をそろえる目的だけで異なる能力を同一型へ戻さない。共通物理量は共通値型にし、能力差がある操作は型で分ける。
