@@ -59,3 +59,78 @@ Python 基準断面の session は、接続中に受信した subcommand ID を�
 ### 方針
 
 M1 item 11 は report mode、player lights、IMU、vibration、readiness に限定する。M2 の output handler で、parse 済み subcommand ID を reply 構築前に接続単位の集合へ記録し、reply 失敗時にも戻さない契約をテストする。M8 はその集合を安定した diagnostics event へ投影する。
+
+## 2026-07-29: blocking tap と public close cancellation
+
+### 現状
+
+初期 API は `tap(&mut self, ...) -> Result<()>` を blocking operation とし、
+`Controller<M, R>` は `Send` だが非 `Sync` とする。同時に、tap の delay は worker
+scheduler が管理し、close で中断できることを求める。
+
+### 観察
+
+safe な public API では、blocking `tap()` が `&mut self` を保持している間に同じ
+controller handle から `close()` を発行できない。public concurrent close を契約にするには、
+cloneable cancellation handle、または tap の非 blocking 化が必要になり、どちらも初期 API の
+変更になる。
+
+### 方針
+
+M2 は tap を worker deadline として保持し、thread sleep を使わない。transport disconnect、
+worker shutdown、command channel termination、crate-private priority close では pending tap を
+中断する。public cancellation handle は追加せず、必要性を fake runtime と後続の実 transport で
+再評価する。blocking tap の press/release acceptance 契約は維持する。
+
+## 2026-07-29: M2 worker の activity wait 候補
+
+### 現状
+
+worker は bounded command、transport activity、shutdown、Periodic deadline のいずれかまで
+待つ必要がある。短い timeout の `TransportPort::poll()` を反復すると実装は小さいが、idle
+wake が増え、command、HCI、shutdown latency が同じ poll 量子に縛られる。
+
+### 観察
+
+command 本体とは別に容量 1 の wake channel を置けば、command enqueue、transport activity、
+priority shutdown を同じ通知へ coalesce できる。worker は最短 deadline まで
+`recv_timeout()` し、起床後に transport を non-blocking drain できる。transport object 自体は
+worker thread の単独所有を維持する。
+
+### 方針
+
+M2 の第一候補を bounded command `sync_channel`、容量 1 の wake `sync_channel<()>`、
+queue 外の priority shutdown latch とする。fake clock / scripted waiter で invariant を検証し、
+実時間 probe で idle CPU、8 ms jitter、command/HCI latency、shutdown latency、fairness を
+測定してから queue 容量と command batch 上限を固定する。Bumble 側で activity notifier を
+得られない場合は M3 の upstream 方針として扱い、短周期 polling を未測定の恒久 fallback にしない。
+
+## 2026-07-29: M2 runtime で意図的に変える Python state semantics
+
+### 現状
+
+Python 基準断面は quaternion IMU encoding state を transport send 前に更新するため、
+rejected input send でも次の quaternion candidate が進み得る。Periodic では connection 前に
+commit した input state を最初の normal input へ持ち越す。bootstrap neutral retry は
+各 send 完了後から 1 秒を待つため、send latency 分だけ次回 deadline が後ろへずれる。
+
+Rust 初期設計は report bytes と next IMU state を candidate として計算し、transport acceptance
+後だけ commit する。各 new connection では protocol state、timer、holdoff と committed input を
+neutral baseline へ戻す。worker scheduler は bootstrap retry も absolute deadline で管理する。
+
+### 観察
+
+IMU の rejection rollback と new-session neutral reset は Python の観測結果と一致しない。
+前者は timer と committed IMU state を維持し、retry 時の時刻から候補を再計算できる。
+fake time も同じなら同じ bytes になる。後者は前 session または connection 前の pressed
+state を別の Switch connection へ自動送信しない安全境界になる。
+absolute bootstrap retry は send latency による drift を避け、overrun 時の missed retry を
+burst 送信しない scheduler 契約とそろう。
+
+### 方針
+
+M2 は Rust 初期設計を採用し、3 件を `rust_spec_delta` の deterministic test で固定する。
+Python runtime fixture には基準断面の観測も `baseline_observation` として残し、byte parity
+case と混同しない。Periodic の未接続 `apply()` 自体は local snapshot へ commit するが、
+new connection の開始時に neutral reset が優先する。利用者へ見える README/rustdoc には
+session を越えて input state を持ち越さないことを書く。
