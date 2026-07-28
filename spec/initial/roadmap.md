@@ -33,7 +33,9 @@ M8 IMU / diagnostics / probe
 M9 portability / release
 ```
 
-型モデルを後付けしない。M0でmodel/reporting/button/stateの型関係とcompile-fail harnessを固定し、その後のprotocolとruntimeをtyped path上に実装する。
+型モデルを後付けしない。M0でmodel、reporting、button、stateの型関係を固定し、その後のprotocolとruntimeをtyped path上に実装する。
+
+型として表現されたmethod absenceやgeneric不一致を確認するためのcompile-fail harnessは作らない。検証はmodel宣言、動的変換、wire mapping、runtime behaviorへ集中させる。
 
 各milestoneは`spec/wip/unit_連番/`で作業仕様を作り、完了後に`spec/complete/unit_連番/`へ移す。
 
@@ -49,7 +51,7 @@ M9 portability / release
 - adapter-default identity
 - fresh pairing
 - Windows 11 + CSR8510 A10 + WinUSB
-- UI / protocol / fake / virtual tests
+- model mapping / protocol / fake / virtual tests
 
 非対象:
 
@@ -89,8 +91,7 @@ M9 portability / release
 
 - public API docs/examples
 - MSRV/stable CI
-- UI compile-pass/fail gate
-- model declaration audit
+- model declaration / wire mapping audit
 - profile creation ordering test
 - Windows supported matrix
 - profile update interruption test
@@ -122,28 +123,28 @@ M9 portability / release
 - `ControllerKind` / `ReportingKind` projection
 - model宣言単一正本
 - `ButtonKind` explicit logical code
+- `(ControllerKind, ButtonKind)` wire mapping
 - `Button<M>`とbutton aliases
 - `InputState<M>`とstate aliases
 - common `Stick` / `ImuFrame` / `ImuSamples`
 - stick capability traits
 - `ControllerBuilder<M,R>`
 - 6 controller aliases
-- `trybuild` UI harness
 
 ### 3.3 exit criteria
 
 - MSRV/stable check、fmt、clippy、test、doc
 - dependency sourceが単一Bumble revision
 - model宣言からkind/profile名/button/stick能力を一意導出
-- ProとJoy-Con RのAがcompile-pass
-- Joy-Con LのAがcompile-fail
-- model違いbutton/stateがcompile-fail
-- Direct apply / Periodic sendがcompile-fail
-- common ImuFrameが全modelでcompile-pass
-- Direct builderにreport periodなし
-- typed builderにkind setterなし
+- model button集合がPython基準断面と一致
+- 全supported buttonにwire mappingがある
+- dynamic `ButtonKind`変換がmodel集合と一致
+- public examplesとrustdocが通常のbuildでcompileする
+- runtimeへ`ControllerKind`やreporting modeを任意指定するsetterがない
 - placeholder `Hello, world!`なし
 - license未決ならrelease job無効
+
+存在しないmethodや異なるgeneric型がcompileできないことを専用fixtureでは検査しない。
 
 ### 3.4 stop condition
 
@@ -172,6 +173,7 @@ M9 portability / release
 - model button集合
 - `(ControllerKind, ButtonKind)` wire mapping
 - logical codeとwire bit分離
+- Joy-Con L/Rの`SL` / `SR` mapping
 - model-specific stick layout
 - neutral/button/stick/IMU bytes
 - malformed parser corpus
@@ -184,7 +186,8 @@ M9 portability / release
 - neutral `0x30` 49bytes
 - Python fixtureとbyte-for-byte一致
 - supported button全てにmapping
-- unsupported buttonを`Button<M>`へ変換不能
+- unsupported dynamic buttonを`Button<M>`へ変換しない
+- `ButtonKind`の数値をwire offsetへ直接使用しない
 - Stick/IMU変換一致
 - malformed inputでpanicなし
 - protocol testがBumbleをlinkしない
@@ -217,7 +220,7 @@ M9 portability / release
 ### 5.2 作業
 
 - 6 model×reporting組み合わせを共通harnessで構築
-- `PeriodicCommand<M>` / `DirectCommand<M>`分離
+- Periodic / Direct command処理の分離
 - open/close/reopen
 - sender ordering
 - periodic deadline skip
@@ -237,18 +240,18 @@ M9 portability / release
 - wall-clock sleepなしで決定的test
 - Periodic/Direct commit semantics一致
 - reply ordering一致
-- close neutral/no-neutral
-- disconnect/reopen reset
+- disconnect/reopenでstate reset
 - queue overflow bounded
 - thread leakなし
-- runtime coreにuntyped button vectorなし
-- runtime coreが毎操作ControllerKind matchしない
-- nonexistent build pathはProfileNotFound
+- runtime coreにuntyped button vectorを永続保持しない
+- runtime coreが毎操作`ControllerKind`をmatchしない
+- nonexistent build pathは`ProfileNotFound`
 - create target existingは上書きなし
 - envelopeがtransport openより先
 - create failureでresource cleanup
 - success時Ready controller返却
-- controllerにcreate_profile methodなし
+
+controllerに`create_profile()` methodが存在しないこと自体は専用testにしない。
 
 ### 5.4 decision gate
 
@@ -277,7 +280,7 @@ Switch実機は不要。USB adapterは必要。
 - reader termination
 - repeated open/close
 - build time/size
-- `M::SPEC`→TransportConfig projection
+- `M::SPEC`→`TransportConfig` projection
 
 ### 6.3 exit criteria
 
@@ -285,14 +288,14 @@ Switch実機は不要。USB adapterは必要。
 - no-open discoveryがclaimを残さない
 - error分類
 - local address/HCI version trace
-- unplug→TransportEnded
+- unplug→`TransportEnded`
 - worker join
 - Bumble込みMSRV
 - license report
 
 ### 6.4 upstream gate
 
-activity receiver、accepted Classic channel、discoverable policy、key-store trait、USB cancellationが不足する場合はM4前にupstream対応。
+activity receiver、accepted Classic channel、discoverable policy、key-store trait、USB cancellationが不足する場合はM4前にupstream対応する。
 
 ## 7. M4: virtual Classic SDP/HID
 
@@ -420,13 +423,14 @@ virtual integration未通過で実機packetを場当たりpatchしない。
 
 - JoyCon button/state aliases
 - left-only/right-only capabilities
-- SL/SR
+- model supported button集合
+- SL/SR mapping
 - model-specific device info/SPI/colors
 - Periodic/Direct
 
 ### 10.2 順序
 
-1. UI tests
+1. model宣言とmapping fixture
 2. protocol fixtures
 3. fake runtime
 4. virtual Bluetooth
@@ -437,22 +441,24 @@ virtual integration未通過で実機packetを場当たりpatchしない。
 
 ### 10.3 exit criteria
 
-- Joy-Con LにAなし
-- Joy-Con RにD-padなし
-- side違いstick methodなし
+- Joy-Con L supported集合にAを含めない
+- Joy-Con R supported集合にD-padを含めない
+- stick capability宣言がsideと一致
 - L: D-pad/left/SL+SR
 - R: ABXY/right/SL+SR
-- mismatchをopen前にreject
+- model mismatchをopen前にreject
 - SPI colors一致
 - reporting readiness一致
 - left/right別evidence
-- JoyConPair未追加
+- `JoyConPair`未追加
+
+method absence自体のcompile-fail証拠は要求しない。
 
 ## 11. M8: IMU、diagnostics、probe
 
 ### 11.1 IMU
 
-- common ImuFrame/ImuSamples
+- common `ImuFrame` / `ImuSamples`
 - standard/quaternion
 - same-mode reset
 - ACK ordering
@@ -479,11 +485,11 @@ swbt-probe profile inspect path
 swbt-probe profile verify path
 ```
 
-CLIはControllerKindをparseし入口で`run::<M>()`へ分岐する。
+CLIは`ControllerKind`をparseし、入口で`run::<M>()`へ分岐する。
 
 ### 11.4 exit criteria
 
-- common IMU compile-pass
+- common IMU unit/golden test
 - model別fixture
 - mode ordering
 - hardware trace
@@ -508,13 +514,13 @@ CLIはControllerKindをparseし入口で`run::<M>()`へ分岐する。
 
 ### 12.3 macOS
 
-初期対象外。USB transportとdriver ownership調査後に追加。
+初期対象外。USB transportとdriver ownership調査後に追加する。
 
 ### 12.4 release engineering
 
 - generic API review
 - alias rustdoc
-- UI tests
+- model / mapping audit
 - examples compile
 - `cargo package`
 - license/SBOM
@@ -544,23 +550,37 @@ M6以降の独立milestone。完了まで`UnsupportedCapability`。
 - namespace compatibility
 - duplicate address guidance
 
-## 14. issue優先度
+## 14. upstream contribution policy
+
+Bumble gapが見つかった場合は次の順で対応する。
+
+1. swbt側のtransport contractで必要挙動を固定
+2. Bumble側のminimal reproductionを作る
+3. upstream issue / PR
+4. 必要なら一時的なfork revision
+5. upstream merge後にofficial revisionへ戻す
+6. fork-only codeとpatch noteを削除
+
+forkを無期限に保守する前提でarchitectureを組まない。
+
+## 15. issue優先度
 
 | severity | 条件 | 対応 |
 |---|---|---|
 | S0 | key漏えい、adapter永続破損、危険な副作用 | 開発停止 |
-| S1 | stale input、close hang、key loss、profile corruption、型保証の抜け道 | blocker |
+| S1 | stale input、close hang、key loss、profile corruption、型を迂回する公開API | blocker |
 | S2 | reconnect failure、unsupported subcommand、high jitter | release blocker/制限 |
 | S3 | diagnostics、ergonomics、build size | roadmap |
 | S4 | cosmetic docs/naming | 通常修正 |
 
-## 15. progress evidence
+## 16. progress evidence
+
+milestone完了PRには次を含める。
 
 - 対象仕様
 - scope/non-goals
 - test command/result
-- UI test result
-- model audit
+- model / mapping audit
 - fixture provenance
 - profile creation ordering
 - hardware matrix
@@ -568,4 +588,4 @@ M6以降の独立milestone。完了まで`UnsupportedCapability`。
 - cleanup/backend rollback
 - Bumble revision/upstream issue
 
-compileするだけで型能力、Bluetooth、protocol milestoneを完了扱いにしない。
+型制約はpublic signatureとgeneric boundの設計判断としてレビューする。人工的な不正コードのcompile failureをprogress evidenceやrelease gateにしない。
