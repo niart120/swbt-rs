@@ -80,3 +80,64 @@ fn wire_positions_use_one_bit_inside_the_button_bytes() {
         }
     }
 }
+
+#[test]
+fn protocol_metadata_is_projected_from_each_model_declaration() {
+    let cases = [
+        (
+            ControllerKind::Pro,
+            "Pro Controller",
+            0x03,
+            [0x03, 0x02],
+            [ButtonKind::L, ButtonKind::R].as_slice(),
+            "323232ffffff00b2ffff3b30",
+        ),
+        (
+            ControllerKind::JoyConL,
+            "Joy-Con (L)",
+            0x01,
+            [0x01, 0x01],
+            [ButtonKind::SL, ButtonKind::SR].as_slice(),
+            "00b2ff32323200b2ff00b2ff",
+        ),
+        (
+            ControllerKind::JoyConR,
+            "Joy-Con (R)",
+            0x02,
+            [0x01, 0x01],
+            [ButtonKind::SL, ButtonKind::SR].as_slice(),
+            "ff3b30323232ff3b30ff3b30",
+        ),
+    ];
+
+    for (kind, local_name, device_type, tail, pairing, colors_hex) in cases {
+        let protocol = kind.spec().protocol;
+        assert_eq!(protocol.local_name, local_name);
+        assert_eq!(protocol.class_of_device, 0x002508);
+        assert_eq!(protocol.device_type, device_type);
+        assert_eq!(protocol.device_info_tail, tail);
+        assert_eq!(protocol.battery_connection, 0x80);
+        assert_eq!(protocol.vibrator_input, 0x00);
+        assert_eq!(protocol.pairing_trigger_buttons, pairing);
+        assert_eq!(protocol.accepted_imu_modes, &[0, 1, 2, 3, 4, 5]);
+        assert_eq!(
+            protocol.default_colors.to_spi_bytes(),
+            decode_12_byte_hex(colors_hex)
+        );
+        assert_eq!(protocol.accelerometer_calibration.zero_raw, [0; 3]);
+        assert_eq!(
+            protocol.accelerometer_calibration.reference_raw,
+            [0x4000; 3]
+        );
+        assert_eq!(protocol.gyroscope_calibration.zero_raw, [0; 3]);
+        assert_eq!(protocol.gyroscope_calibration.reference_raw, [0x343B; 3]);
+    }
+}
+
+fn decode_12_byte_hex(value: &str) -> [u8; 12] {
+    let mut decoded = [0; 12];
+    for (index, byte) in decoded.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).unwrap();
+    }
+    decoded
+}

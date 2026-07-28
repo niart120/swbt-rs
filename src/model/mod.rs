@@ -1,5 +1,7 @@
 //! Controller model markers and their runtime projection.
 
+use crate::profile::{ControllerColors, Rgb24};
+
 mod sealed {
     pub trait Sealed {}
 }
@@ -91,6 +93,74 @@ impl ButtonWirePosition {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SensorCalibration {
+    pub(crate) zero_raw: [i16; 3],
+    pub(crate) reference_raw: [i16; 3],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ModelProtocolSpec {
+    pub(crate) local_name: &'static str,
+    pub(crate) class_of_device: u32,
+    pub(crate) device_type: u8,
+    pub(crate) device_info_tail: [u8; 2],
+    pub(crate) battery_connection: u8,
+    pub(crate) vibrator_input: u8,
+    pub(crate) pairing_trigger_buttons: &'static [ButtonKind],
+    pub(crate) accepted_imu_modes: &'static [u8],
+    pub(crate) default_colors: ControllerColors,
+    pub(crate) accelerometer_calibration: SensorCalibration,
+    pub(crate) gyroscope_calibration: SensorCalibration,
+}
+
+impl ModelProtocolSpec {
+    const fn new(
+        local_name: &'static str,
+        class_of_device: u32,
+        device_type: u8,
+        device_info_tail: [u8; 2],
+        pairing_trigger_buttons: &'static [ButtonKind],
+        default_colors: ControllerColors,
+    ) -> Self {
+        Self {
+            local_name,
+            class_of_device,
+            device_type,
+            device_info_tail,
+            battery_connection: 0x80,
+            vibrator_input: 0x00,
+            pairing_trigger_buttons,
+            accepted_imu_modes: &[0, 1, 2, 3, 4, 5],
+            default_colors,
+            accelerometer_calibration: SensorCalibration {
+                zero_raw: [0; 3],
+                reference_raw: [0x4000; 3],
+            },
+            gyroscope_calibration: SensorCalibration {
+                zero_raw: [0; 3],
+                reference_raw: [0x343B; 3],
+            },
+        }
+    }
+
+    fn is_well_formed(self) -> bool {
+        let _type_checked_colors = self.default_colors.to_spi_bytes();
+        !self.local_name.is_empty()
+            && self.class_of_device <= 0xFF_FFFF
+            && self.device_type != 0
+            && self.device_info_tail != [0; 2]
+            && self.battery_connection == 0x80
+            && self.vibrator_input == 0
+            && !self.pairing_trigger_buttons.is_empty()
+            && self.accepted_imu_modes == [0, 1, 2, 3, 4, 5]
+            && self.accelerometer_calibration.zero_raw == [0; 3]
+            && self.accelerometer_calibration.reference_raw == [0x4000; 3]
+            && self.gyroscope_calibration.zero_raw == [0; 3]
+            && self.gyroscope_calibration.reference_raw == [0x343B; 3]
+    }
+}
+
 /// Read-only model data shared by typed and dynamic boundaries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ModelSpec {
@@ -100,6 +170,7 @@ pub struct ModelSpec {
     has_right_stick: bool,
     supported_buttons: &'static [ButtonKind],
     button_wire_mapping: &'static [(ButtonKind, ButtonWirePosition)],
+    pub(crate) protocol: &'static ModelProtocolSpec,
 }
 
 impl ModelSpec {
@@ -110,6 +181,7 @@ impl ModelSpec {
         has_right_stick: bool,
         supported_buttons: &'static [ButtonKind],
         button_wire_mapping: &'static [(ButtonKind, ButtonWirePosition)],
+        protocol: &'static ModelProtocolSpec,
     ) -> Self {
         Self {
             kind,
@@ -118,6 +190,7 @@ impl ModelSpec {
             has_right_stick,
             supported_buttons,
             button_wire_mapping,
+            protocol,
         }
     }
 
@@ -154,6 +227,7 @@ impl ModelSpec {
     /// Returns whether `button` is valid for this model.
     #[must_use]
     pub fn supports_button(self, button: ButtonKind) -> bool {
+        debug_assert!(self.protocol.is_well_formed());
         button_wire_position(self.kind, button).is_some()
     }
 
@@ -231,6 +305,20 @@ macro_rules! controller_models {
                 kind: $kind:ident,
                 profile_name: $profile_name:literal,
                 spec: $spec:ident,
+                protocol_spec: $protocol_spec:ident,
+                protocol: {
+                    local_name: $local_name:literal,
+                    class_of_device: $class_of_device:literal,
+                    device_type: $device_type:literal,
+                    device_info_tail: $device_info_tail:expr,
+                    pairing_trigger_buttons: [$($pairing_button:ident),+ $(,)?],
+                    default_colors: [
+                        $body_color:expr,
+                        $button_color:expr,
+                        $left_grip_color:expr,
+                        $right_grip_color:expr $(,)?
+                    ],
+                },
                 sticks: [$($stick:ident),* $(,)?],
                 buttons: [
                     $(
@@ -276,6 +364,20 @@ macro_rules! controller_models {
             #[derive(Debug)]
             pub enum $model {}
 
+            static $protocol_spec: ModelProtocolSpec = ModelProtocolSpec::new(
+                $local_name,
+                $class_of_device,
+                $device_type,
+                $device_info_tail,
+                &[$(ButtonKind::$pairing_button),+],
+                ControllerColors::new(
+                    $body_color,
+                    $button_color,
+                    $left_grip_color,
+                    $right_grip_color,
+                ),
+            );
+
             static $spec: ModelSpec = ModelSpec::new(
                 ControllerKind::$kind,
                 $profile_name,
@@ -290,6 +392,7 @@ macro_rules! controller_models {
                         ),
                     )*
                 ],
+                &$protocol_spec,
             );
 
             impl sealed::Sealed for $model {}
@@ -326,6 +429,20 @@ controller_models! {
         kind: Pro,
         profile_name: "pro",
         spec: PRO_SPEC,
+        protocol_spec: PRO_PROTOCOL_SPEC,
+        protocol: {
+            local_name: "Pro Controller",
+            class_of_device: 0x002508,
+            device_type: 0x03,
+            device_info_tail: [0x03, 0x02],
+            pairing_trigger_buttons: [L, R],
+            default_colors: [
+                Rgb24::new(0x32, 0x32, 0x32),
+                Rgb24::new(0xFF, 0xFF, 0xFF),
+                Rgb24::new(0x00, 0xB2, 0xFF),
+                Rgb24::new(0xFF, 0x3B, 0x30),
+            ],
+        },
         sticks: [left, right],
         buttons: [
             A => A @ 3 / 0x08,
@@ -353,6 +470,20 @@ controller_models! {
         kind: JoyConL,
         profile_name: "joycon_l",
         spec: JOYCON_L_SPEC,
+        protocol_spec: JOYCON_L_PROTOCOL_SPEC,
+        protocol: {
+            local_name: "Joy-Con (L)",
+            class_of_device: 0x002508,
+            device_type: 0x01,
+            device_info_tail: [0x01, 0x01],
+            pairing_trigger_buttons: [SL, SR],
+            default_colors: [
+                Rgb24::new(0x00, 0xB2, 0xFF),
+                Rgb24::new(0x32, 0x32, 0x32),
+                Rgb24::new(0x00, 0xB2, 0xFF),
+                Rgb24::new(0x00, 0xB2, 0xFF),
+            ],
+        },
         sticks: [left],
         buttons: [
             L => L @ 5 / 0x40,
@@ -373,6 +504,20 @@ controller_models! {
         kind: JoyConR,
         profile_name: "joycon_r",
         spec: JOYCON_R_SPEC,
+        protocol_spec: JOYCON_R_PROTOCOL_SPEC,
+        protocol: {
+            local_name: "Joy-Con (R)",
+            class_of_device: 0x002508,
+            device_type: 0x02,
+            device_info_tail: [0x01, 0x01],
+            pairing_trigger_buttons: [SL, SR],
+            default_colors: [
+                Rgb24::new(0xFF, 0x3B, 0x30),
+                Rgb24::new(0x32, 0x32, 0x32),
+                Rgb24::new(0xFF, 0x3B, 0x30),
+                Rgb24::new(0xFF, 0x3B, 0x30),
+            ],
+        },
         sticks: [right],
         buttons: [
             A => A @ 3 / 0x08,

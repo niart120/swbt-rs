@@ -12,5 +12,12 @@ publish = false
 name = "swbt"
 path = "src/lib.rs"
 
+[features]
+default = []
+bumble = ["dep:bumble"]
+
 [dependencies]
-bumble = { git = "https://github.com/chaitanyarahalkar/bumble-rs", rev = "bbac2a6803b8cab0920ab725a23aa408fc4fed85" }
+bumble = { git = "https://github.com/chaitanyarahalkar/bumble-rs", rev = "bbac2a6803b8cab0920ab725a23aa408fc4fed85", optional = true }
+
+[dev-dependencies]
+serde_json = "1"
