@@ -6,43 +6,46 @@
 - Rust API: [api.md](api.md)
 - profile / dependency 前提: [source-baseline.md](source-baseline.md)
 
-この文書は、Python 利用者、profile、テスト資産、実機運用を Rust 版へ段階的に移す方法を定義する。Rust 版は Python のクラス構造を再現せず、controller model と reporting mode を型で表し、モデル固有入力の誤用をコンパイル時に拒否する。
+この文書は、Python利用者、profile、テスト資産、実機運用をRust版へ段階的に移す方法を定義する。Rust版はPythonのクラス構造を再現せず、controller modelとreporting modeを型で表し、model固有入力の誤用を通常の静的APIから排除する。
 
 ## 1. 移行目標
 
-- 同じ controller model と入力から互換な NX HID bytes を生成する
-- 同じ output report に対し互換な reply と session transition を行う
-- Periodic / Direct の state commit 条件を一致させる
-- Python profile schema v2 を相互に読める
-- stored link key の意味を失わない
-- connection readiness と close neutral の契約を一致させる
-- 実機で pairing / reconnect / input / cleanup を再現する
-- Python で実行時に拒否していた model mismatch を Rust では可能な限りコンパイル時に拒否する
+- 同じcontroller modelと入力から互換なNX HID bytesを生成する
+- 同じoutput reportに対し互換なreplyとsession transitionを行う
+- Periodic / Directのstate commit条件を一致させる
+- Python profile schema v2を相互に読める
+- stored link keyの意味を失わない
+- connection readinessとclose neutralの契約を一致させる
+- 実機でpairing / reconnect / input / cleanupを再現する
+- Pythonで実行時に拒否していたmodel mismatchをRustでは可能な限り型で表す
 
 互換対象外:
 
 - `asyncio` coroutine / task identity
 - Python class inheritance
-- exception message の完全一致
+- exception messageの完全一致
 - internal import path
-- dataclass の実装詳細
+- dataclassの実装詳細
 - pytest fixture API
-- Bumble Python object 型
-- callback scheduling order。ただし wire send order は互換対象
-- `Button` と `InputState` を model 非依存の単一型として維持すること
+- Bumble Python object型
+- callback scheduling order。ただしwire send orderは互換対象
+- `Button`と`InputState`をmodel非依存の単一型として維持すること
 
 ## 2. 互換レベル
 
 | level | 内容 | gate |
 |---|---|---|
 | L0 Source observation | Python断面とfixture provenance | M1 |
-| L1 Type/API model | model/reporting/input能力のcompile-pass/fail | M0-M1 |
-| L2 Pure protocol | report/parser/reply/SPI/conversion | M1 |
-| L3 Runtime semantics | Periodic/Direct/readiness/cleanup | M2 |
-| L4 Virtual Bluetooth | Classic/SDP/HID/pairing | M4 |
-| L5 Profile data | schema v2とkey fields相互読書き | M6 |
-| L6 Hardware behavior | target matrix | M5-M8 |
-| L7 Operational cutover | docs/probe/monitoring/backend rollback | M9 |
+| L1 Type/API model | `Controller<M,R>`、model固有input、共通値型の設計確定 | M0 |
+| L2 Model data | model宣言、button集合、wire mapping、動的変換 | M0-M1 |
+| L3 Pure protocol | report/parser/reply/SPI/conversion | M1 |
+| L4 Runtime semantics | Periodic/Direct/readiness/cleanup | M2 |
+| L5 Virtual Bluetooth | Classic/SDP/HID/pairing | M4 |
+| L6 Profile data | schema v2とkey fields相互読書き | M6 |
+| L7 Hardware behavior | target matrix | M5-M8 |
+| L8 Operational cutover | docs/probe/monitoring/backend rollback | M9 |
+
+L1の型制約について、人工的な不正コードをcompileさせる専用testは作らない。public signatureとgeneric boundを設計の正本とし、domain dataとruntime behaviorを別途検証する。
 
 manual pairing 1回だけで移行完了にしない。
 
@@ -56,7 +59,7 @@ manual pairing 1回だけで移行完了にしない。
 | `DirectJoyConL` | `Controller<model::JoyConL, reporting::Direct>` / `DirectJoyConL` |
 | `JoyConR` | `Controller<model::JoyConR, reporting::Periodic>` / `JoyConR` |
 | `DirectJoyConR` | `Controller<model::JoyConR, reporting::Direct>` / `DirectJoyConR` |
-| `SwitchGamepad` ABC | 初期Rust APIでは対応traitなし。generic `Controller<M, R>`を使う |
+| `SwitchGamepad` ABC | 初期Rust APIでは対応traitなし。generic `Controller<M,R>`を使う |
 | `PeriodicSwitchGamepad` ABC | `R = reporting::Periodic` |
 | `DirectSwitchGamepad` ABC | `R = reporting::Direct` |
 
@@ -170,19 +173,39 @@ right.tap([JoyConRButton::A], Duration::from_millis(80))?;
 
 | Python `Button` | Pro | Joy-Con L | Joy-Con R |
 |---|---|---|---|
-| A/B/X/Y | `ProButton::*` | 型として非公開 | `JoyConRButton::*` |
-| L/ZL | `ProButton::*` | `JoyConLButton::*` | 型として非公開 |
-| R/ZR | `ProButton::*` | 型として非公開 | `JoyConRButton::*` |
-| Plus/Home | `ProButton::*` | 型として非公開 | `JoyConRButton::*` |
-| Minus/Capture | `ProButton::*` | `JoyConLButton::*` | 型として非公開 |
-| D-pad | `ProButton::*` | `JoyConLButton::*` | 型として非公開 |
-| LeftStick click | Pro | Joy-Con L | 型として非公開 |
-| RightStick click | Pro | 型として非公開 | Joy-Con R |
-| SL/SR | 型として非公開 | Joy-Con L | Joy-Con R |
+| A/B/X/Y | `ProButton::*` | 非対応 | `JoyConRButton::*` |
+| L/ZL | `ProButton::*` | `JoyConLButton::*` | 非対応 |
+| R/ZR | `ProButton::*` | 非対応 | `JoyConRButton::*` |
+| Plus/Home | `ProButton::*` | 非対応 | `JoyConRButton::*` |
+| Minus/Capture | `ProButton::*` | `JoyConLButton::*` | 非対応 |
+| D-pad | `ProButton::*` | `JoyConLButton::*` | 非対応 |
+| LeftStick click | Pro | Joy-Con L | 非対応 |
+| RightStick click | Pro | 非対応 | Joy-Con R |
+| SL/SR | 非対応 | Joy-Con L | Joy-Con R |
 
-button名を設定ファイルから読む場合は`ButtonKind`をparseし、選択済みmodelの`Button<M>::try_from()`を呼ぶ。
+button名を設定ファイルから読む場合は`ButtonKind`をparseし、選択済みmodelの`Button<M>::try_from()`を呼ぶ。この動的変換は実行時testの対象である。
 
-## 7. input state mapping
+## 7. button wire mapping
+
+`ButtonKind`の数値は論理IDであり、NX reportのbyte/bit位置ではない。
+
+```text
+(ControllerKind, ButtonKind)
+    → byte index
+    → bit mask
+```
+
+Python基準断面からmodel別mapping fixtureを作る。特にJoy-Con L/Rの`SL`と`SR`はmodelを含めて比較する。
+
+移行時に検査するもの:
+
+- supported button全てにmappingがある
+- unsupported buttonへmappingを公開しない
+- reserved bitを立てない
+- Pythonのreport bytesと一致する
+- `ButtonKind as u8`をwire offsetへ直接使わない
+
+## 8. input state mapping
 
 Python:
 
@@ -209,7 +232,7 @@ right.apply(state)?;
 
 `InputState<model::Pro>`をJoy-Conへ渡せない。modelを抽象化する箇所はgeneric functionにするか、動的入口で`ControllerKind`を分岐する。
 
-## 8. common value mapping
+## 9. common value mapping
 
 | Python | Rust | 備考 |
 |---|---|---|
@@ -229,9 +252,7 @@ left.left_stick(stick)?;
 right.right_stick(stick)?;
 ```
 
-Joy-Con Lの`right_stick()`、Joy-Con Rの`left_stick()`、片側Joy-Conの`sticks()`はコンパイル不能。
-
-IMU:
+六軸入力:
 
 ```rust
 pad.imu(ImuFrame::neutral())?;
@@ -240,14 +261,12 @@ pad.imu([frame0, frame1, frame2])?;
 
 `ImuFrame`をmodelごとに分けない。wire packing差は`M::SPEC`から選ぶ。
 
-## 9. reporting semantics mapping
+## 10. reporting semantics mapping
 
 | Python | Rust |
 |---|---|
 | Periodic `apply(state)` | `Controller<M, Periodic>::apply(InputState<M>)` |
 | Direct `send(state)` | `Controller<M, Direct>::send(InputState<M>)` |
-| Periodicに`send`なし | methodが存在しない |
-| Directに`apply`なし | methodが存在しない |
 | `report_period_us` | Periodic builderの`report_period(Duration)` |
 
 Periodic:
@@ -264,7 +283,7 @@ Direct:
 - acceptance前failureでprevious state維持
 - user-input schedulerなし
 
-## 10. resource scope mapping
+## 11. resource scope mapping
 
 Python:
 
@@ -293,7 +312,7 @@ close?;
 
 Rust`Drop`にPython context managerと同じcleanup保証を持たせない。
 
-## 11. connection mapping
+## 12. connection mapping
 
 | Python | Rust |
 |---|---|
@@ -309,7 +328,7 @@ Rust`Drop`にPython context managerと同じcleanup保証を持たせない。
 
 正常接続はlink/HID channel openだけでなく、report mode、player lights、reply acceptance、handshake回収、Periodic holdoffを含むreadinessまで待つ。
 
-## 12. profile schema v2
+## 13. profile schema v2
 
 ```json
 {
@@ -361,7 +380,7 @@ write:
 
 自動backup、世代管理、復元機能は実装しない。更新中断では旧または新のvalid fileが残ることを保証する。
 
-## 13. dynamic application migration
+## 14. dynamic application migration
 
 modelが設定やCLIで決まるapplicationは入口で一度だけ分岐する。
 
@@ -377,7 +396,7 @@ match kind {
 
 異なるmodelを同じcollectionに置く必要がある場合も、初期libraryに`AnyController`を追加せずapplication側enumで必要操作を明示する。
 
-## 14. diagnostics mapping
+## 15. diagnostics mapping
 
 Python `DiagnosticsConfig` writerはRustでは`tracing` subscriberへ移す。
 
@@ -395,7 +414,7 @@ Python `DiagnosticsConfig` writerはRustでは`tracing` subscriberへ移す。
 
 運用logにはruntime projectionを記録する。
 
-## 15. error mapping
+## 16. error mapping
 
 | Python | Rust `ErrorKind` |
 |---|---|
@@ -414,21 +433,28 @@ Python `DiagnosticsConfig` writerはRustでは`tracing` subscriberへ移す。
 | `InvalidKeyStoreError` | `InvalidKeyStore` |
 | `AdapterIdentityRecoveryRequired` | `UnsupportedCapability`またはidentity-specific error |
 
-静的Rust APIでは多くのunsupported inputがコンパイル不能になる。`UnsupportedInput`は動的境界に残る。
+静的Rust APIでは多くのunsupported inputが型として表現不能になる。`UnsupportedInput`は動的境界に残る。
 
-## 16. 段階移行
+## 17. 段階移行
 
 ### Phase A: observation
 
-source SHA、protocol fixture、profile fixture、hardware trace、supported input matrixを固定。
+source SHA、protocol fixture、profile fixture、hardware trace、supported input matrixを固定する。
 
-### Phase B: type/API shadow
+### Phase B: type/API foundation
 
-UI testでmodel button、stick capability、state、Periodic/Direct method、common IMUを固定。
+- `Controller<M,R>`とaliasを実装
+- model固有`Button<M>` / `InputState<M>`を実装
+- common `Stick` / `ImuFrame`を実装
+- model宣言を単一正本にする
+- public examplesとrustdocを通常のbuildで確認
+- model集合とwire mappingをfixtureで検証
+
+compilerが保証する不正な型の拒否を、専用compile-fail suiteで再検査しない。
 
 ### Phase C: pure protocol shadow
 
-同じsemantic inputをPythonとRustへ流しbytes/effectsを比較。Python共通`Button`をfixture generatorでmodel付きlogical inputへ変換。
+同じsemantic inputをPythonとRustへ流しbytes/effectsを比較する。Python共通`Button`をfixture generatorでmodel付きlogical inputへ変換する。
 
 ### Phase D: virtual Bluetooth
 
@@ -450,7 +476,7 @@ criteria:
 
 ### Phase F: profile interoperability
 
-synthetic profile、専用hardware profile、既存profile copyの順にread/write/reconnect。自動backup機能は使わない。
+synthetic profile、専用hardware profile、既存profile copyの順にread/write/reconnectする。自動backup機能は使わない。
 
 ### Phase G: workload cutover
 
@@ -460,24 +486,25 @@ synthetic profile、専用hardware profile、既存profile copyの順にread/wri
 - close latency
 - reconnect success
 - profile update count
-- compile-time model guarantees
+- model / mapping audit
 
 backend config switchを維持する。
 
 ### Phase H: Python retirement
 
-model/reportingごとに判定。
+model/reportingごとに判定する。
 
 - supported release
 - hardware matrix
-- type/API gate
+- public API review
+- model / mapping audit
 - profile compatibility
 - operational docs
 - diagnostics
 - unresolved S1なし
 - backend rollback rehearsal
 
-## 17. application boundary
+## 18. application boundary
 
 優先順:
 
@@ -488,7 +515,7 @@ model/reportingごとに判定。
 
 PyO3 bindingを最初に作らない。Bluetooth ownership、shutdown、callback thread、wheel packagingが追加問題になる。
 
-## 18. configuration単位
+## 19. configuration単位
 
 ```toml
 controller = "pro"
@@ -500,7 +527,7 @@ tap_duration_ms = 80
 
 controller/reporting文字列を入口でmarker typeへ分岐する。同じfieldにsecondsとmillisecondsを混在させない。
 
-## 19. backend rollback
+## 20. backend rollback
 
 ```toml
 controller_backend = "python" # or "rust"
@@ -523,13 +550,13 @@ checklist:
 
 libraryはprofileの自動複製・復元を行わない。
 
-## 20. 移行完了判定
+## 21. 移行完了判定
 
 完了:
 
-- L0-L6
-- UI type tests
+- L0-L7
 - target hardware evidence
+- model / mapping audit
 - profile create ordering / data safety
 - error / diagnostics mapping
 - workload soak
@@ -546,7 +573,9 @@ libraryはprofileの自動複製・復元を行わない。
 - profileをparseしただけ
 - Bumble README capabilityだけ
 
-## 21. Python基準断面の将来更新
+ここでいう「compile successだけ」はBluetooth、protocol、profile互換の証拠にならないという意味である。型制約について別途compile-fail証拠を要求する意味ではない。
+
+## 22. Python基準断面の将来更新
 
 1. v0.6.0 baseline milestone完了
 2. new release diff分類
@@ -556,4 +585,26 @@ libraryはprofileの自動複製・復元を行わない。
 6. Rust APIへ取り込むか明示決定
 7. old fixtureを削除しない
 
-新しいPython機能がmodel固有能力を増やす場合、共通`Button`へ追加するだけで終えず、model宣言、`Button<M>`、UI test、wire mapping、migration表を同じ変更で更新する。
+新しいPython機能がmodel固有能力を増やす場合、共通`Button`へ追加するだけで終えず、model宣言、`Button<M>`、wire mapping、migration表を同じ変更で更新する。
+
+## 23. 移行記録
+
+hardware / profile cutoverごとに、秘密情報を除いて次を記録する。
+
+```text
+date
+application
+controller model
+reporting mode
+old backend version
+new swbt-rs commit
+Bumble revision
+OS / adapter / driver / console firmware
+profile source hash
+fresh pairing or reconnect
+test result
+backend rollback result
+known limitations
+```
+
+link key、full profile、raw sensitive packetを含めない。
