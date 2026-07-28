@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::model::ButtonKind;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProtocolError {
     SpiReadTooLarge {
@@ -18,6 +20,13 @@ pub(crate) enum ProtocolError {
         report_id: u8,
         minimum: usize,
         actual: usize,
+    },
+    SubcommandReplyDataTooLarge {
+        size: usize,
+        maximum: usize,
+    },
+    UnsupportedTriggerElapsedButton {
+        button: ButtonKind,
     },
 }
 
@@ -55,6 +64,13 @@ impl fmt::Display for ProtocolError {
                 formatter,
                 "output report 0x{report_id:02x} needs {minimum} bytes, got {actual}"
             ),
+            Self::SubcommandReplyDataTooLarge { size, maximum } => write!(
+                formatter,
+                "subcommand reply data must be {maximum} bytes or less: {size}"
+            ),
+            Self::UnsupportedTriggerElapsedButton { button } => {
+                write!(formatter, "unsupported trigger elapsed button: {button:?}")
+            }
         }
     }
 }
