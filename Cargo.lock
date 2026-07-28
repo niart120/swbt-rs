@@ -89,6 +89,7 @@ name = "swbt-rs"
 version = "0.1.0"
 dependencies = [
  "bumble",
+ "serde_json",
 ]
 
 [[package]]

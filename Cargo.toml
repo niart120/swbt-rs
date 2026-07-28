@@ -14,3 +14,6 @@ path = "src/lib.rs"
 
 [dependencies]
 bumble = { git = "https://github.com/chaitanyarahalkar/bumble-rs", rev = "bbac2a6803b8cab0920ab725a23aa408fc4fed85" }
+
+[dev-dependencies]
+serde_json = "1"

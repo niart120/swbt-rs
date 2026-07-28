@@ -1,0 +1,1161 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "normalized": [
+          {
+            "raw": [
+              0,
+              0
+            ],
+            "value": -1.0
+          },
+          {
+            "raw": [
+              1024,
+              1024
+            ],
+            "value": -0.5
+          },
+          {
+            "raw": [
+              2048,
+              2048
+            ],
+            "value": 0.0
+          },
+          {
+            "raw": [
+              3072,
+              3072
+            ],
+            "value": 0.5
+          },
+          {
+            "raw": [
+              4095,
+              4095
+            ],
+            "value": 1.0
+          }
+        ],
+        "outcome": "values"
+      },
+      "id": "conversion.stick.normalized",
+      "input": {
+        "values": [
+          -1.0,
+          -0.5,
+          0.0,
+          0.5,
+          1.0
+        ]
+      },
+      "kind": "conversion",
+      "model": "model-independent"
+    },
+    {
+      "expected": {
+        "accel_raw": [
+          4096,
+          -2048,
+          16384
+        ],
+        "gyro_raw": [
+          100,
+          -200,
+          1
+        ],
+        "outcome": "values"
+      },
+      "id": "conversion.imu.physical_scale",
+      "input": {
+        "accel_g": [
+          1.0,
+          -0.5,
+          4.0
+        ],
+        "gyro_dps": [
+          7.0,
+          -14.0,
+          0.07
+        ]
+      },
+      "kind": "conversion",
+      "model": "model-independent"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "battery_connection": 128,
+          "button_hex": "000000",
+          "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+          "left_stick_hex": "000880",
+          "report_id": 48,
+          "right_stick_hex": "000880",
+          "timer": 0,
+          "vibrator": 0
+        },
+        "hex": "30008000000000088000088000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.pro.neutral",
+      "input": {
+        "buttons": [],
+        "imu": "neutral",
+        "sticks": "neutral",
+        "timer": 0
+      },
+      "kind": "input_report",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "button_hex": "cf3fcf"
+        },
+        "hex": "304280cf3fcf00088000088000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.pro.all_buttons",
+      "input": {
+        "buttons": [
+          "A",
+          "B",
+          "CAPTURE",
+          "DPAD_DOWN",
+          "DPAD_LEFT",
+          "DPAD_RIGHT",
+          "DPAD_UP",
+          "HOME",
+          "L",
+          "LEFT_STICK",
+          "MINUS",
+          "PLUS",
+          "R",
+          "RIGHT_STICK",
+          "X",
+          "Y",
+          "ZL",
+          "ZR"
+        ],
+        "timer": 66
+      },
+      "kind": "input_report",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "battery_connection": 128,
+          "button_hex": "000000",
+          "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+          "left_stick_hex": "000880",
+          "report_id": 48,
+          "right_stick_hex": "000880",
+          "timer": 0,
+          "vibrator": 0
+        },
+        "hex": "30008000000000088000088000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.joycon_l.neutral",
+      "input": {
+        "buttons": [],
+        "imu": "neutral",
+        "sticks": "neutral",
+        "timer": 0
+      },
+      "kind": "input_report",
+      "model": "joycon_l"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "button_hex": "0029ff"
+        },
+        "hex": "3042800029ff00088000088000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.joycon_l.all_buttons",
+      "input": {
+        "buttons": [
+          "CAPTURE",
+          "DPAD_DOWN",
+          "DPAD_LEFT",
+          "DPAD_RIGHT",
+          "DPAD_UP",
+          "L",
+          "LEFT_STICK",
+          "MINUS",
+          "SL",
+          "SR",
+          "ZL"
+        ],
+        "timer": 66
+      },
+      "kind": "input_report",
+      "model": "joycon_l"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "battery_connection": 128,
+          "button_hex": "000000",
+          "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+          "left_stick_hex": "000880",
+          "report_id": 48,
+          "right_stick_hex": "000880",
+          "timer": 0,
+          "vibrator": 0
+        },
+        "hex": "30008000000000088000088000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.joycon_r.neutral",
+      "input": {
+        "buttons": [],
+        "imu": "neutral",
+        "sticks": "neutral",
+        "timer": 0
+      },
+      "kind": "input_report",
+      "model": "joycon_r"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "button_hex": "ff1600"
+        },
+        "hex": "304280ff160000088000088000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.joycon_r.all_buttons",
+      "input": {
+        "buttons": [
+          "A",
+          "B",
+          "HOME",
+          "PLUS",
+          "R",
+          "RIGHT_STICK",
+          "SL",
+          "SR",
+          "X",
+          "Y",
+          "ZR"
+        ],
+        "timer": 66
+      },
+      "kind": "input_report",
+      "model": "joycon_r"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "left_stick_hex": "23c1ab",
+          "right_stick_hex": "ff0f00"
+        },
+        "hex": "30008000000023c1abff0f0000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.pro.custom_sticks",
+      "input": {
+        "left": [
+          291,
+          2748
+        ],
+        "right": [
+          4095,
+          0
+        ]
+      },
+      "kind": "input_report",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "imu_hex": "0100feff0300fcff0500faff0700f8ff0900f6ff0b00f4ff0d00f2ff0f00f0ff1100eeff"
+        },
+        "hex": "300080000000000880000880000100feff0300fcff0500faff0700f8ff0900f6ff0b00f4ff0d00f2ff0f00f0ff1100eeff",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.pro.standard_imu",
+      "input": {
+        "frames": [
+          [
+            1,
+            -2,
+            3,
+            -4,
+            5,
+            -6
+          ],
+          [
+            7,
+            -8,
+            9,
+            -10,
+            11,
+            -12
+          ],
+          [
+            13,
+            -14,
+            15,
+            -16,
+            17,
+            -18
+          ]
+        ],
+        "imu_mode": 1
+      },
+      "kind": "input_report",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "imu_hex": "0100020003000e0000000080040005000600574b0200000007000800090000000000f40d"
+        },
+        "hex": "300080000000000880000880000100020003000e0000000080040005000600574b0200000007000800090000000000f40d",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.pro.quaternion_mode_02",
+      "input": {
+        "frames": [
+          [
+            1,
+            2,
+            3,
+            0,
+            0,
+            1000
+          ],
+          [
+            4,
+            5,
+            6,
+            0,
+            0,
+            1000
+          ],
+          [
+            7,
+            8,
+            9,
+            0,
+            0,
+            1000
+          ]
+        ],
+        "imu_mode": 2,
+        "now_ns": 1000000000,
+        "previous_report_ns": 0
+      },
+      "kind": "input_report",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "imu_hex": "0100020003000e0000000080040005000600574b0200000007000800090000000000f40d"
+        },
+        "hex": "300080000000000880000880000100020003000e0000000080040005000600574b0200000007000800090000000000f40d",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.pro.quaternion_mode_03",
+      "input": {
+        "frames": [
+          [
+            1,
+            2,
+            3,
+            0,
+            0,
+            1000
+          ],
+          [
+            4,
+            5,
+            6,
+            0,
+            0,
+            1000
+          ],
+          [
+            7,
+            8,
+            9,
+            0,
+            0,
+            1000
+          ]
+        ],
+        "imu_mode": 3,
+        "now_ns": 1000000000,
+        "previous_report_ns": 0
+      },
+      "kind": "input_report",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "imu_hex": "0100020003000e0000000080040005000600574b0200000007000800090000000000f40d"
+        },
+        "hex": "300080000000000880000880000100020003000e0000000080040005000600574b0200000007000800090000000000f40d",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.pro.quaternion_mode_04",
+      "input": {
+        "frames": [
+          [
+            1,
+            2,
+            3,
+            0,
+            0,
+            1000
+          ],
+          [
+            4,
+            5,
+            6,
+            0,
+            0,
+            1000
+          ],
+          [
+            7,
+            8,
+            9,
+            0,
+            0,
+            1000
+          ]
+        ],
+        "imu_mode": 4,
+        "now_ns": 1000000000,
+        "previous_report_ns": 0
+      },
+      "kind": "input_report",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "imu_hex": "0100020003000e0000000080040005000600574b0200000007000800090000000000f40d"
+        },
+        "hex": "300080000000000880000880000100020003000e0000000080040005000600574b0200000007000800090000000000f40d",
+        "length": 49,
+        "outcome": "bytes"
+      },
+      "id": "input.pro.quaternion_mode_05",
+      "input": {
+        "frames": [
+          [
+            1,
+            2,
+            3,
+            0,
+            0,
+            1000
+          ],
+          [
+            4,
+            5,
+            6,
+            0,
+            0,
+            1000
+          ],
+          [
+            7,
+            8,
+            9,
+            0,
+            0,
+            1000
+          ]
+        ],
+        "imu_mode": 5,
+        "now_ns": 1000000000,
+        "previous_report_ns": 0
+      },
+      "kind": "input_report",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "outcome": "parsed",
+        "packet_id": 171,
+        "payload_hex": "30",
+        "report_id": 1,
+        "rumble_hex": "0001404000014040",
+        "subcommand_id": 3
+      },
+      "id": "output.valid_01",
+      "input": {
+        "raw_hex": "01ab00014040000140400330"
+      },
+      "kind": "output_report",
+      "model": "model-independent"
+    },
+    {
+      "expected": {
+        "outcome": "parsed",
+        "packet_id": 42,
+        "payload_hex": "",
+        "report_id": 16,
+        "rumble_hex": "0001404000014040",
+        "subcommand_id": null
+      },
+      "id": "output.valid_10",
+      "input": {
+        "raw_hex": "102a0001404000014040"
+      },
+      "kind": "output_report",
+      "model": "model-independent"
+    },
+    {
+      "expected": {
+        "error_type": "ProtocolError",
+        "outcome": "error"
+      },
+      "id": "output.error.empty",
+      "input": {
+        "raw_hex": ""
+      },
+      "kind": "output_report",
+      "model": "model-independent"
+    },
+    {
+      "expected": {
+        "error_type": "ProtocolError",
+        "outcome": "error"
+      },
+      "id": "output.error.unknown",
+      "input": {
+        "raw_hex": "99"
+      },
+      "kind": "output_report",
+      "model": "model-independent"
+    },
+    {
+      "expected": {
+        "error_type": "ProtocolError",
+        "outcome": "error"
+      },
+      "id": "output.error.truncated_01",
+      "input": {
+        "raw_hex": "01ab0001404000014040"
+      },
+      "kind": "output_report",
+      "model": "model-independent"
+    },
+    {
+      "expected": {
+        "error_type": "ProtocolError",
+        "outcome": "error"
+      },
+      "id": "output.error.truncated_10",
+      "input": {
+        "raw_hex": "102a00014040000140"
+      },
+      "kind": "output_report",
+      "model": "model-independent"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "03",
+        "length": 1,
+        "outcome": "bytes"
+      },
+      "id": "spi.pro.device_type",
+      "input": {
+        "address": 24594,
+        "size": 1
+      },
+      "kind": "spi",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "0000000000000040004000400000000000003b343b343b34",
+        "length": 24,
+        "outcome": "bytes"
+      },
+      "id": "spi.pro.calibration",
+      "input": {
+        "address": 24608,
+        "size": 24
+      },
+      "kind": "spi",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "323232ffffff00b2ffff3b30",
+        "length": 12,
+        "outcome": "bytes"
+      },
+      "id": "spi.pro.colors",
+      "input": {
+        "address": 24656,
+        "size": 12
+      },
+      "kind": "spi",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "ffff",
+        "length": 2,
+        "outcome": "bytes"
+      },
+      "id": "spi.pro.erased",
+      "input": {
+        "address": 458752,
+        "size": 2
+      },
+      "kind": "spi",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "01",
+        "length": 1,
+        "outcome": "bytes"
+      },
+      "id": "spi.joycon_l.device_type",
+      "input": {
+        "address": 24594,
+        "size": 1
+      },
+      "kind": "spi",
+      "model": "joycon_l"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "0000000000000040004000400000000000003b343b343b34",
+        "length": 24,
+        "outcome": "bytes"
+      },
+      "id": "spi.joycon_l.calibration",
+      "input": {
+        "address": 24608,
+        "size": 24
+      },
+      "kind": "spi",
+      "model": "joycon_l"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "00b2ff32323200b2ff00b2ff",
+        "length": 12,
+        "outcome": "bytes"
+      },
+      "id": "spi.joycon_l.colors",
+      "input": {
+        "address": 24656,
+        "size": 12
+      },
+      "kind": "spi",
+      "model": "joycon_l"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "ffff",
+        "length": 2,
+        "outcome": "bytes"
+      },
+      "id": "spi.joycon_l.erased",
+      "input": {
+        "address": 458752,
+        "size": 2
+      },
+      "kind": "spi",
+      "model": "joycon_l"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "02",
+        "length": 1,
+        "outcome": "bytes"
+      },
+      "id": "spi.joycon_r.device_type",
+      "input": {
+        "address": 24594,
+        "size": 1
+      },
+      "kind": "spi",
+      "model": "joycon_r"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "0000000000000040004000400000000000003b343b343b34",
+        "length": 24,
+        "outcome": "bytes"
+      },
+      "id": "spi.joycon_r.calibration",
+      "input": {
+        "address": 24608,
+        "size": 24
+      },
+      "kind": "spi",
+      "model": "joycon_r"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "ff3b30323232ff3b30ff3b30",
+        "length": 12,
+        "outcome": "bytes"
+      },
+      "id": "spi.joycon_r.colors",
+      "input": {
+        "address": 24656,
+        "size": 12
+      },
+      "kind": "spi",
+      "model": "joycon_r"
+    },
+    {
+      "expected": {
+        "decoded": {},
+        "hex": "ffff",
+        "length": 2,
+        "outcome": "bytes"
+      },
+      "id": "spi.joycon_r.erased",
+      "input": {
+        "address": 458752,
+        "size": 2
+      },
+      "kind": "spi",
+      "model": "joycon_r"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 130,
+          "data_hex": "04000302001bdcf99f7d03020000000000000000000000000000000000000000000000",
+          "reply_to": 2
+        },
+        "hex": "21008000000000088000088000820204000302001bdcf99f7d03020000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": null,
+          "report_mode_supported": false,
+          "unsupported_report_mode": null,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.pro.device_info",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "",
+        "subcommand_id": 2
+      },
+      "kind": "subcommand",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 130,
+          "data_hex": "04000102001bdcf99f7d01010000000000000000000000000000000000000000000000",
+          "reply_to": 2
+        },
+        "hex": "21008000000000088000088000820204000102001bdcf99f7d01010000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": null,
+          "report_mode_supported": false,
+          "unsupported_report_mode": null,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.joycon_l.device_info",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "",
+        "subcommand_id": 2
+      },
+      "kind": "subcommand",
+      "model": "joycon_l"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 130,
+          "data_hex": "04000202001bdcf99f7d01010000000000000000000000000000000000000000000000",
+          "reply_to": 2
+        },
+        "hex": "21008000000000088000088000820204000202001bdcf99f7d01010000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": null,
+          "report_mode_supported": false,
+          "unsupported_report_mode": null,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.joycon_r.device_info",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "",
+        "subcommand_id": 2
+      },
+      "kind": "subcommand",
+      "model": "joycon_r"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 128,
+          "data_hex": "0000000000000000000000000000000000000000000000000000000000000000000000",
+          "reply_to": 3
+        },
+        "hex": "2100800000000008800008800080030000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": 48,
+          "report_mode_supported": true,
+          "unsupported_report_mode": null,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.pro.report_mode",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "30",
+        "subcommand_id": 3
+      },
+      "kind": "subcommand",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 128,
+          "data_hex": "0000000000000000000000000000000000000000000000000000000000000000000000",
+          "reply_to": 3
+        },
+        "hex": "2100800000000008800008800080030000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": 63,
+          "report_mode_supported": false,
+          "unsupported_report_mode": 63,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.pro.unsupported_report_mode",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "3f",
+        "subcommand_id": 3
+      },
+      "kind": "subcommand",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 131,
+          "data_hex": "2c012c0100000000000000000000000000000000000000000000000000000000000000",
+          "reply_to": 4
+        },
+        "hex": "2100800000000008800008800083042c012c0100000000000000000000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": null,
+          "report_mode_supported": false,
+          "unsupported_report_mode": null,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.pro.trigger_elapsed",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "",
+        "subcommand_id": 4
+      },
+      "kind": "subcommand",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 131,
+          "data_hex": "00000000000000002c012c010000000000000000000000000000000000000000000000",
+          "reply_to": 4
+        },
+        "hex": "21008000000000088000088000830400000000000000002c012c010000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": null,
+          "report_mode_supported": false,
+          "unsupported_report_mode": null,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.joycon_l.trigger_elapsed",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "",
+        "subcommand_id": 4
+      },
+      "kind": "subcommand",
+      "model": "joycon_l"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 128,
+          "data_hex": "0000000000000000000000000000000000000000000000000000000000000000000000",
+          "reply_to": 8
+        },
+        "hex": "2100800000000008800008800080080000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": null,
+          "report_mode_supported": false,
+          "unsupported_report_mode": null,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.pro.simple_ack",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "",
+        "subcommand_id": 8
+      },
+      "kind": "subcommand",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 144,
+          "data_hex": "1260000001030000000000000000000000000000000000000000000000000000000000",
+          "reply_to": 16
+        },
+        "hex": "2100800000000008800008800090101260000001030000000000000000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": null,
+          "report_mode_supported": false,
+          "unsupported_report_mode": null,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.pro.spi_device_type",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "1260000001",
+        "subcommand_id": 16
+      },
+      "kind": "subcommand",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 160,
+          "data_hex": "0100ff0008001b0100000000000000000000000000000000000000000000000000c800",
+          "reply_to": 33
+        },
+        "hex": "21008000000000088000088000a0210100ff0008001b0100000000000000000000000000000000000000000000000000c800",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": null,
+          "report_mode_supported": false,
+          "unsupported_report_mode": null,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.pro.mcu_config",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "01",
+        "subcommand_id": 33
+      },
+      "kind": "subcommand",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 128,
+          "data_hex": "0000000000000000000000000000000000000000000000000000000000000000000000",
+          "reply_to": 48
+        },
+        "hex": "2100800000000008800008800080300000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": 1,
+          "protocol_ready": false,
+          "report_mode": null,
+          "report_mode_supported": false,
+          "unsupported_report_mode": null,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.pro.player_lights",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "01",
+        "subcommand_id": 48
+      },
+      "kind": "subcommand",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 128,
+          "data_hex": "0000000000000000000000000000000000000000000000000000000000000000000000",
+          "reply_to": 64
+        },
+        "hex": "2100800000000008800008800080400000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 2,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": null,
+          "report_mode_supported": false,
+          "unsupported_report_mode": null,
+          "vibration_enabled": false
+        }
+      },
+      "id": "subcommand.pro.imu_mode",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "02",
+        "subcommand_id": 64
+      },
+      "kind": "subcommand",
+      "model": "pro"
+    },
+    {
+      "expected": {
+        "decoded": {
+          "ack": 128,
+          "data_hex": "0000000000000000000000000000000000000000000000000000000000000000000000",
+          "reply_to": 72
+        },
+        "hex": "2100800000000008800008800080480000000000000000000000000000000000000000000000000000000000000000000000",
+        "length": 50,
+        "outcome": "bytes",
+        "session": {
+          "imu_mode": 0,
+          "player_lights": null,
+          "protocol_ready": false,
+          "report_mode": null,
+          "report_mode_supported": false,
+          "unsupported_report_mode": null,
+          "vibration_enabled": true
+        }
+      },
+      "id": "subcommand.pro.vibration",
+      "input": {
+        "bluetooth_address_hex": "001bdcf99f7d",
+        "payload_hex": "01",
+        "subcommand_id": 72
+      },
+      "kind": "subcommand",
+      "model": "pro"
+    }
+  ],
+  "format": "swbt.protocol-fixtures",
+  "generator": "tools/generate_python_fixtures.py",
+  "python_version": "3.13",
+  "schema_version": 1,
+  "source_commit": "84d2723b127f70fc78e12f4496f5c40af0ccfb0a",
+  "source_paths": [
+    "src/swbt/input.py",
+    "src/swbt/imu.py",
+    "src/swbt/protocol/buttons.py",
+    "src/swbt/protocol/imu_report.py",
+    "src/swbt/protocol/input_report.py",
+    "src/swbt/protocol/output_report.py",
+    "src/swbt/protocol/profiles/base.py",
+    "src/swbt/protocol/profiles/joycon.py",
+    "src/swbt/protocol/profiles/pro_controller.py",
+    "src/swbt/protocol/session.py",
+    "src/swbt/protocol/spi.py",
+    "src/swbt/protocol/subcommand.py"
+  ],
+  "source_repository": "https://github.com/niart120/swbt-python",
+  "source_tree": "ee0654eac1d443e7814eb9816bd9d75328ff8485",
+  "source_version": "0.6.0"
+}

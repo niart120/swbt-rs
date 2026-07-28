@@ -129,7 +129,7 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | 固定 SHA 以外から fixture を生成せず、全 fixture が repository、commit、generator、model、semantic input、expected result を持つ | characterization | fixture | Python は再生成時だけ必要 |
+| refactor-skipped | 固定 SHA 以外から fixture を生成せず、全 fixture が repository、commit、generator、model、semantic input、expected result を持つ | characterization | fixture | red: fixture 不在で compile 失敗。green: 45 cases、audit 2 passed。再生成前後の SHA-256 一致。追加の構造変更なし |
 | todo | `Rgb24` が 24-bit 境界を保証し、`ControllerColors` が 4 色を RGB 順の 12 bytes にする | new | public value | model default は別項目 |
 | todo | IMU の `0.070 dps/raw` と `1/4096 G/raw` が ties-to-even、finite、i16 overflow 契約を守る | new | public value | f64 を使う |
 | todo | 各 `M::SPEC` が device info、default colors、校正、IMU modes、pairing trigger を一意に投影する | new | model | protocol profile は crate-private |
@@ -181,6 +181,8 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 
 | command | result | notes |
 |---|---|---|
+| `cargo test --test protocol_fixture_audit` | pass | red は fixture file 不在。green は provenance / case schema の 2 passed |
+| Python 3.13 generator の連続実行と SHA-256 比較 | pass | 45 cases。固定 checkout、clean、Bumble 非 import を generator 内でも検査 |
 | TDD item commands | not run | 各 item の red / green / refactor を追記する |
 | `cargo fmt --all --check` | not run | final gate |
 | `cargo +1.87 check --all-targets --all-features --locked` | not run | MSRV |
