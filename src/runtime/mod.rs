@@ -1,5 +1,6 @@
 pub(crate) mod connection;
 pub(crate) mod direct;
+pub(crate) mod lifecycle;
 pub(crate) mod output;
 pub(crate) mod periodic;
 pub(crate) mod scheduler;
