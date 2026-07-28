@@ -299,7 +299,7 @@ stale event、close race は Python fixture に入れず、Rust の deterministi
 
 | state | 振る舞い | test level | red / green / refactor evidence |
 |---|---|---|---|
-| planned | T01: Python 基準断面から runtime causal fixture を固定し、source provenance と case set を audit する | characterization | |
+| refactor-skipped | T01: Python 基準断面から runtime causal fixture を固定し、source provenance と case set を audit する | characterization | red: `cargo test --test runtime_fixture_audit --locked` は fixture 未作成の `include_str!` error。green: 同 command で 3 tests passed。固定 Python 3.13 / commit / tree を検査する生成器が production fake runtime を実行し、13 causal cases を生成。audit は case 分類、再生に必要な step、主要因果値を固定。接続後の bootstrap 受理を因果 gate にして task scheduling を期待値から除外。連続生成 SHA-256 `A50E11EF251B29A17F89C06E9C59640C9268D7F98B014A6D4ED21E3DFF72F118` 一致。生成器と audit の責務が分離済みのため refactor-skipped |
 | planned | T02: model 非依存 transport contract が open/send/poll/routing/wake/overflow/terminal error/repeated close を検査する | transport contract | |
 | planned | T03: connection-local observed subcommand set が重複を除き、protocol candidate commit と独立して reset できる | runtime unit | |
 | planned | T04: protocol facade が state/session/time から `0x30` bytes、next timer、next IMU state を返す | protocol unit | |
