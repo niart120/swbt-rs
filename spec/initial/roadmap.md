@@ -2,39 +2,40 @@
 
 - 状態: **決定**
 - 基準断面: [source-baseline.md](source-baseline.md)
+- 型関係: [type-modeling.md](type-modeling.md)
 - API: [api.md](api.md)
 - architecture: [architecture.md](architecture.md)
 - test gate: [testing.md](testing.md)
 
 この文書は実装順序と milestone ごとの exit criteria を定義する。日付ではなく依存関係と証拠で進捗を判定する。
 
-## 1. 実装原則
+## 1. 実装順序
 
 ```text
-M0 repository / dependency gate
+M0 repository / dependency / type-model foundation
   ↓
-M1 pure input + protocol parity
+M1 model-valid input + pure protocol parity
   ↓
-M2 runtime worker + fake transport
+M2 Controller<M, R> worker + fake transport
   ↓
 M3 Bumble external HCI bring-up
   ↓
 M4 virtual Classic SDP/HID integration
   ↓
-M5 Pro Controller fresh pairing + Periodic
+M5 Pro Periodic fresh pairing
   ↓
-M6 profile compatibility + reconnect + Direct
+M6 profile compatibility + reconnect + Pro Direct
   ↓
-M7 Joy-Con L/R
+M7 Joy-Con L/R Periodic + Direct
   ↓
 M8 IMU / diagnostics / probe
   ↓
 M9 portability / release
 ```
 
-実機依存の作業に入る前に、pure protocol と fake transport の failure semantics を固定する。Bumble integration の問題を NX protocol へ混ぜない。
+型モデルを後付けしない。M0で model / reporting / button / state の型関係とcompile-fail harnessを固定し、その後のprotocolとruntimeをtyped path上に実装する。
 
-各 milestone は `spec/wip/unit_連番/` で作業仕様を作り、完了後に `spec/complete/unit_連番/` へ移す。複数 milestone を一つの巨大 PR にまとめない。
+各milestoneは`spec/wip/unit_連番/`で作業仕様を作り、完了後に`spec/complete/unit_連番/`へ移す。複数milestoneを一つの巨大PRにまとめない。
 
 ## 2. release target
 
@@ -42,31 +43,32 @@ M9 portability / release
 
 対象:
 
-- Pro Controller
-- Periodic reporting
+- `Controller<model::Pro, reporting::Periodic>`
+- alias `ProController`
+- `ProButton` / `ProInputState`
 - adapter-default identity
 - fresh pairing
-- Windows 11 + CSR8510 A10 + WinUSB の限定構成
-- protocol / fake / virtual integration tests
-- hardware probe 手順
+- Windows 11 + CSR8510 A10 + WinUSB
+- UI / protocol / fake / virtual tests
 
 非対象:
 
-- reconnect の保証
-- Direct controller
+- reconnect保証
+- Direct
 - Joy-Con
 - explicit local address
-- Linux / macOS 保証
-- crates.io 公開
+- Linux / macOS保証
+- crates.io公開
 
 ### 2.2 `0.1.0-alpha.2`
 
 追加対象:
 
 - profile schema v2 read / write
+- `PairingProfile<model::Pro>`
 - stored link key reconnect
-- DirectProController
-- profile round-trip compatibility
+- `DirectProController`
+- profile round-trip
 - structured diagnostics
 - `swbt-probe`
 
@@ -74,99 +76,123 @@ M9 portability / release
 
 追加対象:
 
-- Joy-Con L/R の Periodic / Direct
+- Joy-Con L/R Periodic / Direct
+- model-specific button/state API
 - IMU public conversion / wire parity
 - limited Linux bring-up
 - dependency / license inventory
-- API review と semver freeze 候補
+- API reviewとsemver freeze候補
 
 ### 2.4 `0.1.0`
 
 必要条件:
 
-- required public API の docs と examples
+- required public API docsとexamples
 - MSRV / stable CI
+- UI compile-pass/fail gate
+- model declaration audit
 - Windows supported matrix
 - profile update interruption test
-- no unresolved severity-high protocol / cleanup defect
-- license 決定
-- release checklist と reproducible build metadata
-- unsupported platform / feature の明記
+- severity-high protocol / cleanup defectなし
+- license決定
+- reproducible build metadata
+- unsupported platform / feature明記
 
-## 3. M0: repository と dependency gate
+## 3. M0: repository、dependency、type-model foundation
 
-### 3.1 作業
+### 3.1 repository
 
-- `src/lib.rs` を追加し library target 名を `swbt` にする
-- `src/main.rs` の placeholder binary を削除または後続 CLI 用に移動する
-- `rust-version = "1.87"` を設定
-- edition 2024 を維持
+- `src/lib.rs`を追加しlibrary target名を`swbt`にする
+- placeholder `src/main.rs`を削除または後続CLIへ移す
+- `rust-version = "1.87"`
+- edition 2024
 - `#![forbid(unsafe_code)]`
-- `Cargo.lock` を commit
-- Bumble crate を exact revision に固定
-- `serde`、`thiserror`、`tracing` 等の direct dependency 方針を決める
-- formatter / clippy / test / docs の GitHub Actions を追加
-- MSRV job を追加
-- Dependabot または Renovate が Bumble git rev を勝手に更新しないよう設定
-- license 方針を maintainer decision として記録
-- initial docs のリンク切れ / terminology check を CI に追加
+- `Cargo.lock`をcommit
+- Bumble crateをexact revisionに固定
+- fmt / clippy / test / docs / MSRV CI
+- license方針をmaintainer decisionとして記録
 
-### 3.2 exit criteria
+### 3.2 type model
+
+- `Controller<M, R>`
+- model marker: Pro / JoyConL / JoyConR
+- reporting marker: Periodic / Direct
+- `ControllerModel` / `ReportingMode` sealed trait
+- `ControllerKind` / `ReportingKind` runtime projection
+- model宣言の単一正本
+- `ButtonKind` explicit logical code
+- `Button<M>`と3つのbutton alias
+- `InputState<M>`と3つのstate alias
+- `Stick` / `ImuFrame`共通値型
+- `HasLeftStick` / `HasRightStick` / `HasDualSticks`
+- `ControllerBuilder<M, R>`
+- 6 controller alias
+- `trybuild` UI harness
+
+### 3.3 exit criteria
 
 - `cargo +1.87 check --all-targets`
-- current stable の `cargo fmt --check`
-- current stable の `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo test --all-targets`
-- `cargo doc --no-deps`
-- dependency source が単一 Bumble revision
-- default branch に placeholder `Hello, world!` が残っていない
-- library consumer の compile test がある
-- license 未決の場合、release job が明示的に無効
+- current stable fmt / clippy / test / doc
+- dependency sourceが単一Bumble revision
+- model宣言からkind、profile名、button集合、stick能力を一意に導出
+- `ProButton::A`と`JoyConRButton::A`がcompile-pass
+- `JoyConLButton::A`がcompile-fail
+- Pro buttonをJoy-Conへ渡すコードがcompile-fail
+- Direct `apply()`とPeriodic `send()`がcompile-fail
+- model違いの`InputState<M>`適用がcompile-fail
+- `ImuFrame`を全modelで共有できる
+- Direct builderに`report_period()`がない
+- placeholder `Hello, world!`がない
+- license未決ならrelease job無効
 
-### 3.3 risk gate
+### 3.4 stop condition
 
-`bumble-transport` の build が supported CI image で成立しない場合、NX 実装へ進まず、dependency feature / native toolchain を先に解決する。
+型制約をruntime validationだけへ戻さないと実装できない問題が見つかった場合、protocol実装へ進まず型モデル仕様を再検討する。
 
-## 4. M1: input model と pure protocol parity
+## 4. M1: model-valid inputとpure protocol parity
 
 ### 4.1 対象
 
-- `Button`
+- `ButtonKind` / `Button<M>`
+- `ButtonSet<M>`
 - `Stick`
-- `ImuFrame`
-- `InputState`
+- `ImuFrame` / `ImuSamples`
+- `InputState<M>`
 - `ControllerColors`
-- controller profiles
+- `ModelSpec`
 - `0x30` input report builder
-- `0x01` / `0x10` output report parser
+- `0x01` / `0x10` parser
 - subcommand responder
 - virtual SPI
-- report session state
+- protocol session state
 - IMU block encoder
 
 ### 4.2 作業
 
-- Python 基準断面から golden fixture generator を作る
-- fixture に source SHA、generator version、controller kind、input parameters を記録
-- neutral / button / stick / IMU report bytes を固定
-- output parser の valid / malformed corpus を作る
-- subcommand `0x02` / `0x03` / `0x04` / `0x08` / `0x10` / `0x21` / `0x30` / `0x40` / `0x48` を実装
-- SPI known range と out-of-range policy を固定
-- Joy-Con profile の unsupported input matrix を data として定義
-- protocol module が filesystem、thread、Bumble に依存しないことを test
-- Python fixture と Rust result の差分表示 tool を用意
+- Python基準断面からgolden fixture generator
+- fixtureにsource SHAとmodelを記録
+- Pro / Joy-Con L / Joy-Con Rのbutton集合を固定
+- `(ControllerKind, ButtonKind)` wire mapping table
+- `ButtonKind` discriminantとwire bitを分離
+- model-specific stick layout
+- neutral / button / stick / IMU report bytes
+- output parser valid / malformed corpus
+- subcommand `0x02` / `0x03` / `0x04` / `0x08` / `0x10` / `0x21` / `0x30` / `0x40` / `0x48`
+- SPI known range / out-of-range policy
+- protocol moduleがfilesystem、thread、Bumbleに依存しないことを検査
 
 ### 4.3 exit criteria
 
-- neutral `0x30` が 49 bytes
-- Python fixture と対象 report / reply が byte-for-byte 一致
-- Stick の全境界と normalized rounding が一致
-- IMU raw / physical unit conversion が tolerance 内で一致
-- malformed report で panic しない
-- property test で encode length / reserved field invariant が成立
-- protocol tests が Bumble dependency を link せず実行可能
-- Miri 対象 unit test が通る
-- source audit fixture が commit 済み
+- neutral `0x30`が49 bytes
+- Python fixtureとreport / replyがbyte-for-byte一致
+- supported model buttonすべてにwire mapping
+- unsupported model buttonを`Button<M>`へ変換できない
+- Stick境界とrounding一致
+- IMU変換一致
+- malformed reportでpanicしない
+- protocol testsがBumbleをlinkせず実行可能
+- Miri selected test通過
+- source audit fixture commit済み
 
 ### 4.4 非対象
 
@@ -174,59 +200,61 @@ M9 portability / release
 - USB
 - pairing
 - profile filesystem write
-- real-time periodic scheduling
+- realtime scheduler
 
-## 5. M2: runtime worker と fake transport
+## 5. M2: `Controller<M, R>` runtimeとfake transport
 
 ### 5.1 対象
 
-- concrete controller skeleton
-- sealed traits
-- worker command channel
+- generic controller / builder
+- `ControllerWorker<M, R>`
+- typed command channel
 - lifecycle state machine
-- state store
-- report sender
-- periodic scheduler
+- `InputStateStore<M>`
+- `ReportSender<M>`
+- reporting policy
+- Periodic scheduler
+- Direct transaction
 - handshake
 - fake `TransportPort`
 - deterministic clock
 
 ### 5.2 作業
 
-- `ProController` / `DirectProController` を fake transport 上で構築
-- `open` / `close` / reopen
+- 6 model×reporting組み合わせを共通harnessで構築
+- `PeriodicCommand<M>` / `DirectCommand<M>`分離
+- open / close / reopen
 - connection event injection
-- `0x21` reply と `0x30` の共通送信順
+- `0x21` replyと`0x30`の共通送信順
 - periodic deadline skip
 - direct acceptance transaction
 - tap cancellation / release failure
-- disconnect / stale session event
+- disconnect / stale session
 - worker panic propagation
-- bounded command queue / backpressure
-- close 中の command reject
-- status snapshot
-- `Drop` と explicit close の差を test
-- activity wait 方式の microbenchmark を作る
+- bounded queue / backpressure
+- status projectionを`M::KIND` / `R::KIND`から生成
+- activity wait microbenchmark
 
 ### 5.3 exit criteria
 
-- wall-clock sleep を使わず周期 test が決定的に通る
-- Periodic は state commit と send failure semantics が仕様通り
-- Direct は acceptance 前 failure で state を変更しない
-- reply が relevant input report に追い越されない
-- close neutral / no-neutral が両方 test 済み
-- fake disconnect 後に state と session が neutral reset
-- reopen で timer / IMU / readiness を引き継がない
-- queue overflow が bounded error
-- worker leak / thread leak test が通る
-- Loom を採用する場合、command/close race の model test が通る
+- wall-clock sleepなしで周期testが決定的
+- Periodic state commit semantics一致
+- Direct acceptance前failureでstate不変
+- replyがinputに追い越されない
+- close neutral / no-neutral test済み
+- disconnect後typed stateがneutral reset
+- reopenでtimer / IMU / readinessを引き継がない
+- queue overflowがbounded error
+- worker / thread leakなし
+- runtime coreでuntyped button vectorを使わない
+- runtime coreが毎操作`ControllerKind`をmatchしない
 
 ### 5.4 decision gate
 
-activity wait 実装を次の計測で決める。
+activity wait方式を次で選ぶ。
 
 - idle CPU
-- 8 ms period の p50 / p95 / p99 jitter
+- 8 ms p50 / p95 / p99 jitter
 - command response latency
 - HCI event response latency
 - shutdown latency
@@ -235,259 +263,244 @@ activity wait 実装を次の計測で決める。
 
 ### 6.1 対象
 
-- Bumble git dependency
 - adapter selector
-- no-open adapter discovery
+- no-open discovery
 - USB transport open / split
 - `ExternalHost`
 - `Device` initialization
-- adapter-only diagnostics
+- model-independent `TransportPort`
+- adapter diagnostics
 - close
 
-Switch 実機は不要。USB Bluetooth adapter は必要。
+Switch実機は不要。USB Bluetooth adapterは必要。
 
 ### 6.2 作業
 
-- `usb:0` selector
-- VID/PID / serial alias
+- `usb:0`、VID/PID、serial selector
 - no-open USB HCI classification
-- `open_split_transport`
-- controller reset / capability query
+- controller reset / capabilities
 - local address read
-- Classic capability check
+- Classic capability
 - permission / driver error mapping
-- reader termination と worker shutdown
+- reader terminationとworker shutdown
 - repeated open / close
-- transport failure injection where possible
-- transitive dependency size / build time measurement
-- `bumble-rs` API gap list を issue 単位で記録
+- dependency build time / size測定
+- `M::SPEC`からtransport configへのprojection test
 
 ### 6.3 exit criteria
 
-- Windows target adapter で 100 回 open / initialize / close を実行し resource leak がない
-- no-open discovery が device handle claim を残さない
-- invalid selector と permission error が区別される
-- local controller address と HCI version を trace できる
-- transport unplug を `TransportEnded` へ変換できる
-- worker が unplug 後に join する
-- MSRV build が Bumble を含めて通る
-- dependency license report が生成できる
+- Windows target adapterで100回open / initialize / close
+- no-open discoveryがhandle claimを残さない
+- invalid selectorとpermission errorを区別
+- local addressとHCI versionをtrace
+- unplugを`TransportEnded`へ変換
+- workerがunplug後join
+- MSRV buildがBumble込みで通る
+- dependency license report生成
 
 ### 6.4 upstream gate
 
-次のいずれかが必要なら、M4 前に上流 issue / PR を作る。
+次が不足する場合はM4前にupstream issue / PR。
 
-- activity receiver への access
-- external `Device` の accepted Classic channel API 不足
-- Classic discoverable / connectable policy 不足
-- key store trait との互換問題
-- USB close / cancellation 問題
+- activity receiver access
+- accepted Classic channel API
+- discoverable / connectable policy
+- key-store trait compatibility
+- USB close / cancellation
 
 ## 7. M4: virtual Classic SDP/HID integration
 
 ### 7.1 対象
 
 - `bumble-controller::LocalLink`
-- two software controllers
-- Classic incoming connection
-- pairing
-- SDP PSM `0x0001`
+- Classic incoming connection / pairing
+- SDP `0x0001`
 - HID control `0x0011`
 - HID interrupt `0x0013`
 - `bumble_hid::DeviceRuntime`
 - `SwbtHidChannelBridge`
+- typed model protocol
 
 ### 7.2 作業
 
-- virtual peer を Nintendo Switch role の test driver として実装
-- inquiry / page / connection request
-- SSP event sequence
-- stored link key reconnect の基本 path
-- SDP service search / attribute request
-- HID control / interrupt channel open order variation
-- HIDP handshake / protocol / idle request
+- Switch roleのvirtual peer
+- SSP sequence
+- stored link key reconnect
+- model-specific SDP service record
+- HID channel open order variation
+- HIDP control request
 - NX output report injection
-- swbt input / reply receive
-- channel close / ACL disconnect
-- malformed HIDP / SDP request
-- MTU edge cases
-- simultaneous SDP and HID traffic fairness
+- typed input / reply receive
+- malformed HIDP / SDP
+- MTU edge
+- disconnect cleanup
 
 ### 7.3 exit criteria
 
-- physical adapter なしで pair → SDP → HID channels → NX handshake を通せる
-- control / interrupt の open order が逆でも両方揃うまで ready にしない
-- SDP continuation request が通る
-- HIDP control request に `DeviceRuntime` が正しく応答
-- invalid PSM / CID / message で panic しない
-- virtual disconnect で channel と session を cleanup
-- link key を再利用した virtual reconnect が通る
-- transport contract tests が fake と Bumble virtual の両実装で通る
+- physical adapterなしでpair→SDP→HID→NX handshake
+- channel open順が逆でも両方揃うまでreadyにしない
+- SDP continuation
+- HIDP request response
+- invalid messageでpanicしない
+- virtual reconnect
+- fakeとBumble virtualのtransport contract一致
+- 6 model×reporting組み合わせが共通suiteを通る
 
 ### 7.4 stop condition
 
-virtual integration を通せない状態で実機 packet を手作業 patch しない。Bumble adapter boundary または upstream gap を先に解決する。
+virtual integrationを通せない状態で実機packetを手作業patchしない。
 
-## 8. M5: Pro Controller fresh pairing と Periodic
+## 8. M5: Pro Periodic fresh pairing
 
 ### 8.1 対象環境
-
-初期 supported candidate:
 
 - Windows 11
 - CSR8510 A10
 - WinUSB
 - Nintendo Switch 2
 - firmware 22.1.0
-- `adapter-default` identity
-
-この構成以外は観測を記録できるが、M5 exit criteria には数えない。
+- adapter-default
+- `ProController`
 
 ### 8.2 作業
 
 - discoverable / connectable window
 - fresh pairing
-- Pro Controller SDP identity
-- HID channel accept
+- Pro SDP identity
+- HID channels
 - bootstrap neutral
-- observed subcommand sequence
-- `0x21` replies
-- protocol readiness
+- subcommand sequence / replies
+- readiness
 - 8 ms periodic input
-- A tap、L+R hold、sticks、neutral
-- close neutral と ACL drain
-- pairing failure trace
-- packet / event trace の redaction review
-- 20 回以上の clean pairing run
+- `ProButton::A`
+- L+R hold
+- dual sticks
+- IMU sample
+- close neutral / ACL drain
+- 20回以上のclean pairing
 
 ### 8.3 exit criteria
 
-- fresh pairing 成功率と失敗理由を記録
-- successful run で control / interrupt / subcommand / ready が trace 可能
-- A tap が Switch UI に反映
-- L+R が 500 ms 以上保持
-- left/right stick direction が反映
-- neutral 後に入力が残らない
-- close 後に adapter を再 open できる
-- 20 successful run 中、hang / leaked handle / stale input が 0
-- hardware evidence を date、OS build、dongle ID、driver、Switch firmware と共に保存
-- `0.1.0-alpha.1` の release note draft
+- fresh pairing成功率と失敗理由記録
+- control / interrupt / subcommand / ready trace
+- A tapがUI反映
+- L+Rを500 ms以上保持
+- left/right stick反映
+- neutral後入力残存なし
+- close後adapter再open
+- 20 successful run中hang / leaked handle / stale input 0
+- hardware metadata保存
+- alpha.1 release note draft
 
-### 8.4 非対象
+## 9. M6: profile compatibility、reconnect、Pro Direct
 
-- profile reconnect
-- Direct
-- Joy-Con
-- explicit local address
+### 9.1 profile
 
-## 9. M6: profile compatibility、reconnect、Direct
-
-### 9.1 profile compatibility
-
-- Python schema v2 parser
+- schema v2 raw DTO
+- `PairingProfile<model::Pro>`
 - Python fixture read
-- Rust write → Python read
-- Python write → Rust read
+- Rust write→Python read
 - key field preservation
 - atomic create / replace
 - lock contention
-- controller kind mismatch
-- adapter-default namespace resolution
-- multiple current peer rejection
+- model mismatch
+- adapter-default namespace
+- multiple peer rejection
 
 ### 9.2 reconnect
 
 - stored Classic link key
-- active reconnect / incoming bonded reconnect
-- no-bond result
+- active / incoming bonded reconnect
+- no-bond
 - timeout
 - stale / rejected bond
-- explicit re-pair path。bond を暗黙削除しない
-- reconnect failure 後の clean close
+- explicit re-pair
+- clean close
 
 ### 9.3 Direct
 
 - `DirectProController`
+- `ProInputState`
 - `send`
 - semantic helper transaction
-- tap press/release transaction
+- tap transaction
 - no periodic user input
 - close neutral exception
 - Periodic profile reuse
 
 ### 9.4 exit criteria
 
-- Python v0.6.0 profile fixture を Rust が lossless に read
-- Rust 作成 profile を Python v0.6.0 が read
-- same profile を Periodic / Direct が再利用
-- real hardware reconnect が複数 power cycle で成功
-- invalid bond を自動削除しない
-- Direct idle 中に periodic `0x30` がない
-- Direct send failure で snapshot が前 state
-- profile update interruption test で元 file または新 file のどちらかが valid
-- key material が log / panic output に出ない
-- `0.1.0-alpha.2` criteria を満たす
+- Python profileをtyped Rust profileがlossless read
+- Rust profileをPythonがread
+- Pro profileをPeriodic / Directで再利用
+- power cycle reconnect
+- invalid bondを暗黙削除しない
+- Direct idle中periodic `0x30`なし
+- Direct failureでsnapshotが前state
+- update interruptionで旧または新fileがvalid
+- key materialがlogへ出ない
+- alpha.2 criteria達成
 
 ## 10. M7: Joy-Con L/R
 
-### 10.1 対象
+### 10.1 型とprotocol
 
-- `JoyConL` / `JoyConR`
-- `DirectJoyConL` / `DirectJoyConR`
-- controller kind profile
-- device info / SPI / colors
-- SL / SR elapsed time
-- side-specific input validation
+- `JoyConLButton` / `JoyConRButton`
+- `JoyConLInputState` / `JoyConRInputState`
+- left-only / right-only stick capability
+- SL / SR
+- model-specific device info / SPI / colors
 - Periodic / Direct
-- fresh pairing / reconnect
 
 ### 10.2 作業順
 
-1. pure protocol fixtures
-2. fake runtime validation
-3. virtual Bluetooth
-4. Joy-Con L hardware
-5. Joy-Con R hardware
-6. profile reuse
-7. Direct
+1. UI compile-pass/fail
+2. pure protocol fixtures
+3. fake runtime
+4. virtual Bluetooth
+5. Joy-Con L hardware
+6. Joy-Con R hardware
+7. profile reuse
+8. Direct
 
 ### 10.3 exit criteria
 
-- unsupported button / stick を commit 前に拒否
-- Joy-Con L の D-pad / left stick / SL+SR
-- Joy-Con R の ABXY / right stick / SL+SR
-- controller kind mismatch を adapter open 前に拒否
-- colors の SPI bytes が Python fixture と一致
-- Periodic / Direct の readiness contract が Pro と同じ
-- left / right の evidence を別 run として記録
-- `JoyConPair` を暗黙追加していない
+- Joy-Con LにAが存在しない
+- Joy-Con RにD-padが存在しない
+- Joy-Con Lにright stick methodがない
+- Joy-Con Rにleft stick methodがない
+- Joy-Con L D-pad / left stick / SL+SR実機確認
+- Joy-Con R ABXY / right stick / SL+SR実機確認
+- model mismatchをadapter open前に拒否
+- colors SPI bytes一致
+- Periodic / Direct readiness一致
+- left / right evidenceを別runで保存
+- `JoyConPair`を追加していない
 
 ## 11. M8: IMU、diagnostics、probe
 
 ### 11.1 IMU
 
-- public physical unit conversion
+- common `ImuFrame` / `ImuSamples`
 - standard / quaternion mode
-- same-mode re-request epoch reset
+- same-mode re-request reset
 - ACK ordering
-- raw three-frame input
-- long-run state stability
-- trace redaction
+- long-run stability
+- model-specific encoder fixture
 
 ### 11.2 diagnostics
 
 - stable event names
 - `GamepadStatus`
+- `M::KIND` / `R::KIND` projection
 - environment snapshot
-- report accepted counters
+- accepted counters
 - disconnect reason
-- unsupported subcommand
-- packet trace opt-in policy
-- correlation / session id
+- unsupported dynamic button
+- session ID
+- redaction
 
-### 11.3 `swbt-probe`
-
-subcommand candidate:
+### 11.3 probe
 
 ```text
 swbt-probe adapters
@@ -498,26 +511,26 @@ swbt-probe profile inspect path
 swbt-probe profile verify path
 ```
 
-probe は public library の consumer とし、private transport API を直接使わない。adapter-only debug だけ例外にする場合は dedicated internal feature とする。
+CLIは`ControllerKind`をparseし、入口で`run::<M>()`へ分岐する。core操作をuntyped controllerへ戻さない。
 
 ### 11.4 exit criteria
 
-- IMU fixture parity
-- IMU mode transition ordering test
-- hardware trace で accepted mode を確認
-- trace に key / sensitive raw data がない
-- probe exit code と error category が文書化
-- JSONL schema sample が docs にある
-- profile inspect が key value を既定で redaction
-- `0.1.0-beta.1` criteria を満たす
+- common IMU API compile-pass
+- model別IMU fixture parity
+- ACK ordering
+- hardware traceでmode確認
+- key / sensitive data非出力
+- probe exit code / error category文書化
+- JSONL sample
+- beta.1 criteria達成
 
-## 12. M9: portability と release
+## 12. M9: portabilityとrelease
 
 ### 12.1 Windows
 
-- supported driver setup
+- driver setup
 - device claim / release
-- unplug behavior
+- unplug
 - package installation
 - release artifact
 - troubleshooting
@@ -525,26 +538,25 @@ probe は public library の consumer とし、private transport API を直接�
 ### 12.2 Linux
 
 - libusb permission / udev
-- kernel driver detach / reattach
+- driver detach / reattach
 - adapter open / close
 - virtual tests
 - hardware test
-- supported / experimental label の決定
+- supported / experimental label
 
 ### 12.3 macOS
 
-初期対象外。Bumble USB transport の実用性、permission、driver ownership を調査してから roadmap へ追加する。
+初期対象外。USB transport、permission、driver ownershipを調査後に追加する。
 
 ### 12.4 release engineering
 
-- public API review
-- rustdoc
+- public generic API review
+- alias rustdoc
+- compile-fail docs / UI tests
 - examples compile
 - `cargo package`
-- license files
-- SBOM / dependency licenses
-- changelog
-- semver policy
+- license / SBOM
+- changelog / semver
 - security contact
 - hardware matrix
 - known limitations
@@ -552,67 +564,49 @@ probe は public library の consumer とし、private transport API を直接�
 
 ### 12.5 exit criteria
 
-- `0.1.0` checklist 完了
-- supported matrix の各構成で fresh pairing と reconnect
-- clean install 手順を別 machine で再現
-- crate tarball に秘密 fixture / hardware trace がない
-- docs の全 command が current code で実行可能
-- release commit と Bumble revision が記録
-- application backend rollback procedure がある
+- `0.1.0` checklist完了
+- supported matrixでfresh pairing / reconnect
+- clean install再現
+- crateに秘密fixtureなし
+- docs commandがcurrent codeで実行可能
+- release commitとBumble revision記録
+- application backend rollback手順
 
 ## 13. explicit local address milestone
 
-M6 以降の独立 milestone とする。release 番号には直結させない。
+M6以降の独立milestone。完了までproduction supportは`UnsupportedCapability`。
 
-必要な成果:
-
-- adapter identity backend interface
-- CSR8510 A10 command / storage semantics の確認
+- adapter identity backend
+- CSR8510 A10 semantics
 - expected-address guard
 - partial failure recovery
 - power cycle test
-- profile namespace migration
-- duplicate address prevention guidance
-- Python profile interoperability
-- irreversible operation の明示
+- profile namespace compatibility
+- duplicate address guidance
 
-この milestone が完了するまで、API 型は存在しても production support は `UnsupportedCapability` とする。
-
-## 14. upstream contribution policy
-
-Bumble gap が見つかった場合、次の順で対応する。
-
-1. swbt transport contract test で必要挙動を固定
-2. minimal reproduction を Bumble 側 test として作る
-3. upstream issue / PR
-4. merge 前に必要なら temporary fork revision
-5. upstream merge 後に official revision へ戻す
-6. fork-only code と patch note を削除
-
-fork を無期限に保守する前提で architecture を組まない。
-
-## 15. issue 優先度
+## 14. issue優先度
 
 | severity | 条件 | 対応 |
 |---|---|---|
-| S0 | key 漏えい、adapter 永続破損、process 外への危険な副作用 | 開発停止、公開 artifact 無効化 |
-| S1 | stale input、close hang、pairing key loss、profile corruption | 対象 milestone blocker |
-| S2 | reconnect failure、unsupported subcommand、high jitter | release blocker または明示制限 |
-| S3 | diagnostics 欠落、ergonomics、build size | roadmap で管理 |
+| S0 | key漏えい、adapter永続破損、危険な副作用 | 開発停止、artifact無効化 |
+| S1 | stale input、close hang、key loss、profile corruption、型保証の抜け道 | milestone blocker |
+| S2 | reconnect failure、unsupported subcommand、high jitter | release blockerまたは制限 |
+| S3 | diagnostics、ergonomics、build size | roadmap管理 |
 | S4 | cosmetic docs / naming | 通常修正 |
 
-## 16. progress evidence
+## 15. progress evidence
 
-milestone 完了 PR には次を含める。
+milestone完了PRに含める。
 
-- 対象仕様へのリンク
-- 実装範囲 / 非範囲
-- test command と結果
+- 対象仕様
+- scope / non-goals
+- test command / result
+- UI compile-pass/fail result
+- model declaration audit
 - fixture provenance
-- hardware を使った場合の matrix row
+- hardware matrix row
 - 未検証事項
-- rollback / cleanup
-- Bumble revision と upstream issue
-- `dev-journal/YYYY-MM-DD.md` の判断記録
+- cleanup / backend rollback
+- Bumble revision / upstream issue
 
-「コードが compile する」だけを Bluetooth / protocol milestone の完了条件にしない。
+「コードがcompileする」だけで型能力、Bluetooth、protocol milestoneを完了扱いにしない。
