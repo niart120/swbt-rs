@@ -86,12 +86,19 @@ M2 の `create_profile()` 成功は crate-private fake backend に対する orch
 - air delivery、completed packet、Switch UI 反映は成功条件に含めない。
 - fake transport は accepted、rejected、accepted-then-disconnect を別の script outcome として表す。
 - `close()` は冪等。send rejection 後も cleanup を試みる。
-- send before open は `TransportClosed`、repeated open は success とする。
+- send / poll / fake event injection は open 前と close 後に `TransportErrorKind::Closed` を返す。
+  repeated open は最初の notifier を保持して success とする。
 - control / interrupt input は model 非依存 event として別 channel identity を保つが、同じ
   runtime output handler へ渡す。
-- event queue は bounded とし、terminal source error と queue overflow を構造化して返す。
+- event queue は bounded とする。source termination より前に受信した event は FIFO 順で
+  返してから `SourceTerminated` を返す。event 欠落が発生した queue overflow は
+  `EventQueueOverflow` を即時かつ継続して返す。
+- terminal 後の send / disconnect / fake event injection は同じ terminal error を返す。
+  `close()` は terminal 後も実行できる。
 - port は worker の coalescing wake notifier を登録できる。別 thread は wake だけを送り、
-  transport object と event queue の drain は worker が単独所有する。
+  transport object と event queue の drain は worker が単独所有する。worker は 1 回の wake
+  で `poll(Duration::ZERO)` が空になるまで有限 batch を繰り返し、次の activity で再度 wake
+  される。
 - `poll(Duration::ZERO)` は block せず、current queued event を有限 batch で返す。
 - transport error の `Debug` / `Display` に pairing key や profile 全文を含めない。
 
@@ -300,7 +307,7 @@ stale event、close race は Python fixture に入れず、Rust の deterministi
 | state | 振る舞い | test level | red / green / refactor evidence |
 |---|---|---|---|
 | refactor-skipped | T01: Python 基準断面から runtime causal fixture を固定し、source provenance と case set を audit する | characterization | red: `cargo test --test runtime_fixture_audit --locked` は fixture 未作成の `include_str!` error。green: 同 command で 3 tests passed。固定 Python 3.13 / commit / tree を検査する生成器が production fake runtime を実行し、13 causal cases を生成。audit は case 分類、再生に必要な step、主要因果値を固定。接続後の bootstrap 受理を因果 gate にして task scheduling を期待値から除外。連続生成 SHA-256 `A50E11EF251B29A17F89C06E9C59640C9268D7F98B014A6D4ED21E3DFF72F118` 一致。生成器と audit の責務が分離済みのため refactor-skipped |
-| planned | T02: model 非依存 transport contract が open/send/poll/routing/wake/overflow/terminal error/repeated close を検査する | transport contract | |
+| refactor-done | T02: model 非依存 transport contract が open/send/poll/routing/wake/overflow/terminal error/repeated close を検査する | transport contract | red: `cargo test --lib runtime::transport::tests --locked` は未定義 transport API の compile error。green: 同 command で 6 tests passed。refactor: lifecycle と notifier を同じ lock で管理して close と injection/send/termination を直列化。source termination 前の FIFO event、即時 sticky overflow、terminal 後の操作拒否と close、wake 後の有限 batch drain と再通知、sanitized source chain を明示 |
 | planned | T03: connection-local observed subcommand set が重複を除き、protocol candidate commit と独立して reset できる | runtime unit | |
 | planned | T04: protocol facade が state/session/time から `0x30` bytes、next timer、next IMU state を返す | protocol unit | |
 | planned | T05: `ReportSender<M>` が input/reply のtimer sequenceとacceptance後candidate commitを共有し、rejection後はcommitted stateを保ってretry時刻から再準備する | runtime unit | |
@@ -319,7 +326,7 @@ stale event、close race は Python fixture に入れず、Rust の deterministi
 | planned | T18: handshakeが両HID channel後にbootstrap neutralを送り、最初のsubcommandまでabsolute retryする | runtime unit | |
 | planned | T19: Readyがsame-sessionのaccepted report-mode/nonzero-lights replyとhandshake回収を要求し、rejection/zero-lights/disconnect/timeoutを回収して終了する | runtime integration | |
 | planned | T20: close/close-without-neutralがpending send、neutral、drain、disconnect、transport close、completion、joinの順とfailure継続を守る | runtime integration | |
-| planned | T21: worker coreがshutdownを優先し、bounded command batch、HCI/reply、due deadlineを飢餓なく処理する | worker unit | |
+| planned | T21: worker coreがshutdownを優先し、bounded command batch、HCI/reply、due deadlineを飢餓なく処理し、T02 transport の一時 `dead_code` 許可を削除する | worker unit | |
 | planned | T22: coalescing wakeがidle時にblockし、command/transport/shutdown通知または指定deadlineで一度だけ起床する | worker unit | |
 | planned | T23: full command queueがwall-clock waitなしで即時`Busy`を返す | worker integration | |
 | planned | T24: worker termination/panicがwaiting responseを`WorkerFailed`にし、completion後にjoinを回収する | worker integration | |

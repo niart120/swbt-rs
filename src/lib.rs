@@ -31,6 +31,7 @@ pub mod model;
 pub mod profile;
 mod protocol;
 pub mod reporting;
+mod runtime;
 
 pub use controller::{
     Controller, ControllerBuilder, DirectJoyConL, DirectJoyConR, DirectProController, JoyConL,

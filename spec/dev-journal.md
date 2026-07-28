@@ -134,3 +134,25 @@ Python runtime fixture には基準断面の観測も `baseline_observation` と
 case と混同しない。Periodic の未接続 `apply()` 自体は local snapshot へ commit するが、
 new connection の開始時に neutral reset が優先する。利用者へ見える README/rustdoc には
 session を越えて input state を持ち越さないことを書く。
+
+## 2026-07-29: M2 transport contract と worker 接続前 dead code
+
+### 現状
+
+T02 は `src/runtime/transport/` に crate-private の transport contract を追加する。fake contract
+test は open、send acceptance、non-blocking bounded poll、channel routing、coalescing wake、
+queue overflow、terminal source、close を検証する。production caller は T21 の worker core で
+接続する。
+
+### 観察
+
+transport module を `cfg(test)` にすると通常 build が contract を検査しない。通常 build に
+含めると、worker 接続前は module 全体が未参照になり、`-D warnings` の `dead_code` に失敗する。
+個々の型へ許可を散らすと、production caller 接続後も不要な型を見落としやすい。
+
+### 方針
+
+T02 から T21 までは transport module に限り、理由付き
+`cfg_attr(not(test), allow(dead_code))` を置く。test build では抑制せず、fake contract の未参照を
+隠さない。T21 で worker caller を接続した commit に属性削除を含め、通常 build と clippy で
+実参照を確認する。
