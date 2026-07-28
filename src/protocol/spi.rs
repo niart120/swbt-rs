@@ -1,8 +1,10 @@
 //! Read-only virtual SPI flash.
 
+use std::marker::PhantomData;
+
 use crate::{
-    model::{ModelProtocolSpec, SensorCalibration},
-    profile::{ControllerColors, ControllerKind},
+    model::{ControllerModel, SensorCalibration},
+    profile::ControllerColors,
 };
 
 use super::error::ProtocolError;
@@ -32,19 +34,17 @@ impl SpiRead {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct VirtualSpiFlash {
-    protocol: &'static ModelProtocolSpec,
+pub(crate) struct VirtualSpiFlash<M: ControllerModel> {
     colors: ControllerColors,
+    model: PhantomData<fn() -> M>,
 }
 
-impl VirtualSpiFlash {
+impl<M: ControllerModel> VirtualSpiFlash<M> {
     #[must_use]
-    pub(crate) fn new(model: ControllerKind, colors: Option<ControllerColors>) -> Self {
-        let protocol = model.spec().protocol;
+    pub(crate) fn new(colors: Option<ControllerColors>) -> Self {
         Self {
-            protocol,
-            colors: colors.unwrap_or(protocol.default_colors),
+            colors: colors.unwrap_or(M::SPEC.protocol.default_colors),
+            model: PhantomData,
         }
     }
 
@@ -71,18 +71,19 @@ impl VirtualSpiFlash {
     }
 
     fn byte_at(&self, address: u32) -> u8 {
+        let protocol = M::SPEC.protocol;
         match address {
-            DEVICE_TYPE_ADDRESS => self.protocol.device_type,
+            DEVICE_TYPE_ADDRESS => protocol.device_type,
             COLOR_INFO_EXISTS_ADDRESS => 0x01,
             FACTORY_ACCELEROMETER_CALIBRATION_ADDRESS..=FACTORY_ACCELEROMETER_CALIBRATION_END => {
                 calibration_byte(
-                    self.protocol.accelerometer_calibration,
+                    protocol.accelerometer_calibration,
                     address - FACTORY_ACCELEROMETER_CALIBRATION_ADDRESS,
                 )
             }
             FACTORY_GYROSCOPE_CALIBRATION_ADDRESS..=FACTORY_GYROSCOPE_CALIBRATION_END => {
                 calibration_byte(
-                    self.protocol.gyroscope_calibration,
+                    protocol.gyroscope_calibration,
                     address - FACTORY_GYROSCOPE_CALIBRATION_ADDRESS,
                 )
             }

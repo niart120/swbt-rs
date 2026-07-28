@@ -28,6 +28,10 @@ pub(crate) enum ProtocolError {
     UnsupportedTriggerElapsedButton {
         button: ButtonKind,
     },
+    TruncatedSpiReadRequest {
+        minimum: usize,
+        actual: usize,
+    },
 }
 
 impl fmt::Display for ProtocolError {
@@ -70,6 +74,9 @@ impl fmt::Display for ProtocolError {
             ),
             Self::UnsupportedTriggerElapsedButton { button } => {
                 write!(formatter, "unsupported trigger elapsed button: {button:?}")
+            }
+            Self::TruncatedSpiReadRequest { .. } => {
+                formatter.write_str("SPI read subcommand must include address and size")
             }
         }
     }

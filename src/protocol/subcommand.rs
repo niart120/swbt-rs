@@ -5,7 +5,12 @@ use crate::{
     model::{ButtonKind, ControllerModel},
 };
 
-use super::{error::ProtocolError, input_report::encode_0x30, output_report::SubcommandRequest};
+use super::{
+    error::ProtocolError,
+    input_report::encode_0x30,
+    output_report::SubcommandRequest,
+    spi::{MAX_READ_SIZE, VirtualSpiFlash},
+};
 
 const SUBCOMMAND_REPLY_SIZE: usize = 50;
 const SUBCOMMAND_REPLY_DATA_SIZE: usize = 35;
@@ -13,11 +18,14 @@ const SUBCOMMAND_REPLY_ID: u8 = 0x21;
 const DEVICE_INFO_SUBCOMMAND: u8 = 0x02;
 const TRIGGER_ELAPSED_SUBCOMMAND: u8 = 0x04;
 const SIMPLE_ACK_SUBCOMMAND: u8 = 0x08;
+const SPI_READ_SUBCOMMAND: u8 = 0x10;
 const MCU_CONFIG_SUBCOMMAND: u8 = 0x21;
 const DEVICE_INFO_ACK: u8 = 0x82;
 const TRIGGER_ELAPSED_ACK: u8 = 0x83;
 const SIMPLE_ACK: u8 = 0x80;
+const SPI_READ_ACK: u8 = 0x90;
 const MCU_CONFIG_ACK: u8 = 0xA0;
+const SPI_READ_REQUEST_SIZE: usize = 5;
 const DEVICE_INFO_FIRMWARE: [u8; 2] = [0x04, 0x00];
 const DEVICE_INFO_MARKER: u8 = 0x02;
 const TRIGGER_ELAPSED_TICKS: [u8; 2] = 300_u16.to_le_bytes();
@@ -82,6 +90,40 @@ pub(crate) fn try_prepare_stateless_reply<M: ControllerModel>(
         }
         _ => return Ok(None),
     };
+    Ok(Some(reply))
+}
+
+pub(crate) fn try_prepare_spi_reply<M: ControllerModel>(
+    request: SubcommandRequest<'_>,
+    state: &InputState<M>,
+    timer: u8,
+    spi: &VirtualSpiFlash<M>,
+) -> Result<Option<PreparedSubcommandReply>, ProtocolError> {
+    if request.id() != SPI_READ_SUBCOMMAND {
+        return Ok(None);
+    }
+    let payload = request.payload();
+    if payload.len() < SPI_READ_REQUEST_SIZE {
+        return Err(ProtocolError::TruncatedSpiReadRequest {
+            minimum: SPI_READ_REQUEST_SIZE,
+            actual: payload.len(),
+        });
+    }
+
+    let address = u32::from_le_bytes(payload[..4].try_into().expect("slice length was checked"));
+    let size = usize::from(payload[4]);
+    let read = spi.read(address, size)?;
+    let mut data = [0; SPI_READ_REQUEST_SIZE + MAX_READ_SIZE];
+    data[..SPI_READ_REQUEST_SIZE].copy_from_slice(&payload[..SPI_READ_REQUEST_SIZE]);
+    data[SPI_READ_REQUEST_SIZE..SPI_READ_REQUEST_SIZE + read.as_slice().len()]
+        .copy_from_slice(read.as_slice());
+    let reply = prepare_0x21(
+        request.id(),
+        SPI_READ_ACK,
+        &data[..SPI_READ_REQUEST_SIZE + read.as_slice().len()],
+        state,
+        timer,
+    )?;
     Ok(Some(reply))
 }
 
