@@ -1,11 +1,3 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T03 defines connection observations before T07 output integration"
-    )
-)]
-
 const BITS_PER_WORD: usize = u64::BITS as usize;
 const WORD_COUNT: usize = 256 / BITS_PER_WORD;
 
@@ -23,10 +15,24 @@ impl ObservedSubcommands {
     }
 
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T18 uses the empty observation state for handshake retry"
+        )
+    )]
     pub(crate) fn is_empty(&self) -> bool {
         self.words.iter().all(|word| *word == 0)
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T17 resets observations with each new connection session"
+        )
+    )]
     pub(crate) fn reset(&mut self) {
         *self = Self::default();
     }
