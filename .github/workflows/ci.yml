@@ -60,4 +60,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --doc --all-features --locked
       - run: cargo doc --no-deps --all-features --locked
