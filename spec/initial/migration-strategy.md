@@ -10,16 +10,14 @@
 
 ## 1. 移行目標
 
-移行成功条件:
-
 - 同じ controller model と入力から互換な NX HID bytes を生成する
 - 同じ output report に対し互換な reply と session transition を行う
-- Periodic / Direct の state commit 条件が一致する
+- Periodic / Direct の state commit 条件を一致させる
 - Python profile schema v2 を相互に読める
 - stored link key の意味を失わない
-- connection readiness と close neutral の契約が一致する
-- 実機で pairing / reconnect / input / cleanup が再現する
-- Python で実行時に拒否していたモデル不一致入力を、Rust では可能な限りコンパイル時に拒否する
+- connection readiness と close neutral の契約を一致させる
+- 実機で pairing / reconnect / input / cleanup を再現する
+- Python で実行時に拒否していた model mismatch を Rust では可能な限りコンパイル時に拒否する
 
 互換対象外:
 
@@ -37,13 +35,13 @@
 
 | level | 内容 | gate |
 |---|---|---|
-| L0 Source observation | Python断面とfixture provenance固定 | M1 |
+| L0 Source observation | Python断面とfixture provenance | M1 |
 | L1 Type/API model | model/reporting/input能力のcompile-pass/fail | M0-M1 |
-| L2 Pure protocol | report/parser/reply/SPI/conversion一致 | M1 |
-| L3 Runtime semantics | Periodic/Direct/readiness/cleanup一致 | M2 |
-| L4 Virtual Bluetooth | Classic/SDP/HID/pairing通過 | M4 |
+| L2 Pure protocol | report/parser/reply/SPI/conversion | M1 |
+| L3 Runtime semantics | Periodic/Direct/readiness/cleanup | M2 |
+| L4 Virtual Bluetooth | Classic/SDP/HID/pairing | M4 |
 | L5 Profile data | schema v2とkey fields相互読書き | M6 |
-| L6 Hardware behavior | target matrixでpairing/input/reconnect | M5-M8 |
+| L6 Hardware behavior | target matrix | M5-M8 |
 | L7 Operational cutover | docs/probe/monitoring/backend rollback | M9 |
 
 manual pairing 1回だけで移行完了にしない。
@@ -62,9 +60,9 @@ manual pairing 1回だけで移行完了にしない。
 | `PeriodicSwitchGamepad` ABC | `R = reporting::Periodic` |
 | `DirectSwitchGamepad` ABC | `R = reporting::Direct` |
 
-Rust の 6 名は独立 newtype ではなく alias である。
+6名は独立newtypeではなくaliasである。
 
-## 4. construction mapping
+## 4. existing profileのconstruction
 
 Python:
 
@@ -87,32 +85,88 @@ let mut pad = ProController::builder("usb:0")
 
 差:
 
-- Rust builder は `ControllerBuilder<model::Pro, reporting::Periodic>`
-- adapter open は `open()` まで行わない
-- existing profile は `PairingProfile<model::Pro>`として検証する
-- `report_period()` は Direct builder に存在しない
-- `ControllerKind` や reporting mode を値として指定しない
-- Rust controller は `Clone` しない
+- Rust builderは`ControllerBuilder<model::Pro, reporting::Periodic>`
+- `build()`はexisting profileだけを読む
+- nonexistent pathは`ProfileNotFound`
+- adapter openは`open()`まで行わない
+- profileは`PairingProfile<model::Pro>`として検証する
+- Direct builderに`report_period()`はない
+- `ControllerKind`やreporting modeを値で指定しない
+- Rust controllerは`Clone`しない
 
-## 5. model-specific button mapping
+`profile_path=None`はephemeral controllerであり、session内pairing keyだけを使う。
 
-Python は全モデルで共通 `Button` enum を使い、unsupported input を実行時に拒否する。
+## 5. new profile factory mapping
+
+Python:
+
+```python
+pad = await ProController.create_profile(
+    adapter="usb:0",
+    profile_path="profiles/pro.json",
+    pair_timeout=60.0,
+)
+```
+
+Rust:
+
+```rust
+let mut pad = ProController::builder("usb:0")
+    .profile_path("profiles/pro.json")
+    .create_profile(CreateProfileOptions {
+        identity: ProfileIdentity::AdapterDefault,
+        pair_timeout: Duration::from_secs(60),
+    })?;
+```
+
+Rustの`create_profile()`はcontroller methodではなく、typed builderを消費する複合操作である。
+
+順序:
+
+1. builder設定とtarget pathを検査
+2. `M::KIND`を持つvalid empty envelopeをcreate-new
+3. `PairingProfile<M>`として再読込
+4. controllerを構築
+5. adapter / workerをopen
+6. pairingとprotocol readiness
+7. Ready controllerを返す
+
+理由:
+
+- profile identityを永続化する前にadapterをpower onしない
+- controller kind mismatchをopen前に排除する
+- pairing failure後もvalid empty envelopeから明示retryできる
+- partial controller objectを利用者へ返さない
+
+path既存は`ProfileAlreadyExists`、path未指定は`ProfilePathRequired`。pairing失敗ではenvelopeを残し、内部controllerをcleanupする。
+
+既存empty profileからのretry:
+
+```rust
+let mut pad = ProController::builder("usb:0")
+    .profile_path("profiles/pro.json")
+    .build()?;
+pad.open()?;
+pad.pair(Duration::from_secs(60))?;
+```
+
+## 6. model-specific button mapping
+
+Pythonは全modelで共通`Button` enumを使い、unsupported inputを実行時に拒否する。
 
 ```python
 await pro.tap(Button.A)
 await right.tap(Button.A)
 ```
 
-Rust は同じ論理名でも model 付き型を使う。
+Rust:
 
 ```rust
 pro.tap([ProButton::A], Duration::from_millis(80))?;
 right.tap([JoyConRButton::A], Duration::from_millis(80))?;
 ```
 
-`ProButton::A` と `JoyConRButton::A` は内部で `ButtonKind::A` に対応するが、相互代入できない。Joy-Con L には `JoyConLButton::A` が存在しない。
-
-### 5.1 mapping table
+`ProButton::A`と`JoyConRButton::A`は内部で`ButtonKind::A`に対応するが型は別。`JoyConLButton::A`は存在しない。
 
 | Python `Button` | Pro | Joy-Con L | Joy-Con R |
 |---|---|---|---|
@@ -122,13 +176,13 @@ right.tap([JoyConRButton::A], Duration::from_millis(80))?;
 | Plus/Home | `ProButton::*` | 型として非公開 | `JoyConRButton::*` |
 | Minus/Capture | `ProButton::*` | `JoyConLButton::*` | 型として非公開 |
 | D-pad | `ProButton::*` | `JoyConLButton::*` | 型として非公開 |
-| LeftStick click | `ProButton::LEFT_STICK` | `JoyConLButton::LEFT_STICK` | 型として非公開 |
-| RightStick click | `ProButton::RIGHT_STICK` | 型として非公開 | `JoyConRButton::RIGHT_STICK` |
-| SL/SR | 型として非公開 | `JoyConLButton::SL/SR` | `JoyConRButton::SL/SR` |
+| LeftStick click | Pro | Joy-Con L | 型として非公開 |
+| RightStick click | Pro | 型として非公開 | Joy-Con R |
+| SL/SR | 型として非公開 | Joy-Con L | Joy-Con R |
 
-既存 application が button 名を設定ファイルから読む場合は、まず `ButtonKind` を parseし、選択済み model の `Button<M>::try_from()` を呼ぶ。unsupported input はこの動的境界で `UnsupportedInput` になる。
+button名を設定ファイルから読む場合は`ButtonKind`をparseし、選択済みmodelの`Button<M>::try_from()`を呼ぶ。
 
-## 6. input state mapping
+## 7. input state mapping
 
 Python:
 
@@ -153,51 +207,40 @@ let state = JoyConRInputState::neutral()
 right.apply(state)?;
 ```
 
-`InputState<model::Pro>` を Joy-Con controller へ渡せない。application 内で model を抽象化していた箇所は、model generic function にするか、動的入口で `ControllerKind` を分岐する。
+`InputState<model::Pro>`をJoy-Conへ渡せない。modelを抽象化する箇所はgeneric functionにするか、動的入口で`ControllerKind`を分岐する。
 
-## 7. common value mapping
-
-次はPython版と同じ概念をmodel非依存値として移す。
+## 8. common value mapping
 
 | Python | Rust | 備考 |
 |---|---|---|
 | `Stick` | `Stick` | 座標値は共通 |
 | `IMUFrame` | `ImuFrame` | 六軸センサー値は共通 |
-| 1 frame / 3 frames | `ImuSamples::Repeat` / `Frames` | invalid slice lengthをAPIから除去 |
+| 1 frame / 3 frames | `ImuSamples::Repeat` / `Frames` | invalid slice lengthを除去 |
 | `ControllerColors` | `ControllerColors` | model specがwire利用を決定 |
 | float seconds | `Duration` | 単位を型で明示 |
 
-### 7.1 stick API
-
-Pythonでは共通methodを呼び、unsupported sideを実行時に拒否する。
-
-Rustではmethod自体を能力で制限する。
+stick method:
 
 ```rust
 pro.left_stick(stick)?;
 pro.right_stick(stick)?;
 pro.sticks(left, right)?;
-
 left.left_stick(stick)?;
 right.right_stick(stick)?;
 ```
 
 Joy-Con Lの`right_stick()`、Joy-Con Rの`left_stick()`、片側Joy-Conの`sticks()`はコンパイル不能。
 
-### 7.2 IMU API
+IMU:
 
 ```rust
 pad.imu(ImuFrame::neutral())?;
-pad.imu([
-    frame0,
-    frame1,
-    frame2,
-])?;
+pad.imu([frame0, frame1, frame2])?;
 ```
 
-`ImuFrame`をmodelごとに分けない。wire packing差はprotocol encoderが`M::SPEC`から選ぶ。
+`ImuFrame`をmodelごとに分けない。wire packing差は`M::SPEC`から選ぶ。
 
-## 8. reporting semantics mapping
+## 9. reporting semantics mapping
 
 | Python | Rust |
 |---|---|
@@ -205,24 +248,23 @@ pad.imu([
 | Direct `send(state)` | `Controller<M, Direct>::send(InputState<M>)` |
 | Periodicに`send`なし | methodが存在しない |
 | Directに`apply`なし | methodが存在しない |
-| Periodic `report_period_us` | Periodic builderの`report_period(Duration)` |
-| Directにperiodなし | builder methodが存在しない |
+| `report_period_us` | Periodic builderの`report_period(Duration)` |
 
 Periodic:
 
-- local state commit後に成功
+- local state commit後成功
 - 未接続中もstate更新可能
-- next tickでlatest state送信
+- next tickでlatest state
 - send failureでrollbackしない
 
 Direct:
 
-- 接続済み必須
+- connected必須
 - transport acceptance後だけcommit
 - acceptance前failureでprevious state維持
 - user-input schedulerなし
 
-## 9. resource scope mapping
+## 10. resource scope mapping
 
 Python:
 
@@ -249,13 +291,14 @@ operation?;
 close?;
 ```
 
-Rust `Drop` にPython context managerと同じcleanup保証を持たせない。error pathでも明示`close()`結果を処理する。
+Rust`Drop`にPython context managerと同じcleanup保証を持たせない。
 
-## 10. connection mapping
+## 11. connection mapping
 
 | Python | Rust |
 |---|---|
 | `await open()` | `open()` |
+| classmethod `create_profile()` | builder `create_profile()` |
 | `await pair(timeout=...)` | `pair(Duration)` |
 | `await reconnect(timeout=...)` | `reconnect(Duration)` |
 | `await connect(...)` | `connect(ConnectOptions)` |
@@ -266,9 +309,7 @@ Rust `Drop` にPython context managerと同じcleanup保証を持たせない。
 
 正常接続はlink/HID channel openだけでなく、report mode、player lights、reply acceptance、handshake回収、Periodic holdoffを含むreadinessまで待つ。
 
-## 11. profile schema v2
-
-JSON envelopeはPython基準断面と互換にする。
+## 12. profile schema v2
 
 ```json
 {
@@ -284,19 +325,15 @@ JSON envelopeはPython基準断面と互換にする。
 }
 ```
 
-raw parserは`ControllerKind`を読む。typed controllerは次に変換する。
-
 ```text
 ProfileDocument { controller_kind: ControllerKind }
   ↓ compare with M::KIND
 PairingProfile<M>
 ```
 
-`PairingProfile<model::Pro>`をJoy-Con controllerへ渡すAPIは作らない。
+`PairingProfile<model::Pro>`をJoy-Conへ渡すAPIは作らない。
 
-### 11.1 key store
-
-保持field:
+key fields:
 
 - `address_type`
 - `ltk`
@@ -308,9 +345,9 @@ PairingProfile<M>
 - `link_key`
 - `link_key_type`
 
-unknown fieldを黙って捨てない。key materialをlogしない。
+unknown fieldを黙って捨てず、key materialをlogしない。
 
-### 11.2 write
+write:
 
 - UTF-8
 - two-space indent
@@ -322,11 +359,11 @@ unknown fieldを黙って捨てない。key materialをlogしない。
 - updateはatomic replace
 - concurrent writerはlockで拒否
 
-自動backup、世代管理、復元機能は実装しない。更新中断では更新前または更新後のvalid fileが残ることを保証する。
+自動backup、世代管理、復元機能は実装しない。更新中断では旧または新のvalid fileが残ることを保証する。
 
-## 12. dynamic application migration
+## 13. dynamic application migration
 
-controller modelが設定ファイルやCLIで決まるapplicationは、入口で一度だけ分岐する。
+modelが設定やCLIで決まるapplicationは入口で一度だけ分岐する。
 
 ```rust
 match kind {
@@ -336,35 +373,38 @@ match kind {
 }
 ```
 
-分岐後は`Button<M>`と`InputState<M>`を維持する。core application全体を`ControllerKind + ButtonKind + untyped state`で動かさない。
+分岐後は`Button<M>`と`InputState<M>`を維持する。core全体を`ControllerKind + ButtonKind + untyped state`へ戻さない。
 
-異なるmodelを同じcollectionへ格納する必要がある場合も、初期libraryに`AnyController`を追加せず、application側のenumで必要操作とfailure semanticsを明示する。
+異なるmodelを同じcollectionに置く必要がある場合も、初期libraryに`AnyController`を追加せずapplication側enumで必要操作を明示する。
 
-## 13. diagnostics mapping
+## 14. diagnostics mapping
 
 Python `DiagnosticsConfig` writerはRustでは`tracing` subscriberへ移す。
 
-`GamepadStatus`は次を含む。
+`GamepadStatus`:
 
 - lifecycle
 - connected
-- `controller_kind` (`M::KIND`から導出)
-- `reporting_kind` (`R::KIND`から導出)
+- `controller_kind` (`M::KIND`)
+- `reporting_kind` (`R::KIND`)
 - report mode
 - accepted counters
 - last subcommand
 - disconnect reason
 - worker failure
 
-model markerや`Button<M>`の型名だけに依存せず、運用ログにはruntime projectionを記録する。
+運用logにはruntime projectionを記録する。
 
-## 14. error mapping
+## 15. error mapping
 
 | Python | Rust `ErrorKind` |
 |---|---|
 | `AdapterDiscoveryError` | `AdapterDiscovery` |
 | `TransportOpenError` | `TransportOpen` |
 | `ClosedError` | `TransportClosed` |
+| new profile path未指定 | `ProfilePathRequired` |
+| existing profile path不存在 | `ProfileNotFound` |
+| create target existing | `ProfileAlreadyExists` |
 | `ConnectionTimeoutError` | `ConnectionTimeout` |
 | `ConnectionFailedError` | `ConnectionFailed` |
 | `InvalidInputError` | `InvalidInput` |
@@ -374,55 +414,45 @@ model markerや`Button<M>`の型名だけに依存せず、運用ログにはrun
 | `InvalidKeyStoreError` | `InvalidKeyStore` |
 | `AdapterIdentityRecoveryRequired` | `UnsupportedCapability`またはidentity-specific error |
 
-静的Rust APIでは多くのunsupported inputがコンパイル不能になる。`UnsupportedInput`はCLI、config、trace replay、`ButtonKind -> Button<M>`変換などの動的境界に残る。
+静的Rust APIでは多くのunsupported inputがコンパイル不能になる。`UnsupportedInput`は動的境界に残る。
 
-applicationはmessage文字列をparseせず`ErrorKind`をmatchする。
-
-## 15. 段階移行
+## 16. 段階移行
 
 ### Phase A: observation
 
-Pythonを実機基準とし、source SHA、protocol fixture、profile fixture、hardware trace、supported input matrixを固定する。
+source SHA、protocol fixture、profile fixture、hardware trace、supported input matrixを固定。
 
 ### Phase B: type/API shadow
 
-RustのUI testで次を固定する。
-
-- model-specific button集合
-- stick capability
-- model-specific state
-- Periodic / Direct method集合
-- common `ImuFrame`
+UI testでmodel button、stick capability、state、Periodic/Direct method、common IMUを固定。
 
 ### Phase C: pure protocol shadow
 
-同じsemantic inputをPythonとRustへ流し、bytesとeffectsを比較する。Pythonの共通`Button`をfixture generatorでmodel付きlogical inputへ変換する。
+同じsemantic inputをPythonとRustへ流しbytes/effectsを比較。Python共通`Button`をfixture generatorでmodel付きlogical inputへ変換。
 
 ### Phase D: virtual Bluetooth
 
-RustがBumble virtual linkを所有し、Classic、SDP、HID、pairing、typed inputを通す。
+Bumble virtual linkでClassic、SDP、HID、pairing、typed inputを通す。
 
 ### Phase E: hardware canary
 
-専用adapterと専用profileでRust fresh pairingを行う。既存Python processと同時にadapterを開かない。
+専用adapterと新規profileでbuilder `create_profile()`を使う。
 
 criteria:
 
+- envelopeがadapter open前に作成される
 - clean pairing
 - model-supported input reflection
-- neutral
-- close
+- neutral / close
 - repeated run
-- no adapter identity mutation
+- no identity mutation
 - trace redaction
 
 ### Phase F: profile interoperability
 
-synthetic profile、専用hardware profile、既存profile copyの順にRust read/write/reconnectを試す。自動backup機能は使わない。
+synthetic profile、専用hardware profile、既存profile copyの順にread/write/reconnect。自動backup機能は使わない。
 
 ### Phase G: workload cutover
-
-applicationのcontroller操作をPythonからRustへ置換する。
 
 - failure rate
 - connect latency
@@ -436,33 +466,29 @@ backend config switchを維持する。
 
 ### Phase H: Python retirement
 
-controller model / reporting modeごとに判定する。
+model/reportingごとに判定。
 
-- Rust supported release
-- target hardware matrix
+- supported release
+- hardware matrix
 - type/API gate
 - profile compatibility
 - operational docs
-- equivalent diagnostics
+- diagnostics
 - unresolved S1なし
 - backend rollback rehearsal
 
-未移植featureを使うapplicationはPythonを残す。
+## 17. application boundary
 
-## 16. application boundary
+優先順:
 
-言語境界が必要な場合の優先順:
-
-1. application自体をRustへ移す
-2. Rust CLIをsubprocessとして使う
+1. applicationをRustへ移す
+2. Rust CLIをsubprocess利用
 3. narrow IPC daemonを別仕様で追加
 4. FFI
 
 PyO3 bindingを最初に作らない。Bluetooth ownership、shutdown、callback thread、wheel packagingが追加問題になる。
 
-subprocess protocolを作る場合も、raw HID / HCI bytesを公開しない。controller kindとbutton kindは動的値になるため、CLI内部でtyped pathへ変換する。
-
-## 17. configuration単位
+## 18. configuration単位
 
 ```toml
 controller = "pro"
@@ -472,16 +498,16 @@ report_period_us = 8000
 tap_duration_ms = 80
 ```
 
-Rust側はcontroller/reporting文字列を入口でmarker typeへ分岐する。同じfieldにsecondsとmillisecondsを混在させない。
+controller/reporting文字列を入口でmarker typeへ分岐する。同じfieldにsecondsとmillisecondsを混在させない。
 
-## 18. backend rollback
+## 19. backend rollback
 
 ```toml
 controller_backend = "python" # or "rust"
 profile_path = "profiles/pro.json"
 ```
 
-同じprocessまたは複数processで両backendがadapterを同時openしない。backend switchはprocess restartを伴う。
+同じprocessまたは複数processで両backendがadapterを同時openしない。switchはprocess restartを伴う。
 
 checklist:
 
@@ -491,22 +517,20 @@ checklist:
 - current profile hash / parse result
 - Python environment lock
 - Python profile load
-- Python reconnect、または必要時fresh pairing
+- Python reconnectまたはfresh pairing
 - input neutral
 - incident trace保存
 
 libraryはprofileの自動複製・復元を行わない。
 
-## 19. 移行完了判定
-
-model / reporting組み合わせごとに判定する。
+## 20. 移行完了判定
 
 完了:
 
 - L0-L6
 - UI type tests
 - target hardware evidence
-- profile data safety
+- profile create ordering / data safety
 - error / diagnostics mapping
 - workload soak
 - backend rollback rehearsal
@@ -519,14 +543,12 @@ model / reporting組み合わせごとに判定する。
 - unit testだけ
 - single manual pairing
 - report accepted traceだけ
-- Python profileをparseしただけ
-- Bumble READMEのcapability記述だけ
+- profileをparseしただけ
+- Bumble README capabilityだけ
 
-## 20. Python基準断面の将来更新
+## 21. Python基準断面の将来更新
 
-current Python mainを自動的にnew source of truthにしない。
-
-1. v0.6.0 baselineに対するmilestone完了
+1. v0.6.0 baseline milestone完了
 2. new release diff分類
 3. bug fix / protocol discovery / API addition分離
 4. fixture version追加
