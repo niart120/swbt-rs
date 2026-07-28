@@ -7,9 +7,9 @@ mod sealed {
 /// Runtime identity for a controller reporting mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ReportingKind {
-    /// The worker sends the latest state on a fixed schedule.
+    /// Selects scheduled state reporting in the later runtime.
     Periodic,
-    /// A state is sent only when the caller requests it.
+    /// Selects caller-driven state reporting in the later runtime.
     Direct,
 }
 

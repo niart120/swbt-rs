@@ -26,7 +26,7 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | 静的 Rust API | controller model と reporting mode を選ぶ | `Controller<M, R>` と 6 alias が選択を型として保持する | runtime setter で kind/mode を変更しない |
 | 動的入力境界 | `ButtonKind` と対象 model | 対応 button だけ `Button<M>` へ変換できる | 非対応 button は `UnsupportedInput` |
 | report encoder の後続実装 | model と button | Python 基準断面と一致する byte index / mask を取得できる | 論理 ID を wire bit と同一視しない |
-| package/CI | MSRV または stable toolchain | fmt、clippy、test、doc、build を再現できる | Rust 1.87 を MSRV とする |
+| package/CI | MSRV または stable toolchain | fmt、check、clippy、test、doc を再現できる | Rust 1.87 を MSRV とする |
 
 ## 2. 対象範囲
 
@@ -40,7 +40,7 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 - `InputState<M>` と model-specific alias
 - `Controller<M, R>`、`ControllerBuilder<M, R>` と 6 controller alias の型基盤
 - M0 の公開 API を使う example と rustdoc
-- fmt、MSRV、stable、clippy、test、doc を実行する GitHub Actions workflow
+- fmt、MSRV/stable check、clippy、test、doctest、doc を実行する GitHub Actions workflow
 - M0 の package、API、model mapping、文書整合の gate
 
 ## 3. 対象外
@@ -90,14 +90,14 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | refactor-skipped | package が `swbt` library target、Rust 1.87、MIT を公開し、placeholder binary を含まない | new | package | red: `swbt` import 失敗。green: library target と metadata を確認。追加の構造変更なし |
 | refactor-done | Pro / JoyConL / JoyConR と Periodic / Direct が sealed trait を通じて一意な kind/spec を投影する | new | unit | red: 公開 module/type 不在。green: 2 passed。model の重複宣言を macro の単一正本へ統合 |
 | refactor-skipped | model ごとの supported `ButtonKind` だけが `Button<M>` へ変換され、`ButtonSet<M>` が重複を除いて論理順に列挙する | new | unit | red: input/error surface 不在。green: 3 passed。model 宣言へ supported 集合と associated constants を集約済み |
-| refactor-done | 全 supported button が Python 基準 commit と一致する byte index / mask を持ち、非対応組み合わせに mapping がない | characterization | unit | red: mapping type/function 不在。green: 2 passed。M0 の accessor を test build に絞り、同じ mapping を動的変換にも使用 |
+| refactor-done | 全 supported button が Python 基準 commit と一致する byte index / mask を持ち、非対応組み合わせに mapping がない | characterization | unit | red: mapping type/function 不在。green: 2 passed。M1 encoder から使える `pub(crate)` lookup を保持し、同じ mapping を動的変換にも使用 |
 | refactor-done | `Stick` が 12-bit raw 値と非対称 normalized 変換を保持し、不正値を拒否する | new | unit | red: Stick/capability trait 不在。green: 5 passed。model の stick bool を capability 宣言へ統合 |
 | refactor-skipped | `ImuFrame` と `ImuSamples` が signed 16-bit 六軸値と 1/3 frame の順序を保持する | new | unit | red: IMU 型不在。green: 3 passed。追加の構造変更なし。物理単位と wire conversion は M1 |
 | refactor-skipped | `InputState<M>` が model-valid button、stick 能力、3 IMU frame を含む neutral / replacement state を保持する | new | unit | red: state alias 不在。green: 3 passed。private 完全状態で不正な public constructor なし |
-| refactor-skipped | `Controller<M, R>`、`ControllerBuilder<M, R>` と 6 alias を公開 API から参照できる | new | integration | red: controller surface 不在。green: 2 passed。runtime method/field は M2 のまま |
+| refactor-skipped | `Controller<M, R>`、`ControllerBuilder<M, R>` と 6 alias を公開 API から参照できる | new | integration | red: controller surface 不在。green: 2 passed。`Controller` は `Send` / 非 `Sync` とし、runtime method/field は M2 のまま |
 | refactor-done | Cargo が Bumble 基準 commit の direct dependency を単一 revision で解決し、lockfile に固定する | new | package | red: direct dependency 不在。green: metadata/lock/build。crates.io 同名 package との衝突を検出し publish を無効化 |
 | refactor-done | M0 の公開 example と rustdoc が通常の build で compile する | new | integration | red: example target 不在。green: example/doc/doctest。公開文面から milestone 内部語を除去 |
-| refactor-skipped | GitHub Actions が MSRV/stable の fmt、clippy、test、doc、build gate を定義する | new | package | red: workflow 不在。green: YAML と同一 local commands。remote run は PR 後 |
+| refactor-skipped | GitHub Actions が MSRV/stable の fmt、check、clippy、test、doctest、doc gate を定義する | new | package | red: workflow 不在。green: YAML と同一 local commands。remote run は PR 後 |
 
 ## 7. 設計メモ
 

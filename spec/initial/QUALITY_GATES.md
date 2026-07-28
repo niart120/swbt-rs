@@ -18,6 +18,11 @@ Cargo metadata / release / public API を触る変更:
 cargo package
 ```
 
+`publish = false` の作業単位で package artifact を完了条件に含めない場合も、
+command は実行して結果を記録する。失敗は成功扱いにせず、公開を再び有効にする
+作業単位の blocker として追跡する。`publish = false` を解除する前には
+`cargo package` の成功を必須とする。
+
 ## 判定
 
 - command と結果を PR 本文または work unit に記録する。
