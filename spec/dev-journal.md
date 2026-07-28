@@ -156,3 +156,24 @@ T02 から T21 までは transport module に限り、理由付き
 `cfg_attr(not(test), allow(dead_code))` を置く。test build では抑制せず、fake contract の未参照を
 隠さない。T21 で worker caller を接続した commit に属性削除を含め、通常 build と clippy で
 実参照を確認する。
+
+## 2026-07-29: M2 observed subcommand set と output handler 接続前 dead code
+
+### 現状
+
+T03 は `src/runtime/connection.rs` に crate-private の `ObservedSubcommands` を追加する。
+観測集合を使う output handler は T07 で実装する。
+
+### 観察
+
+T03 の test は全 `u8` ID の bit set、重複除去、reset を検査する。通常 build に
+connection module を含めると、T07 までは production caller がなく `dead_code` になる。
+`cfg(test)` だけにすると通常 build が型を検査しない。
+
+### 方針
+
+T03 から T07 までは connection module に理由付き
+`cfg_attr(not(test), allow(dead_code))` を置く。T07 の output handler が `observe()` を使う
+commit で module 全体の許可を削除し、未接続の `reset()` と `is_empty()` だけへ許可を狭める。
+`reset()` は T17 の session reset、`is_empty()` は T18 の handshake で実参照を作り、それぞれの
+commit で method 単位の許可を削除する。各段階で通常 build と clippy を確認する。

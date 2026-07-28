@@ -308,11 +308,11 @@ stale event、close race は Python fixture に入れず、Rust の deterministi
 |---|---|---|---|
 | refactor-skipped | T01: Python 基準断面から runtime causal fixture を固定し、source provenance と case set を audit する | characterization | red: `cargo test --test runtime_fixture_audit --locked` は fixture 未作成の `include_str!` error。green: 同 command で 3 tests passed。固定 Python 3.13 / commit / tree を検査する生成器が production fake runtime を実行し、13 causal cases を生成。audit は case 分類、再生に必要な step、主要因果値を固定。接続後の bootstrap 受理を因果 gate にして task scheduling を期待値から除外。連続生成 SHA-256 `A50E11EF251B29A17F89C06E9C59640C9268D7F98B014A6D4ED21E3DFF72F118` 一致。生成器と audit の責務が分離済みのため refactor-skipped |
 | refactor-done | T02: model 非依存 transport contract が open/send/poll/routing/wake/overflow/terminal error/repeated close を検査する | transport contract | red: `cargo test --lib runtime::transport::tests --locked` は未定義 transport API の compile error。green: 同 command で 6 tests passed。refactor: lifecycle と notifier を同じ lock で管理して close と injection/send/termination を直列化。source termination 前の FIFO event、即時 sticky overflow、terminal 後の操作拒否と close、wake 後の有限 batch drain と再通知、sanitized source chain を明示 |
-| planned | T03: connection-local observed subcommand set が重複を除き、protocol candidate commit と独立して reset できる | runtime unit | |
+| refactor-skipped | T03: connection-local observed subcommand set が重複を除き、protocol candidate commit と独立して reset できる | runtime unit | red: `cargo test --lib runtime::connection::tests --locked` は `ObservedSubcommands` 未定義の compile error。green: 同 command で 2 tests passed。全 256 ID を検査する bit set が重複を除き、明示 reset 後に同じ ID を再観測できる。型は `ProtocolSession` や candidate outcome を保持せず observation の rollback 経路を持たない。実装が単一責務のため refactor-skipped |
 | planned | T04: protocol facade が state/session/time から `0x30` bytes、next timer、next IMU state を返す | protocol unit | |
 | planned | T05: `ReportSender<M>` が input/reply のtimer sequenceとacceptance後candidate commitを共有し、rejection後はcommitted stateを保ってretry時刻から再準備する | runtime unit | |
 | planned | T06: reply prefix が pre-transition readiness に基づき neutral/current を選ぶ | runtime unit | |
-| planned | T07: output handler が control/interruptを同じ順で処理し、subcommandをprepare前に記録し、malformed/rumble-onlyで状態を捏造しない | runtime unit | |
+| planned | T07: output handler が control/interruptを同じ順で処理し、subcommandをprepare前に記録し、malformed/rumble-onlyで状態を捏造せず、T03 observation の module-wide `dead_code` 許可を未接続 method 単位へ狭める | runtime unit | |
 | planned | T08: in-flight old-mode inputを許しつつ、accepted `0x40` ACKが最初のnew-mode inputより先になる | runtime integration | |
 | planned | T09: Periodic state store が未接続でも先行commitし、wire failureでrollbackせず、new sessionでneutralへresetする | runtime unit | |
 | planned | T10: Periodic scheduler が8 ms absolute deadline、overrun skip、no burstをfake clockで計算する | scheduler unit | |
@@ -322,8 +322,8 @@ stale event、close race は Python fixture に入れず、Rust の deterministi
 | planned | T14: Periodic tapが非Readyではpress前に拒否され、Readyではpress/releaseをlocal commitし、両send失敗でもrollbackせず最初のerrorを返す | runtime unit | |
 | planned | T15: Direct tapがpress rejection後はreleaseせず、accepted press後はinbound replyを許し、release rejectionでpressedを維持し、disconnect/shutdownでdelayを中断する | runtime integration | |
 | planned | T16: lifecycle state machineがopen/close/reopenと冪等遷移を決定的に処理し、closing commandを`Shutdown`にする | runtime unit | |
-| planned | T17: increasing session IDがtimer/session/holdoff/observed/inputをresetし、stale eventを破棄する | runtime unit | |
-| planned | T18: handshakeが両HID channel後にbootstrap neutralを送り、最初のsubcommandまでabsolute retryする | runtime unit | |
+| planned | T17: increasing session IDがtimer/session/holdoff/observed/inputをresetし、stale eventを破棄して observation `reset()` の一時 `dead_code` 許可を削除する | runtime unit | |
+| planned | T18: handshakeが両HID channel後にbootstrap neutralを送り、最初のsubcommandまでabsolute retryし、observation `is_empty()` の一時 `dead_code` 許可を削除する | runtime unit | |
 | planned | T19: Readyがsame-sessionのaccepted report-mode/nonzero-lights replyとhandshake回収を要求し、rejection/zero-lights/disconnect/timeoutを回収して終了する | runtime integration | |
 | planned | T20: close/close-without-neutralがpending send、neutral、drain、disconnect、transport close、completion、joinの順とfailure継続を守る | runtime integration | |
 | planned | T21: worker coreがshutdownを優先し、bounded command batch、HCI/reply、due deadlineを飢餓なく処理し、T02 transport の一時 `dead_code` 許可を削除する | worker unit | |
