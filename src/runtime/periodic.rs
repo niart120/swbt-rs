@@ -9,6 +9,7 @@
 use std::{error::Error as StdError, fmt, time::Duration};
 
 use crate::{
+    input::InputState,
     model::ControllerModel,
     protocol::SwitchHidProtocol,
     runtime::{
@@ -21,6 +22,13 @@ use crate::{
 };
 
 const REPLY_HOLDOFF: Duration = Duration::from_millis(300);
+
+pub(crate) fn commit_candidate<M: ControllerModel>(
+    candidate: InputState<M>,
+    state: &mut InputStateStore<M>,
+) {
+    state.commit(candidate);
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AutomaticInput {

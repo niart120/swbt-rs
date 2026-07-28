@@ -34,6 +34,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::{
+        controller::input::press_candidate,
         input::{InputState, ProButton},
         model::{ButtonKind, Pro},
         protocol::{DeviceInfoBluetoothAddress, SwitchHidProtocol},
@@ -158,6 +159,6 @@ mod tests {
 
     fn pressed_state(kind: ButtonKind) -> InputState<Pro> {
         let button = ProButton::try_from(kind).expect("button supported by Pro Controller");
-        InputState::neutral().with_buttons([button])
+        press_candidate(&InputState::neutral(), [button]).expect("non-empty press is valid")
     }
 }

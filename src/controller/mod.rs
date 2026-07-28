@@ -1,5 +1,7 @@
 //! Typed controller and builder identities.
 
+pub(crate) mod input;
+
 use std::cell::Cell;
 use std::marker::PhantomData;
 
