@@ -15,7 +15,7 @@ Controller model: Pro / JoyConL / JoyConR
 Reporting mode:   Periodic / Direct
 ```
 
-Rust版の正本:
+Rust版の正本は次の1型とする。
 
 ```rust
 pub struct Controller<M, R> {
@@ -44,7 +44,7 @@ pub trait ControllerModel: private::Sealed + Send + 'static {
 }
 ```
 
-marker typeは値を持たない。`ControllerModel`はsealedにする。
+marker typeは値を持たない。利用者定義modelによって型関係が開かないよう、`ControllerModel`はsealedにする。
 
 ## 3. reporting型
 
@@ -93,9 +93,9 @@ pub enum ControllerKind {
 }
 ```
 
-`ControllerKind`はprofile JSON、diagnostics、CLIで使う実行時表現。model型と独立した正本にしない。
+`ControllerKind`はprofile JSON、diagnostics、CLIで使う実行時表現であり、model型と独立した正本にしない。
 
-model宣言1箇所から次を生成または検査する。
+model宣言1箇所から、次を生成するか機械的に整合させる。
 
 - model marker
 - `ControllerKind` variant
@@ -141,9 +141,11 @@ controller_models! {
 }
 ```
 
-macro採否は実装詳細だが、同情報を複数の手書き表へ重複させないことは仕様とする。
+macro採否は実装詳細だが、同じ情報を複数の手書き表へ重複させないことは仕様とする。
 
 ## 6. ボタンの全体集合
+
+全modelで使う論理的なボタン名を`ButtonKind`に集約する。
 
 ```rust
 #[repr(u8)]
@@ -172,7 +174,15 @@ pub enum ButtonKind {
 }
 ```
 
-explicit discriminantは論理IDとtable indexに使う。NX reportのbyte/bit位置とはみなさない。wire mappingは`(ControllerKind, ButtonKind)`から明示的に決める。
+explicit discriminantは安定した論理ID、配列index、診断表示、動的入力のserializationに使ってよい。
+
+**決定:** この数値をNX input reportのbyte位置またはbit位置とは同一視しない。wire layoutは次の明示マッピングを正本とする。
+
+```text
+(ControllerKind, ButtonKind) -> input report byte / bit
+```
+
+理由は、同じ論理名でもmodelによってwire上の位置が異なる場合があるためである。代表例はJoy-Con L/Rの`SL`と`SR`である。encoderはmapping tableまたは明示`match`を使い、`ButtonKind as u8`をそのままreport offsetやbit numberへ変換しない。
 
 ## 7. モデル付きボタン
 
@@ -188,7 +198,7 @@ pub type JoyConLButton = Button<model::JoyConL>;
 pub type JoyConRButton = Button<model::JoyConR>;
 ```
 
-自由なconstructorは公開せず、modelで使用可能なassociated constantだけを生成する。
+自由なconstructorは公開せず、modelで使用可能なassociated constantだけを提供する。
 
 ```rust
 let pro_a = ProButton::A;
@@ -196,32 +206,23 @@ let right_a = JoyConRButton::A;
 let left_up = JoyConLButton::DPAD_UP;
 ```
 
-`ProButton::A`と`JoyConRButton::A`は同じ`ButtonKind::A`を指すが型は異なる。
+`ProButton::A`と`JoyConRButton::A`は同じ`ButtonKind::A`を指すが型は異なる。Joy-Con Lには`A`のassociated constantを定義しない。
 
-compile-fail:
-
-```compile_fail
-left.press([ProButton::A])?;
-```
-
-```compile_fail
-let button = JoyConLButton::A;
-```
-
-動的境界:
+動的境界では明示変換を使う。
 
 ```rust
 impl<M: ControllerModel> TryFrom<ButtonKind> for Button<M> {
     type Error = Error;
+
     fn try_from(kind: ButtonKind) -> Result<Self>;
 }
 ```
 
-静的Rustコードはtyped constantを使い、通常経路を動的検査へ戻さない。
+CLIや設定ファイルから得た`ButtonKind`が対象modelで使えない場合は`UnsupportedInput`を返す。静的Rustコードではtyped constantを使い、通常経路を動的検査へ戻さない。
 
 ## 8. 共通値型
 
-model非依存:
+次はmodel非依存のまま保持する。
 
 - `Stick`: 12-bit x/y座標
 - `ImuFrame`: accel 3軸 + gyro 3軸
@@ -230,7 +231,16 @@ model非依存:
 - `Rgb24`
 - `LocalAddress`
 
-ProとJoy-Conで同じ六軸値を表すために`ImuFrame<Pro>`等を作らない。model差は`ModelSpec`とprotocol encoderの責務。
+ProとJoy-Conで同じ六軸値を表すために`ImuFrame<Pro>`等を作らない。model差が校正値やwire encodingにある場合は、`ModelSpec`とprotocol encoderの責務とする。
+
+```rust
+pub enum ImuSamples {
+    Repeat(ImuFrame),
+    Frames([ImuFrame; 3]),
+}
+```
+
+任意長sliceを受けて0件、2件、4件を実行時拒否するAPIは作らない。
 
 ## 9. stick能力
 
@@ -304,8 +314,14 @@ Pro用stateをJoy-Conへ渡せない。公開constructorで不正な共通state�
 
 ```rust
 impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
-    pub fn press(&mut self, buttons: impl IntoIterator<Item = Button<M>>) -> Result<()>;
-    pub fn release(&mut self, buttons: impl IntoIterator<Item = Button<M>>) -> Result<()>;
+    pub fn press(
+        &mut self,
+        buttons: impl IntoIterator<Item = Button<M>>,
+    ) -> Result<()>;
+    pub fn release(
+        &mut self,
+        buttons: impl IntoIterator<Item = Button<M>>,
+    ) -> Result<()>;
     pub fn tap(
         &mut self,
         buttons: impl IntoIterator<Item = Button<M>>,
@@ -437,28 +453,30 @@ Bumble transport、HCI、L2CAP、HIDP framingはmodel非依存なのでgeneric�
 
 core input stateを早期に`ControllerKind + untyped buttons`へ変換しない。
 
-## 16. 検証規則
+## 16. 検証対象の境界
 
-compile-pass/failで固定する。
+型が存在しない、methodが存在しない、異なるgeneric引数を代入できない、といったRust compiler自身が保証する性質について、専用のcompile-pass / compile-fail fixtureや`trybuild` suiteは作らない。
 
-- ProとJoy-Con RでそれぞれAを使用可能
-- Joy-Con LにA constantなし
-- Joy-Con LへProButtonを渡せない
-- Joy-Con Lにright stickなし
-- Joy-Con Rにleft stickなし
-- Directにapplyなし
-- Periodicにsendなし
-- Pro stateをJoy-Conへ渡せない
-- ImuFrameは全model共通
-- Direct builderにreport periodなし
-- controllerにcreate_profile methodなし
-- builder create_profileがtyped controllerを返す
+次は通常のlibrary、example、rustdocをcompileする過程で十分であり、人工的な不正コードをrelease gateにしない。
 
-値audit:
+- Joy-Con Lに`A` constantがない
+- Joy-Con Lにright stick methodがない
+- Joy-Con Rにleft stick methodがない
+- Directに`apply()`がない
+- Periodicに`send()`がない
+- 異なるmodelの`Button<M>` / `InputState<M>`を渡せない
+- Direct builderに`report_period()`がない
 
-- ButtonKind discriminant重複なし
-- 全model buttonにwire mappingあり
-- model宣言、ControllerKind、profile名、capability一致
+テスト対象にするのは、compilerがdomain上の正しさを判断できない実装データと動的境界である。
+
+- model宣言と`ControllerKind` / profile名の一対一対応
+- 各modelのsupported button集合が基準仕様と一致すること
+- 全supported buttonに明示wire mappingがあること
+- `(ControllerKind, ButtonKind)`が正しいbyte / bitへ変換されること
+- `TryFrom<ButtonKind> for Button<M>`がsupported集合と一致すること
+- `ModelSpec`とstick capability宣言の整合
+- profile JSONから`PairingProfile<M>`への動的検査
+- runtime state、report bytes、送信順序、failure semantics
 
 ## 17. 対象外
 
