@@ -32,4 +32,4 @@ git diff --check
 
 ## ライセンス
 
-ライセンスは未設定です。
+MIT ライセンスです。全文は [LICENSE](LICENSE) にあります。
