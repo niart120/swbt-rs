@@ -20,13 +20,6 @@ impl<M: ControllerModel> InputStateStore<M> {
         self.committed.clone()
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T13 routes validated Periodic input changes into the state store"
-        )
-    )]
     pub(crate) fn commit(&mut self, next: InputState<M>) {
         self.committed = next;
     }
