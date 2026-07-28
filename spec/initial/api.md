@@ -5,26 +5,24 @@
 - 基準断面: [source-baseline.md](source-baseline.md)
 - 型関係の正本: [type-modeling.md](type-modeling.md)
 
-この文書は `swbt-rs` の初期公開 API と、その成功・失敗・状態確定の意味を定義する。型名や method 名を変更する場合は、先にこの文書と `type-modeling.md` を更新する。
+この文書は `swbt-rs` の初期公開 API と、その成功・失敗・状態確定の意味を定義する。
 
 ## 1. API 方針
 
-- 公開 API は同期・blocking API とし、利用者に特定の async runtime を要求しない
+- 公開 API は同期・blocking API とする
 - controller model と reporting mode は `Controller<M, R>` の型引数で表す
-- モデル固有のボタンと入力状態は `Button<M>`、`InputState<M>` で表す
-- スティック値と六軸センサー値は共通の物理量なので、`Stick` と `ImuFrame` は model 非依存とする
-- 使用できないボタン、存在しないスティック、異なる model の入力状態は、可能な限りコンパイル時に拒否する
-- profile JSON、status、CLI のような動的境界だけが `ControllerKind` と `ButtonKind` を扱う
+- model 固有のボタンと入力状態は `Button<M>`、`InputState<M>` で表す
+- `Stick` と `ImuFrame` は model 非依存の共通値型とする
+- 使用できないボタン、存在しないスティック、異なる model の入力状態は可能な限りコンパイル時に拒否する
+- profile JSON、status、CLI のような動的境界だけが `ControllerKind`、`ReportingKind`、`ButtonKind` を扱う
 - Bumble の型、CID、HCI packet、L2CAP manager を公開 API に出さない
 - controller object は `Clone` しない。初期 API では `Send`、非 `Sync` を目標にする
-- 状態変更操作は `&mut self` を要求し、利用者側の同時操作を型で抑制する
-- `Drop` は短い best-effort shutdown だけを行う。neutral 送信と終了エラーの確認には明示的な `close()` が必要
+- 状態変更操作は `&mut self` を要求する
+- `Drop` は短い best-effort shutdown だけを行い、neutral と終了エラーの確認には明示的な `close()` を使う
 - raw HID / HCI bytes を送る公開 API は作らない
 - Python 版との互換対象は wire bytes、入力意味、profile schema、状態確定条件であり、class inheritance と coroutine 形式ではない
 
 ## 2. crate root の公開要素
-
-初期公開対象は次の形とする。
 
 ```rust
 pub use adapter::{list_adapters, AdapterInfo, AdapterSelector};
@@ -52,10 +50,10 @@ pub use model::{
 pub use profile::{
     ControllerColors, ControllerKind, LocalAddress, ProfileIdentity, Rgb24,
 };
-pub use reporting::ReportingMode;
+pub use reporting::{ReportingKind, ReportingMode};
 ```
 
-marker type は module 経由でも参照できる。
+marker type は module 経由で参照する。
 
 ```rust
 pub mod model {
@@ -74,15 +72,13 @@ pub mod reporting {
 
 ## 3. controller 型
 
-### 3.1 正本
+### 3.1 generic 正本と alias
 
 ```rust
 pub struct Controller<M: ControllerModel, R: ReportingMode> {
     // private fields
 }
 ```
-
-利用者向けの 6 名は alias とする。
 
 ```rust
 pub type ProController =
@@ -101,7 +97,7 @@ pub type DirectJoyConR =
     Controller<model::JoyConR, reporting::Direct>;
 ```
 
-6 個の public newtype、6 個の builder 型、6 組の forwarding method は作らない。rustdoc は alias から generic 正本と model/reporting 固有の method を参照できるように構成する。
+6 個の public newtype、6 個の builder 型、6 組の forwarding method は作らない。
 
 ### 3.2 共通 builder
 
@@ -117,13 +113,17 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 }
 ```
 
-共通設定:
-
 ```rust
 impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     pub fn profile_path(self, path: impl Into<PathBuf>) -> Self;
     pub fn controller_colors(self, colors: ControllerColors) -> Self;
+
     pub fn build(self) -> Result<Controller<M, R>>;
+
+    pub fn create_profile(
+        self,
+        options: CreateProfileOptions,
+    ) -> Result<Controller<M, R>>;
 }
 ```
 
@@ -135,12 +135,47 @@ impl<M: ControllerModel> ControllerBuilder<M, reporting::Periodic> {
 }
 ```
 
-制約:
+### 3.3 `build()`
+
+`build()` は I/O を開始しない。
+
+- `profile_path = None` は永続 bond を持たない一時 controller を構築する
+- `profile_path = Some(path)` では path が存在することを要求する
+- existing profile を `PairingProfile<M>` として検証する
+- controller kind mismatch は adapter open 前に拒否する
+- path が存在しない場合は `ProfileNotFound`
+- adapter は `open()` まで開かない
+
+新規 profile 用の存在しない path を `build()` へ渡して、後から controller method で作成する流れは提供しない。
+
+### 3.4 builder の `create_profile()`
+
+新規 profile 作成は builder を消費する複合操作とする。
+
+```text
+validate builder and target path
+  → create valid empty PairingProfile<M> envelope
+  → construct Controller<M, R>
+  → open adapter / worker
+  → pair to normal-input readiness
+  → return Ready Controller<M, R>
+```
+
+規則:
+
+- `profile_path` は必須
+- path が既に存在する場合は `ProfileAlreadyExists`
+- envelope を adapter open より先に原子的に作成する
+- pairing に失敗しても envelope は残す
+- 失敗時は内部 controller を `close_without_neutral()` 相当で cleanup し、controller object は返さない
+- 成功時に返す controller は `Ready`
+- `ProfileIdentity::LocalAddress` は対応 gate 完了まで `UnsupportedCapability`
+
+`Controller<M, R>` 自体には `create_profile()` method を生やさない。
+
+### 3.5 builder 制約
 
 - adapter は必須
-- `profile_path = None` は永続 bond を持たない一時 controller
-- path が存在する場合、`build()` は JSON と `M::KIND` の一致を検査する
-- path が存在しない場合、`create_profile()` 用の未作成 target として保持する
 - `report_period` は `1 ms..=1 s`、既定値は `8 ms`
 - Direct builder に `report_period()` は存在しない
 - `ControllerKind` と reporting mode を値として指定する method は作らない
@@ -149,7 +184,7 @@ impl<M: ControllerModel> ControllerBuilder<M, reporting::Periodic> {
 
 ## 4. 基本利用例
 
-### 4.1 Pro Controller で接続する
+### 4.1 existing profile で接続する
 
 ```rust
 use std::time::Duration;
@@ -173,9 +208,27 @@ fn main() -> swbt::Result<()> {
 }
 ```
 
-`build()` は adapter を開かない。`open()` は HCI transport と worker を準備するが、discoverable / connectable 化、pairing、reconnect を開始しない。
+### 4.2 新規 profile を作成して pairing する
 
-### 4.2 Joy-Con R の A ボタン
+```rust
+use std::time::Duration;
+use swbt::{CreateProfileOptions, ProfileIdentity, ProButton, ProController};
+
+fn main() -> swbt::Result<()> {
+    let mut pad = ProController::builder("usb:0")
+        .profile_path("profiles/switch-pro.json")
+        .create_profile(CreateProfileOptions {
+            identity: ProfileIdentity::AdapterDefault,
+            pair_timeout: Duration::from_secs(60),
+        })?;
+
+    pad.tap([ProButton::A], Duration::from_millis(80))?;
+    pad.close()?;
+    Ok(())
+}
+```
+
+### 4.3 Joy-Con R の A ボタン
 
 ```rust
 use std::time::Duration;
@@ -188,7 +241,7 @@ fn tap_a(right: &mut JoyConR) -> swbt::Result<()> {
 
 `ProButton::A` と `JoyConRButton::A` は同じ論理 `ButtonKind::A` を指すが、型は別である。`JoyConLButton::A` は存在しない。
 
-### 4.3 Direct controller へ完全状態を送る
+### 4.4 Direct controller へ完全状態を送る
 
 ```rust
 use swbt::{
@@ -203,30 +256,6 @@ fn send_one_state(pad: &mut DirectProController) -> swbt::Result<()> {
     pad.send(state)
 }
 ```
-
-Direct controller は利用者入力用の周期 report loop を持たない。`send()` は report が transport の L2CAP 送信経路に受理された後だけ local state を確定する。
-
-### 4.4 新規 profile を作成する
-
-```rust
-use std::time::Duration;
-use swbt::{CreateProfileOptions, ProfileIdentity, ProController};
-
-fn pair() -> swbt::Result<()> {
-    let mut pad = ProController::builder("usb:0")
-        .profile_path("profiles/switch-pro.json")
-        .build()?;
-
-    pad.open()?;
-    pad.create_profile(CreateProfileOptions {
-        identity: ProfileIdentity::AdapterDefault,
-        pair_timeout: Duration::from_secs(60),
-    })?;
-    pad.close()
-}
-```
-
-`create_profile()` は path が存在する場合に上書きしない。空の valid envelope を原子的に作成した後、その profile identity で adapter を開いた session を使って pairing する。pairing に失敗しても envelope は残す。
 
 ## 5. lifecycle
 
@@ -243,15 +272,9 @@ pub enum LifecycleState {
 }
 ```
 
-### 5.1 共通 lifecycle method
-
 ```rust
 impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     pub fn open(&mut self) -> Result<()>;
-    pub fn create_profile(
-        &mut self,
-        options: CreateProfileOptions,
-    ) -> Result<()>;
     pub fn pair(&mut self, timeout: Duration) -> Result<()>;
     pub fn reconnect(&mut self, timeout: Duration) -> Result<()>;
     pub fn connect(
@@ -286,6 +309,11 @@ pub struct ConnectOptions {
     pub allow_pairing: bool,
 }
 
+pub struct CreateProfileOptions {
+    pub identity: ProfileIdentity,
+    pub pair_timeout: Duration,
+}
+
 #[non_exhaustive]
 pub enum ConnectionPath {
     Reconnected,
@@ -314,6 +342,8 @@ pub struct ConnectionResult {
 3. bond がなく `allow_pairing = false` なら `NoBond`
 4. reconnect が通信失敗した場合、bond を暗黙削除して fresh pairing へ移らない
 
+`pair()` は一時 controller、または既存の empty profile から pairing を再試行する入口である。新規 file 作成は行わない。
+
 接続 API は次を満たした後だけ成功する。
 
 - Classic ACL が有効
@@ -324,13 +354,11 @@ pub struct ConnectionResult {
 - 同じ connection session で上記を満たす
 - handshake state を停止・回収済み
 
-Periodic は最後の automatic input holdoff 終了後に scheduler を開始できた時点で `Ready` にする。Direct は protocol ready で `Ready` とし、確認用 periodic report を送らない。
+Periodic は最後の automatic input holdoff 終了後に scheduler を開始できた時点で `Ready`。Direct は protocol ready で `Ready` とし、確認用 periodic report を送らない。
 
 ## 7. ボタン
 
 ### 7.1 論理集合
-
-`ButtonKind` は全モデルの論理ボタン集合である。explicit `repr(u8)` は安定した論理 ID と table index に使うが、NX wire bit とは別契約とする。
 
 ```rust
 #[repr(u8)]
@@ -358,6 +386,8 @@ pub enum ButtonKind {
 }
 ```
 
+explicit discriminant は論理 ID と table index に使い、NX wire bit とは別契約とする。
+
 ### 7.2 モデル付きボタン
 
 ```rust
@@ -370,15 +400,13 @@ pub type JoyConLButton = Button<model::JoyConL>;
 pub type JoyConRButton = Button<model::JoyConR>;
 ```
 
-使用可能集合:
-
 | model | buttons |
 |---|---|
 | Pro | A/B/X/Y, L/R/ZL/ZR, Plus/Minus/Home/Capture, LeftStick/RightStick, D-pad |
 | Joy-Con L | L/ZL, Minus/Capture, LeftStick, SL/SR, D-pad |
 | Joy-Con R | A/B/X/Y, R/ZR, Plus/Home, RightStick, SL/SR |
 
-自由な `Button<M>::new(ButtonKind)` は公開しない。dynamic boundary 用に `TryFrom<ButtonKind> for Button<M>` を提供し、unsupported kind は `UnsupportedInput` とする。
+自由な `Button<M>::new(ButtonKind)` は公開しない。dynamic boundary 用に `TryFrom<ButtonKind> for Button<M>` を提供する。
 
 ## 8. `Stick`
 
@@ -401,13 +429,10 @@ impl Stick {
     pub fn down(amount: f32) -> Result<Self>;
     pub fn left(amount: f32) -> Result<Self>;
     pub fn right(amount: f32) -> Result<Self>;
-
-    pub const fn x(&self) -> u16;
-    pub const fn y(&self) -> u16;
 }
 ```
 
-`Stick` は座標値なので model 非依存とする。method の存在を capability trait で制限する。
+`Stick` は共通値型とし、method の存在を capability trait で制限する。
 
 ```rust
 impl<M: HasLeftStick, R: ReportingMode> Controller<M, R> {
@@ -423,8 +448,6 @@ impl<M: HasDualSticks, R: ReportingMode> Controller<M, R> {
 }
 ```
 
-`normalized` / `tilt` は各軸 `-1.0..=1.0`、direction helper は `0.0..=1.0`。NaN と infinity を拒否する。
-
 ## 9. 六軸センサー
 
 ```rust
@@ -433,41 +456,24 @@ pub struct ImuFrame {
     accel: [i16; 3],
     gyro: [i16; 3],
 }
-```
 
-提供する constructor / converter:
-
-- `ImuFrame::neutral()`
-- `ImuFrame::raw(accel, gyro)`
-- `ImuFrame::gyro([i16; 3])`
-- `ImuFrame::accel([i16; 3])`
-- `with_gyro` / `with_accel`
-- `from_gyro_rate_rad_s([f32; 3])`
-- `to_gyro_rate_rad_s()`
-- `from_accel_g([f32; 3])`
-- `to_accel_g()`
-
-尺度は gyro `0.070 dps/raw`、accelerometer `1/4096 G/raw`。非有限値と i16 範囲外を clamp せず拒否する。
-
-frame 数を slice 長の実行時規則にしない。
-
-```rust
 pub enum ImuSamples {
     Repeat(ImuFrame),
     Frames([ImuFrame; 3]),
 }
-
-impl From<ImuFrame> for ImuSamples;
-impl From<[ImuFrame; 3]> for ImuSamples;
 ```
+
+- gyro scale: `0.070 dps/raw`
+- accelerometer scale: `1/4096 G/raw`
+- non-finite と i16 overflow は reject
+- `ImuFrame` と `ImuSamples` は全 model で共通
+- model 固有の校正値と wire packing は protocol encoder が `M::SPEC` から選ぶ
 
 ```rust
 impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     pub fn imu(&mut self, samples: impl Into<ImuSamples>) -> Result<()>;
 }
 ```
-
-`ImuFrame` と `ImuSamples` は全モデルで同じ型を使う。モデル固有の校正値や wire packing は protocol encoder が `M::SPEC` から選ぶ。
 
 ## 10. モデル付き `InputState`
 
@@ -482,8 +488,6 @@ pub type JoyConLInputState = InputState<model::JoyConL>;
 pub type JoyConRInputState = InputState<model::JoyConR>;
 ```
 
-共通 method:
-
 ```rust
 impl<M: ControllerModel> InputState<M> {
     pub fn neutral() -> Self;
@@ -495,11 +499,7 @@ impl<M: ControllerModel> InputState<M> {
     pub fn buttons(&self) -> impl Iterator<Item = Button<M>> + '_;
     pub fn imu_frames(&self) -> &[ImuFrame; 3];
 }
-```
 
-capability 固有 method:
-
-```rust
 impl<M: HasLeftStick> InputState<M> {
     pub fn with_left_stick(self, stick: Stick) -> Self;
     pub fn left_stick(&self) -> Stick;
@@ -515,11 +515,9 @@ impl<M: HasDualSticks> InputState<M> {
 }
 ```
 
-`InputState<M>` は model-valid な状態しか公開 API から構築できない。異なる model 間の変換、model 非依存 `InputState` alias、stable serde format は提供しない。
+異なる model 間の変換、model 非依存 `InputState` alias、stable serde format は提供しない。
 
 ## 11. 入力操作と状態確定
-
-共通操作:
 
 ```rust
 impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
@@ -541,7 +539,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 }
 ```
 
-空の button iterator は `InvalidInput`。`tap()` duration は `0..=24 h` とし、0 は押下受理直後に解放を送る。
+空 button iterator は `InvalidInput`。`tap()` duration は `0..=24 h`。
 
 Periodic 専用:
 
@@ -552,7 +550,10 @@ impl<M: ControllerModel> Controller<M, reporting::Periodic> {
 }
 ```
 
-Periodic の state operation は worker が local state を確定した時点で成功する。未接続でも更新でき、wire 送信失敗で local state を rollback しない。接続中は次の deadline で latest state を送る。
+- local state commit 後に成功
+- 未接続でも state 更新可能
+- wire failure で rollback しない
+- next deadline で latest state を送る
 
 Direct 専用:
 
@@ -562,13 +563,14 @@ impl<M: ControllerModel> Controller<M, reporting::Direct> {
 }
 ```
 
-Direct は接続済みを要求する。report が L2CAP 送信経路に受理された後だけ state を commit し、受理前 failure では以前の snapshot を維持する。
+- 接続済みを要求
+- L2CAP path acceptance 後だけ commit
+- acceptance 前 failure では previous state を維持
+- user-input scheduler を持たない
 
-`tap()` は両方式で押下と解放を最低 1 回ずつ受理させる action API とする。解放失敗時は最後に受理された押下 state を維持する。
+`tap()` は両方式で押下と解放を最低 1 回ずつ受理させる。解放失敗時は最後に受理された押下 state を維持する。
 
-## 12. controller identity と profile
-
-`ControllerKind` は runtime projection であり、typed builder の選択値ではない。
+## 12. profile と controller identity
 
 ```rust
 pub enum ControllerKind {
@@ -576,20 +578,16 @@ pub enum ControllerKind {
     JoyConL,
     JoyConR,
 }
-```
 
-モデル宣言、`ControllerKind`、profile 文字列、button capability、stick capability は単一宣言から生成または検査する。
-
-Periodic / Direct は profile kind に含めない。同じ model の profile は両方式で共有できる。
-
-```rust
 pub enum ProfileIdentity {
     AdapterDefault,
     LocalAddress(LocalAddress),
 }
 ```
 
-明示 local address は実機 gate を通るまで `UnsupportedCapability` とし、adapter identity を変更しない。
+`ControllerKind` は runtime projection であり、typed builder の選択値ではない。model 宣言、profile 文字列、button capability、stick capability は単一宣言から生成または検査する。
+
+Periodic / Direct は profile kind に含めない。同じ model の profile は両方式で共有できる。
 
 ## 13. adapter discovery
 
@@ -597,23 +595,7 @@ pub enum ProfileIdentity {
 pub fn list_adapters() -> Result<Vec<AdapterInfo>>;
 ```
 
-adapter を claim / open せず、USB descriptor と interface class から Bluetooth HCI candidate を列挙する。
-
-```rust
-pub struct AdapterInfo {
-    pub name: String,
-    pub aliases: Vec<String>,
-    pub vendor_id: Option<u16>,
-    pub product_id: Option<u16>,
-    pub manufacturer: Option<String>,
-    pub product: Option<String>,
-    pub serial_number: Option<String>,
-    pub bus_number: Option<u8>,
-    pub device_address: Option<u8>,
-    pub port_numbers: Vec<u8>,
-    pub is_bluetooth_hci: bool,
-}
-```
+adapter を claim / open せず、USB descriptor と interface class から Bluetooth HCI candidate を列挙する。Bumble の selector 型は返さない。
 
 ## 14. status と diagnostics
 
@@ -632,22 +614,21 @@ pub struct GamepadStatus {
 }
 ```
 
-`controller_kind` と `reporting_kind` は `M` と `R` から導出する。controller 内部に重複 field として保持しない。
+kind は `M` と `R` から導出し、controller 内部に重複 field として保持しない。`status()` は worker I/O を待たない snapshot とする。
 
-`status()` は worker I/O を待たない安価な snapshot とする。key、raw pairing payload、full packet bytes を含めない。
-
-構造化 trace は `tracing` facade を使う。`report_tx_accepted` は transport 受理を意味し、controller completion、air delivery、Switch UI 反映を意味しない。
+構造化 trace は `tracing` facade を使う。`report_tx_accepted` は transport 受理を意味し、air delivery や Switch UI 反映を意味しない。
 
 ## 15. error
 
 ```rust
-pub type Result<T> = std::result::Result<T, Error>;
-
 #[non_exhaustive]
 pub enum ErrorKind {
     AdapterDiscovery,
     TransportOpen,
     TransportClosed,
+    ProfilePathRequired,
+    ProfileNotFound,
+    ProfileAlreadyExists,
     InvalidProfile,
     ProfileControllerMismatch,
     InvalidKeyStore,
@@ -665,23 +646,18 @@ pub enum ErrorKind {
 }
 ```
 
-通常の静的 API で model 不一致の button や state を受け付けないため、`UnsupportedInput` は主に次の動的境界で使う。
+通常の静的 API で model 不一致 input を受け付けないため、`UnsupportedInput` は主に CLI、config、trace replay、`ButtonKind -> Button<M>` の動的境界で使う。
 
-- `ButtonKind` から `Button<M>` への変換
-- CLI / 設定ファイルの入力
-- malformed profile / trace replay
-- wire から得た値の検査
-
-message 文言は semver 契約にしない。Bumble error は source chain に保持するが、public variant として露出しない。
+message 文言は semver 契約にしない。Bumble error は source chain に保持し、public variant として露出しない。
 
 ## 16. thread と cancellation
 
-- `Controller<M, R>` は `Send` を目標とし、同時操作は `&mut self` で禁止する
-- worker command channel は bounded とする
+- `Controller<M, R>` は `Send` を目標とする
+- 同時操作は `&mut self` で禁止する
+- worker command channel は bounded
 - public blocking method は timeout または worker termination を観測できる
-- `tap()` の delay は worker scheduler が管理し、close command で中断できる
-- close 開始後の input command は `TransportClosed` または `Busy`
-- worker panic は `WorkerFailed` へ変換する
+- `tap()` delay は worker scheduler が管理し、close で中断できる
+- worker panic は `WorkerFailed`
 
 ## 17. 初期公開 API に含めないもの
 
@@ -689,19 +665,17 @@ message 文言は semver 契約にしない。Bumble error は source chain に�
 - 利用者定義 model / reporting mode
 - `AnyController` と型消去された controller collection
 - dynamic `ControllerKind` factory
-- raw HID control / interrupt packet API
-- raw HCI / L2CAP API
+- controller method の `create_profile()`
+- raw HID / HCI / L2CAP API
 - custom transport public trait
 - `JoyConPair`
 - controller manager
 - 高水準 rumble
 - amiibo / NFC
 - IR camera
-- macro scheduler
 - daemon IPC
 - C ABI / FFI
-- `InputState<M>` の stable serde format
 - automatic infinite reconnect
 - implicit bond deletion と fresh pairing fallback
 
-動的な統一操作面が必要になった場合は、型消去によって失うモデル能力と failure semantics を別仕様で定義する。
+動的な統一操作面が必要になった場合は、型消去で失う能力と failure semantics を別仕様で定義する。
