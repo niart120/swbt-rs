@@ -124,7 +124,7 @@ impl<M: ControllerModel> SwitchHidProtocol<M> {
         }
     }
 
-    fn prepare_subcommand(
+    pub(crate) fn prepare_subcommand(
         &self,
         request: SubcommandRequest<'_>,
         state: &InputState<M>,

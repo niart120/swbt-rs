@@ -13,7 +13,8 @@ use crate::{
     model::ControllerModel,
     protocol::{
         ImuEncodingState, InputPreparation, PreparedOutputAction, PreparedSessionReply,
-        PreparedSubcommandReply, ProtocolSession, SwitchHidProtocol,
+        PreparedSubcommandReply, ProtocolError, ProtocolSession, SubcommandRequest,
+        SwitchHidProtocol,
     },
     runtime::transport::{SendAcceptance, TransportPort, TransportResult},
 };
@@ -48,6 +49,29 @@ impl<M: ControllerModel> ReportSender<M> {
     #[must_use]
     pub(crate) const fn session(&self) -> ProtocolSession {
         self.committed.session
+    }
+
+    pub(crate) fn prepare_reply(
+        &self,
+        protocol: &SwitchHidProtocol<M>,
+        request: SubcommandRequest<'_>,
+        current: &InputState<M>,
+    ) -> Result<PreparedOutputAction, ProtocolError> {
+        if self.committed.session.protocol_ready() {
+            protocol.prepare_subcommand(
+                request,
+                current,
+                self.committed.next_timer,
+                self.committed.session,
+            )
+        } else {
+            protocol.prepare_subcommand(
+                request,
+                &InputState::neutral(),
+                self.committed.next_timer,
+                self.committed.session,
+            )
+        }
     }
 
     pub(crate) fn send_input(
@@ -132,10 +156,11 @@ mod tests {
     use std::time::Duration;
 
     use crate::{
-        input::{ImuFrame, InputState},
+        input::{ImuFrame, InputState, Stick},
         model::Pro,
         protocol::{
-            DeviceInfoBluetoothAddress, OutputPreparation, PreparedOutputAction, SwitchHidProtocol,
+            DeviceInfoBluetoothAddress, OutputReport, PreparedOutputAction, SwitchHidProtocol,
+            parse_output_report,
         },
         runtime::{
             sender::ReportSender,
@@ -175,6 +200,71 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(0x30, 0), (0x21, 1), (0x30, 2)]
         );
+        assert_eq!(sender.timer(), 3);
+    }
+
+    #[test]
+    fn reply_prefix_uses_readiness_before_the_session_candidate_is_committed() {
+        let protocol = protocol();
+        let (mut transport, control) = open_transport();
+        control.script_sends([
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Rejected,
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Accepted,
+        ]);
+        let mut sender = ReportSender::<Pro>::new();
+        let current = InputState::<Pro>::neutral().with_sticks(
+            Stick::raw(0x123, 0xabc).unwrap(),
+            Stick::raw(0xfff, 0).unwrap(),
+        );
+        let neutral = InputState::<Pro>::neutral();
+
+        let report_mode = output_action(&protocol, &sender, &current, 0x03, &[0x30]);
+        assert_eq!(
+            reply_prefix(&report_mode),
+            input_prefix(&protocol, &sender, &neutral)
+        );
+        sender
+            .send_reply(report_mode, &mut transport)
+            .expect("report mode reply accepted");
+        assert!(!sender.session().protocol_ready());
+
+        let session_before_rejection = sender.session();
+        let rejected_lights = output_action(&protocol, &sender, &current, 0x30, &[0x01]);
+        assert_eq!(
+            reply_prefix(&rejected_lights),
+            input_prefix(&protocol, &sender, &neutral)
+        );
+        let error = sender
+            .send_reply(rejected_lights, &mut transport)
+            .expect_err("first player lights reply rejected");
+        assert_eq!(error.kind(), TransportErrorKind::SendRejected);
+        assert_eq!(sender.timer(), 1);
+        assert_eq!(sender.session(), session_before_rejection);
+
+        let accepted_lights = output_action(&protocol, &sender, &current, 0x30, &[0x01]);
+        assert_eq!(
+            reply_prefix(&accepted_lights),
+            input_prefix(&protocol, &sender, &neutral)
+        );
+        sender
+            .send_reply(accepted_lights, &mut transport)
+            .expect("player lights reply retry accepted");
+        assert!(sender.session().protocol_ready());
+
+        let next_reply = output_action(&protocol, &sender, &current, 0x08, &[]);
+        assert_eq!(
+            reply_prefix(&next_reply),
+            input_prefix(&protocol, &sender, &current)
+        );
+        assert_ne!(
+            reply_prefix(&next_reply),
+            input_prefix(&protocol, &sender, &neutral)
+        );
+        sender
+            .send_reply(next_reply, &mut transport)
+            .expect("reply after readiness accepted");
         assert_eq!(sender.timer(), 3);
     }
 
@@ -303,12 +393,32 @@ mod tests {
         raw.extend_from_slice(&NEUTRAL_RUMBLE);
         raw.push(subcommand_id);
         raw.extend_from_slice(payload);
-        let prepared = protocol
-            .prepare_output_report(&raw, state, sender.timer(), sender.session())
-            .expect("valid output report");
-        let OutputPreparation::Subcommand { outcome, .. } = prepared else {
+        let OutputReport::Subcommand { request, .. } =
+            parse_output_report(&raw).expect("valid output report")
+        else {
             panic!("0x01 must prepare a subcommand");
         };
-        outcome.expect("supported subcommand")
+        sender
+            .prepare_reply(protocol, request, state)
+            .expect("supported subcommand")
+    }
+
+    fn reply_prefix(action: &PreparedOutputAction) -> &[u8] {
+        match action {
+            PreparedOutputAction::Reply(reply) => &reply.bytes()[2..13],
+            PreparedOutputAction::SessionReply(reply) => &reply.bytes()[2..13],
+        }
+    }
+
+    fn input_prefix(
+        protocol: &SwitchHidProtocol<Pro>,
+        sender: &ReportSender<Pro>,
+        state: &InputState<Pro>,
+    ) -> [u8; 11] {
+        protocol
+            .prepare_input_report(state, sender.timer(), sender.session(), 0)
+            .bytes()[2..13]
+            .try_into()
+            .expect("input prefix has a fixed width")
     }
 }

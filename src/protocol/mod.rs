@@ -65,13 +65,15 @@ mod spi;
 )]
 mod subcommand;
 
+pub(crate) use error::ProtocolError;
 pub(crate) use facade::{InputPreparation, PreparedOutputAction, SwitchHidProtocol};
 pub(crate) use imu::ImuEncodingState;
+pub(crate) use output_report::SubcommandRequest;
 pub(crate) use session::ProtocolSession;
 pub(crate) use subcommand::{PreparedSessionReply, PreparedSubcommandReply};
 
 #[cfg(test)]
-pub(crate) use facade::OutputPreparation;
+pub(crate) use output_report::{OutputReport, parse_output_report};
 #[cfg(test)]
 pub(crate) use subcommand::DeviceInfoBluetoothAddress;
 
