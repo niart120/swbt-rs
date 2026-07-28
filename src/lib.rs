@@ -5,12 +5,17 @@
 //! roadmap order. The M0 foundation establishes this library target before any
 //! Bluetooth transport is exposed.
 
+pub mod controller;
 pub mod error;
 pub mod input;
 pub mod model;
 pub mod profile;
 pub mod reporting;
 
+pub use controller::{
+    Controller, ControllerBuilder, DirectJoyConL, DirectJoyConR, DirectProController, JoyConL,
+    JoyConR, ProController,
+};
 pub use error::{Error, ErrorKind, Result};
 pub use input::{
     Button, ButtonKind, ImuFrame, ImuSamples, InputState, JoyConLButton, JoyConLInputState,
