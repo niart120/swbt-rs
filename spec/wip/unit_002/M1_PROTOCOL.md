@@ -133,7 +133,7 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | refactor-done | `Rgb24` が 24-bit 境界を保証し、`ControllerColors` が 4 色を RGB 順の 12 bytes にする | new | public value | red: root import 不在。green: 3 passed。SPI byte 検査を公開 contract test へ統合し、重複 unit test を除去 |
 | refactor-skipped | IMU の `0.070 dps/raw` と `1/4096 G/raw` が ties-to-even、finite、i16 overflow 契約を守る | new | public value | red: physical constructor/method 不在。green: 7 passed、MSRV pass。変換 helper は小さく追加の構造変更なし |
 | refactor-skipped | 各 `M::SPEC` が device info、default colors、校正、IMU modes、pairing trigger を一意に投影する | new | model | red: `ModelSpec::protocol` 不在。green: 3 model の metadata projection 1 passed、MSRV pass。model macro 内の単一宣言として実装済みで追加の構造変更なし |
-| todo | virtual SPI が model seed、custom colors、erased range、最大長、境界 error を再現する | new | protocol unit | zero-length end read は Python と一致 |
+| refactor-done | virtual SPI が model seed、custom colors、erased range、最大長、境界 error を再現する | new | protocol unit | red: SPI 型不在。green: 3 passed、MSRV pass。固定長 29-byte read と疎な seed 投影にし、SPI テストを専用 module へ分離 |
 | todo | neutral state が決定的な 49-byte `0x30` と candidate next timer を生成し、timer が wrap する | new | protocol unit | report ID と layout を固定 |
 | todo | 3 model の全 supported button と stick が Python fixture と一致し、SL/SR と unavailable side を誤配置しない | characterization | protocol unit | logical code を wire offset に使わない |
 | todo | disabled / standard IMU が zero block、3 raw frames、順序、candidate next state を生成する | new | protocol unit | input report builder と mode selection を分離 |
@@ -175,6 +175,7 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | `tests/protocol_fixture_audit.rs` | new | fixture schema / coverage audit |
 | `.github/workflows/ci.yml` | modify | no-default-features protocol gate |
 | `README.md` | modify | M1 の現在面と feature/gate |
+| `spec/dev-journal.md` | modify | M2 接続時に解除する一時的な dead-code 境界 |
 | `spec/wip/unit_002/M1_PROTOCOL.md` | new / modify | 作業仕様と検証記録 |
 
 ## 9. 検証
@@ -187,12 +188,14 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | `cargo +1.87 test --test imu_contract --locked` | pass | red は physical conversion API 不在。green は raw/scale/rounding/error/preservation を含む 7 passed |
 | `cargo +1.87 test --locked model::tests::protocol_metadata_is_projected_from_each_model_declaration` | pass | red は `ModelSpec::protocol` 不在。green は model 別 device info、色、校正、IMU modes、pairing trigger を検査する 1 passed |
 | `cargo clippy --all-targets --all-features -- -D warnings` | pass | TDD item 4 時点。protocol metadata は crate-private のまま警告なし |
+| `cargo +1.87 test --locked protocol::tests::spi` | pass | red は `VirtualSpiFlash` / `ProtocolError` 不在。green / refactor 後は model seed、override、最大長、end-exclusive、overflow の 3 passed |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | TDD item 5 時点。通常 build と unit test build の双方で警告なし |
 | TDD item commands | not run | 各 item の red / green / refactor を追記する |
 | `cargo fmt --all --check` | not run | final gate |
 | `cargo +1.87 check --all-targets --all-features --locked` | not run | MSRV |
 | `cargo check --all-targets --all-features --locked` | not run | stable |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | not run | static gate |
-| `cargo test --all-targets --all-features --locked` | not run | all features |
+| `cargo test --all-targets --all-features --locked` | pass | TDD item 5 時点で unit 6、integration 28、example 0 passed。final gate で再実行する |
 | `cargo test --lib protocol:: --no-default-features --locked` | not run | Bumble-free protocol |
 | `cargo tree --no-default-features --edges normal` | not run | Bumble 不在を検査 |
 | `cargo +nightly miri test --lib protocol::` | not run | selected Miri |

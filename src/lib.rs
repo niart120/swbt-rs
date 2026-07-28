@@ -29,6 +29,7 @@ pub mod error;
 pub mod input;
 pub mod model;
 pub mod profile;
+mod protocol;
 pub mod reporting;
 
 pub use controller::{

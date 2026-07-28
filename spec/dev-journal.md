@@ -31,3 +31,17 @@ M0 は `chaitanyarahalkar/bumble-rs` の commit `bbac2a6803b8cab0920ab725a23aa40
 ### 方針
 
 M0 では exact git revision を優先し、`publish = false` を設定する。M9 の package / release 作業までに、`bumble-rs` の crate 公開名、upstream publish、または依存境界の変更を作業仕様へ昇格する。別 package を使った `cargo package` 成功を release gate にしない。
+
+## 2026-07-29: M1 pure protocol と M2 runtime の接続前 dead code
+
+### 現状
+
+M1 は `src/protocol/` に crate-private の純粋変換を実装する。最初の production caller は M2 の worker / sender であり、M1 中は unit test からだけ呼ばれる。
+
+### 観察
+
+`protocol` を `cfg(test)` にすると通常 build が M1 の実装を検査しない。通常 build に含めると、M2 接続前の module 全体が未参照として `dead_code` になる。
+
+### 方針
+
+M1 中は、実装済みで unit test がある protocol module に限り `cfg_attr(not(test), allow(dead_code, reason = "..."))` を置く。test build では抑制せず、未検査 item を隠さない。M2 が runtime caller を追加した commit で属性を削除し、通常 build の参照関係を gate で確認する。
