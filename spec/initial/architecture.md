@@ -2,56 +2,56 @@
 
 - 状態: **決定**
 - 基準断面: [source-baseline.md](source-baseline.md)
+- 型関係の正本: [type-modeling.md](type-modeling.md)
 - 公開契約: [api.md](api.md)
 
-この文書は `swbt-rs` の module 境界、所有権、runtime 駆動、Bumble 統合、接続状態機械を定義する。
+この文書は `swbt-rs` の module 境界、型所有権、runtime 駆動、Bumble 統合、profile persistence、接続状態機械を定義する。
 
 ## 1. 設計目標
 
-`swbt-rs` は daemon ではなく library とする。利用者は process 内の controller object を操作し、library 内部の worker が Bluetooth と周期送信を駆動する。
-
 優先順位は次の通り。
 
-1. NX HID wire behavior と送信順序の再現
-2. cleanup、neutral、state commit の予測可能性
-3. Bumble 依存の局所化
-4. 実機なしで決定的に検証できる構造
-5. Rust 利用者が async runtime を選ばずに使える公開 API
-6. 性能と依存量の削減
+1. model 固有の入力能力と reporting mode の差をコンパイル時に保証する
+2. NX HID wire behavior と送信順序を Python 基準断面と一致させる
+3. cleanup、neutral、state commit の意味を予測可能にする
+4. Bumble 依存を transport 境界へ閉じ込める
+5. 実機なしで決定的に検証できる構造にする
+6. 利用者に async runtime を要求しない
+7. 性能と依存量の削減は correctness 確定後に行う
 
-初期段階で最小 build size を優先して Bumble の責務を再実装しない。
+モデル差を共通 enum と実行時 validation だけへ畳み込まず、公開 controller、入力状態、worker、protocol session が `M` と `R` を保持する。
 
 ## 2. 全体構成
 
 ```text
 利用者 thread
   │
-  │  swbt public API
+  │ Controller<M, R>
+  │ Button<M> / InputState<M>
   ▼
-Concrete Controller
-  ├─ builder / profile validation
+ControllerBuilder<M, R>
+  ├─ typed profile validation: PairingProfile<M>
   ├─ immutable configuration
-  ├─ status snapshot
-  └─ bounded command client
-             │ command / response
+  └─ worker creation
+             │ typed command / response
              ▼
-      Controller Worker (1 thread / controller)
+      ControllerWorker<M, R>
         ├─ lifecycle state machine
-        ├─ InputStateStore
-        ├─ ReportScheduler
-        ├─ ReportSender
-        ├─ ProtocolHandshake
-        ├─ SwitchHidProtocol
-        ├─ ProfileStore
+        ├─ InputStateStore<M>
+        ├─ ReportingPolicy<R>
+        ├─ ReportSender<M>
+        ├─ ProtocolHandshake<M>
+        ├─ SwitchHidProtocol<M>
+        ├─ ProfileStore<M>
         └─ TransportPort
-               │
+               │ model-independent events / bytes
                ▼
         BumbleTransportAdapter
           ├─ bumble_transport::ExternalHost
           ├─ bumble_host::Device
           ├─ Classic pairing / key store bridge
           ├─ SDP channel service
-          ├─ HID control/interrupt channel bridge
+          ├─ HID control/interrupt bridge
           └─ USB HCI transport
                │
                ▼
@@ -61,11 +61,64 @@ Concrete Controller
         Nintendo Switch
 ```
 
-**決定:** Bumble、protocol state、report timer、connection state を同じ worker thread が所有する。複数 thread から同じ `Device` や channel manager を mutate しない。
+Bumble、protocol state、report timer、connection state は controller ごとの単一 worker thread が所有する。複数 thread から同じ `Device`、channel manager、`InputState<M>` を mutate しない。
 
-## 3. crate / module 構成
+## 3. 型軸と値軸
 
-初期の想定構成:
+### 3.1 型として保持するもの
+
+- controller model: `model::Pro` / `model::JoyConL` / `model::JoyConR`
+- reporting mode: `reporting::Periodic` / `reporting::Direct`
+- model-valid button: `Button<M>`
+- model-valid complete state: `InputState<M>`
+- model 固有 profile: `PairingProfile<M>`
+- model 固有 worker / protocol state: `ControllerWorker<M, R>` / `SwitchHidProtocol<M>`
+
+### 3.2 共通値として保持するもの
+
+- `Stick`
+- `ImuFrame`
+- `ImuSamples`
+- `ControllerColors`
+- `Rgb24`
+- Bluetooth address / peer identity
+- HCI / L2CAP / HIDP bytes
+
+共通物理量を model ごとに複製しない。能力差は method の trait bound、wire 差は `M::SPEC` と encoder で表す。
+
+### 3.3 runtime projection
+
+`ControllerKind` と `ReportingKind` は profile DTO、diagnostics、CLI などの動的境界で使う値である。core controller に重複 field として保持せず、常に `M::KIND` と `R::KIND` から導出する。
+
+## 4. model 宣言の単一正本
+
+model の次の情報は 1 箇所の宣言から生成または検査する。
+
+- marker type
+- `ControllerKind` variant
+- profile 文字列
+- 使用可能 `ButtonKind`
+- `Button<M>` associated constants
+- `TryFrom<ButtonKind> for Button<M>`
+- `HasLeftStick` / `HasRightStick` / `HasDualSticks`
+- local name、class of device、device info、SPI seed、SDP policy を持つ `ModelSpec`
+
+```rust
+pub struct ModelSpec {
+    pub kind: ControllerKind,
+    pub profile_name: &'static str,
+    pub local_name: &'static str,
+    pub class_of_device: u32,
+    pub supported_buttons: ButtonKindSet,
+    pub has_left_stick: bool,
+    pub has_right_stick: bool,
+    pub protocol: &'static ProtocolProfile,
+}
+```
+
+`ModelSpec` は runtime 読み取り専用であり、public customization point にしない。model 宣言と別の手書き対応表を protocol、profile、docs に複製しない。
+
+## 5. crate / module 構成
 
 ```text
 src/
@@ -76,22 +129,36 @@ src/
     discovery.rs
     selector.rs
 
-  controller/
+  model/
     mod.rs
-    builder.rs
-    common.rs
+    declaration.rs
+    capability.rs
+    spec.rs
+
+  reporting/
+    mod.rs
     periodic.rs
     direct.rs
-    pro_controller.rs
-    joycon_l.rs
-    joycon_r.rs
+
+  controller/
+    mod.rs
+    controller.rs
+    builder.rs
+    aliases.rs
 
   input/
     mod.rs
     button.rs
+    button_kind.rs
+    button_set.rs
+    stick.rs
     imu.rs
     state.rs
-    stick.rs
+
+  connection/
+    mod.rs
+    options.rs
+    result.rs
 
   diagnostics/
     mod.rs
@@ -101,22 +168,19 @@ src/
   protocol/
     mod.rs
     input_report.rs
+    imu_report.rs
     output_report.rs
     session.rs
     handshake.rs
     subcommand.rs
     spi.rs
     rumble.rs
-    profiles/
-      mod.rs
-      common.rs
-      pro_controller.rs
-      joycon_l.rs
-      joycon_r.rs
+    profile.rs
 
   profile/
     mod.rs
     document.rs
+    typed.rs
     key_store.rs
     local_address.rs
     store.rs
@@ -129,6 +193,7 @@ src/
     state_store.rs
     report_sender.rs
     report_scheduler.rs
+    reporting_policy.rs
     status.rs
     clock.rs
 
@@ -149,10 +214,10 @@ src/
   error.rs
 
   bin/
-    swbt-probe.rs       # roadmap 後半で追加
+    swbt-probe.rs
 
 tests/
-  common/
+  ui/
   fixtures/
   protocol/
   runtime/
@@ -162,70 +227,70 @@ tests/
   hardware/
 ```
 
-公開 module は `adapter`、`controller`、`diagnostics`、`input`、`profile`、`error` の再 export に限定する。`protocol`、`runtime`、`transport` は crate-private とする。
+公開 module は `adapter`、`connection`、`controller`、`diagnostics`、`input`、`model`、`profile`、`reporting`、`error` に限定する。`protocol`、`runtime`、`transport` は crate-private とする。
 
-## 4. 依存方向
+## 6. 依存方向
 
 ```text
-controller
-  → input
-  → profile
-  → runtime
+controller<M, R>
+  → model
+  → reporting
+  → input<M>
+  → profile<M>
+  → runtime<M, R>
   → error
 
-runtime
-  → input
-  → protocol
-  → profile
+runtime<M, R>
+  → model
+  → reporting policy
+  → input<M>
+  → protocol<M>
+  → profile<M>
   → transport::port
   → error
 
-protocol
-  → input
-  → protocol::profiles
+protocol<M>
+  → model::ModelSpec
+  → input<M>
   → error
 
-profile
-  → protocol::profiles::ControllerKind
+profile<M>
+  → model
+  → profile DTO
   → error
 
 transport::bumble
   → transport::port
-  → profile::key_store interface
+  → neutral key-store interface
   → bumble-* crates
   → error
-
-input
-  → std only
 ```
 
 禁止する依存:
 
-- `input` から `protocol` / `transport` / Bumble
-- `protocol` から `runtime` / `transport` / Bumble
-- `profile::document` から Bumble の stored key type
-- `controller` から `transport::bumble` の concrete type
-- public signature から Bumble type
-- test fake から production Bumble adapter
-- Bumble adapter から concrete public controller type
+- `input` から Bumble、transport、runtime
+- `ButtonKind` discriminant から暗黙に wire byte / bit を導くこと
+- profile DTO から public controller concrete alias へ依存すること
+- controller から `transport::bumble` concrete type へ依存すること
+- public signature に Bumble type を出すこと
+- test fake から production Bumble adapter へ依存すること
+- Bumble adapter から `Button<M>` や `InputState<M>` を扱うこと
+- core runtime で `ControllerKind` を毎操作 `match`して model 型を再現すること
 
-`profile::key_store` は swbt schema と neutral key representation を所有し、Bumble conversion は `transport::bumble::key_store` に置く。
+## 7. public controller と builder
 
-## 5. controller object と worker 所有権
-
-### 5.1 public controller
+### 7.1 `Controller<M, R>`
 
 public controller が所有するもの:
 
-- validated immutable `ControllerConfig`
-- worker command sender
+- validated immutable `ControllerConfig<M, R>`
+- typed worker command sender
 - worker join handle
-- lock-free または短時間 read lock の status snapshot
+- read-only status snapshot
 - lifecycle client-side guard
-- controller kind marker
-- reporting mode marker
+- `PhantomData<fn() -> (M, R)>` または同等の型保持
 
-public controller が所有しないもの:
+所有しないもの:
 
 - open USB handle
 - `ExternalHost`
@@ -236,202 +301,236 @@ public controller が所有しないもの:
 - report scheduler
 - Switch session state
 
-これらは worker に閉じ込める。
+### 7.2 `ControllerBuilder<M, R>`
 
-### 5.2 worker command
-
-概念上の command:
+builder は共通型 1 個とし、model / reporting の値 field を持たない。
 
 ```rust
-enum WorkerCommand {
+struct ControllerConfig<M: ControllerModel, R: ReportingMode> {
+    adapter: AdapterSelector,
+    profile_path: Option<PathBuf>,
+    colors: ControllerColors,
+    report_period: R::PeriodConfig,
+    _marker: PhantomData<fn() -> M>,
+}
+```
+
+`R::PeriodConfig` は Periodic では validated `Duration`、Direct では unit 型とするか、同等に不正状態を表現不能にする。Direct config に `Option<Duration>` を残して build 時に reject する設計は採らない。
+
+path が存在する場合は `PairingProfile<M>::load()` で model を確定する。path が存在しない場合は create-new target として保持し、通常 reconnect は `NoBond`、`create_profile()` は新規作成へ進む。
+
+## 8. model-valid input
+
+### 8.1 `ButtonKind` と `Button<M>`
+
+`ButtonKind` は closed な論理 ID であり、explicit discriminant を持つ。`Button<M>` は対象 model で使用可能であることの型証明である。
+
+公開経路:
+
+```text
+static Rust code
+  → ProButton::A / JoyConRButton::A
+  → Button<M>
+  → ButtonKind
+  → explicit wire mapping table
+```
+
+動的経路:
+
+```text
+CLI / config string
+  → ButtonKind
+  → TryFrom<ButtonKind> for Button<M>
+  → supported / UnsupportedInput
+```
+
+`Button<M>` の private constructor を crate 内でも無秩序に使わない。生成 code と dynamic conversion を model declaration module に閉じる。
+
+### 8.2 `InputState<M>`
+
+`InputState<M>` は public API から model-valid な状態だけを構築できる。
+
+内部候補:
+
+```rust
+struct InputState<M: ControllerModel> {
+    buttons: ButtonSet<M>,
+    sticks: M::StickState,
+    imu: [ImuFrame; 3],
+}
+```
+
+`M::StickState` は private associated type とし、次のような model 固有 layout を許可する。
+
+```text
+Pro      → DualStickState { left, right }
+JoyConL  → LeftStickState { left }
+JoyConR  → RightStickState { right }
+```
+
+公開 API が不正な `Option<Stick>` の組み合わせを作ってから送信時に検査する構造は採らない。
+
+### 8.3 共通センサー値
+
+`ImuFrame` は model 非依存である。`InputState<M>` に同じ `[ImuFrame; 3]` を保持し、wire encoder が `M::SPEC.protocol` と connection session の IMU mode から bytes を生成する。
+
+## 9. typed worker command
+
+概念上の command は model 型を保持する。
+
+```rust
+pub(crate) enum CommonCommand<M: ControllerModel> {
     Open,
     CreateProfile(CreateProfileRequest),
     Pair { timeout: Duration },
     Reconnect { timeout: Duration },
     Connect(ConnectOptions),
-
-    Apply(InputState),        // Periodic
-    Send(InputState),         // Direct
-    Press(Vec<Button>),
-    Release(Vec<Button>),
-    Tap { buttons: Vec<Button>, duration: Duration },
-    SetSticks { left: Option<Stick>, right: Option<Stick> },
-    SetImu([ImuFrame; 3]),
+    Press(Vec<Button<M>>),
+    Release(Vec<Button<M>>),
+    Tap {
+        buttons: Vec<Button<M>>,
+        duration: Duration,
+    },
+    SetImu(ImuSamples),
     Neutral,
-
     Close { send_neutral: bool },
 }
 ```
 
-各 command は one-shot response sender を持つ。response を失った場合も worker は command の副作用を途中で巻き戻さない。呼び出し thread が timeout した後の扱いを曖昧にしないため、入力 command 自体には library-defined operation timeout を設け、public call の待機 timeout と一致させる。
+stick command は capability-bound frontend で作られ、worker へ渡す時点でも model-valid な private command にする。
 
-channel は bounded とする。初期値は 64 command。queue full は無期限 block ではなく `Busy` とする。report tick は command queue に積まず、worker 内 scheduler が持つ。
+reporting 固有 command:
 
-### 5.3 単一 worker を採用する理由
+```rust
+pub(crate) enum PeriodicCommand<M: ControllerModel> {
+    Common(CommonCommand<M>),
+    Apply(InputState<M>),
+}
 
-- Bumble core が同期・明示 poll model である
-- `Device`、Classic channel、pairing session の mutable ownership を一箇所にできる
-- `0x21` reply と `0x30` input の実送信順を一つの sender で固定できる
-- Direct transaction の「受理後 commit」を lock ではなく event loop 順序で実現できる
-- periodic timer と HCI activity の待機を同じ deadline calculation で扱える
-- close / disconnect / timeout と入力 command の競合を再現可能にできる
+pub(crate) enum DirectCommand<M: ControllerModel> {
+    Common(CommonCommand<M>),
+    Send(InputState<M>),
+}
+```
 
-async executor を内部に導入して同じ mutable state を `Arc<Mutex<_>>` へ分散させない。
+`R` に応じた associated command type または同等の private abstraction で worker を構築する。内部 enum に `Apply` と `Send` の両方を残し、到達不能 branch を runtime error にする構造は避ける。
 
-## 6. worker loop
+command channel は bounded とする。report tick は command queue に積まず、worker 内 scheduler が所有する。
 
-概念的な loop:
+## 10. `ControllerWorker<M, R>`
+
+```rust
+struct ControllerWorker<M: ControllerModel, R: ReportingMode> {
+    lifecycle: LifecycleStateMachine,
+    state: InputStateStore<M>,
+    reporting: R::RuntimeState,
+    sender: ReportSender<M>,
+    protocol: SwitchHidProtocol<M>,
+    profile: ProfileStore<M>,
+    transport: Box<dyn TransportPort>,
+}
+```
+
+`R::RuntimeState`:
+
+```text
+Periodic → ReportScheduler + period + holdoff integration
+Direct   → no user-input scheduler + acceptance transaction state
+```
+
+worker の model/reporting generic は compile-time invariant のために維持する。Bumble transport を 6 通りに複製するためではない。transport field と I/O loop は model 非依存の共通実装を共有する。
+
+### 10.1 loop
 
 ```text
 while lifecycle != Closed:
-    1. due report / tap release / handshake retry の最短 deadline を計算
-    2. command channel を非 blocking drain
+    1. reporting policy と handshake の最短 deadline を計算
+    2. typed command channel を non-blocking drain
     3. Bumble Device を poll
-    4. inbound transport event を protocol へ渡す
-    5. 生成された reply を ReportSender へ渡す
+    4. inbound transport event を HIDP / NX protocol へ渡す
+    5. 生成 reply を ReportSender<M> へ渡す
     6. due scheduler event を処理
-    7. status snapshot を更新
+    7. typed state から status projection を更新
     8. command、HCI activity、deadline のいずれかまで待つ
 ```
 
-`ExternalHost` の reader thread が HCI source を block read し、worker は receiver と timer を待つ。command channel と HCI activity を同時 select できない場合は、次のどちらかを実装 spike で比較する。
+busy loop は禁止する。command channel と `ExternalHost` activity を同時 select できない場合は、activity receiver の統合か bounded deadline-aware poll を計測して選ぶ。
 
-- `ExternalHost` の activity receiver を worker select に統合する小さな upstream / local adapter
-- 最大 1 ms の bounded poll interval と deadline-aware wait
+## 11. reporting policy
 
-busy loop は禁止する。8 ms periodic mode で idle CPU 使用率と jitter を測定し、選択を roadmap M2 で確定する。
+### 11.1 Periodic
 
-## 7. runtime component
-
-### 7.1 `InputStateStore`
-
-責務:
-
-- current committed state の保持
-- neutral baseline の生成
-- helper operation から候補 state を生成
-- controller profile validation の適用
-- `snapshot()` 用 copy の公開
-- disconnect / new session 時の neutral reset
-
-Periodic:
-
-- `Apply` / helper command の validation 完了後に commit
+- state command は validation 完了後に `InputState<M>` を commit
 - wire send 失敗で local state を rollback しない
+- 通常入力 readiness 成立後に scheduler を開始
+- absolute monotonic deadline を使う
+- overrun 時に missed tick を burst 送信しない
+- 各 tick で latest typed state を 1 件だけ送る
 
-Direct:
+### 11.2 Direct
 
-- candidate report が transport に受理された後だけ commit
-- 受理前 failure では current state を維持
+- 接続済みを要求
+- candidate `InputState<M>` を report に encode
+- transport acceptance 後だけ state を commit
+- acceptance 前 failure では previous state を維持
+- user-input scheduler を持たない
+- `tap()` の押下から解放まで同じ transaction を保持
 
-state store は worker 専有であり、内部 mutex を持たない。public snapshot は worker が更新する read-only mirror を使う。
+## 12. protocol component
 
-### 7.2 `ReportSender`
-
-すべての HID interrupt output の唯一の送信点とする。
-
-所有する状態:
-
-- 8-bit timer byte
-- connection session id
-- IMU encoding state
-- reply 後 automatic input holdoff deadline
-- accepted report counters
-- trace metadata
-
-入力:
-
-- periodic / direct / handshake の `0x30`
-- subcommand reply の `0x21`
-- close 時 neutral
-
-規則:
-
-- report bytes の構築と transport send を同じ worker iteration で行う
-- timer byte は transport acceptance 後に進める
-- IMU next state も acceptance 後に commit する
-- reply の state prefix は send 直前の committed state から取る
-- reply が要求する session state transition は ACK と同じ serialized operation 内で行う
-- `0x40` IMU mode ACK より新形式 `0x30` が先に出ない
-- raw send failure は lifecycle / connection policy へ error event を返す
-
-### 7.3 `ReportScheduler`
-
-Periodic controller だけが通常入力用 scheduler を持つ。
-
-- 既定 period 8 ms
-- monotonic clock
-- deadline = previous deadline + period
-- send が遅延した場合、過去 deadline 分を burst 送信しない
-- current time 以上になるまで deadline を period 単位で進める
-- each tick で latest state snapshot を 1 件だけ送る
-- reply holdoff 中も deadline progression は維持し、解除後に過去 tick を追送しない
-- disconnect 中は通常 tick を送らない
-- reconnect で新 session が ready になった時点から新しい epoch を開始する
-
-clock と wait は trait で注入可能にするが crate-private とする。
-
-### 7.4 `ProtocolHandshake`
-
-connection session ごとに一つ作る。
-
-state:
-
-```text
-WaitingForFirstSubcommand
-  ├─ 1 秒ごとに bootstrap neutral
-  └─ first valid output report
-       ↓
-WaitingForReportModeAndLights
-  ├─ supported 0x03 30 reply accepted
-  ├─ non-zero 0x30 player lights reply accepted
-  └─ 条件成立
-       ↓
-ProtocolReady
-```
-
-規則:
-
-- first valid subcommand 受信後は 1 秒 bootstrap retry を停止
-- supported report mode reply 後は requested mode の neutral `0x30` を handshake owner として送る
-- unsupported report mode は ready 条件にしない
-- readiness flag は session id と結び、旧 connection から再利用しない
-- reply acceptance failure、disconnect、timeout で `Failed`
-- ready 条件成立後は handshake を明示停止してから normal scheduler を開始する
-
-### 7.5 `SwitchHidProtocol`
-
-純粋または明示 state 入出力の protocol core とする。
+### 12.1 `SwitchHidProtocol<M>`
 
 責務:
 
-- `0x30` input report の生成
-- `0x01` / `0x10` output report の parse
-- rumble raw state の保持に必要な event 生成
-- subcommand dispatch
-- `0x21` reply payload と ACK の生成
-- virtual SPI read
-- controller kind 固有 device info / colors
-- report mode、IMU mode、vibration enabled 等の connection session state
-- IMU 36-byte block encode
+- `InputState<M>` から `0x30` report を生成
+- `0x01` / `0x10` output report を parse
+- subcommand effect と `0x21` reply を生成
+- model 固有 device info / SPI / controller colors を `M::SPEC` から取得
+- connection session の report mode、IMU mode、vibration state を管理
 
 扱わないもの:
 
-- HCI / ACL / L2CAP
-- USB
-- wall clock sleep
+- USB / HCI / L2CAP
 - filesystem
-- public controller lifecycle
+- worker thread
 - pairing key
 - tracing subscriber
 
-protocol API は byte slice と明示 state を受け、同じ入力から同じ output を返す部分を最大化する。
+### 12.2 button wire mapping
 
-## 8. transport port
+wire mapping は明示表とする。
 
-### 8.1 internal interface
+```rust
+fn button_wire_position(
+    kind: ControllerKind,
+    button: ButtonKind,
+) -> Option<ButtonWirePosition>;
+```
 
-Bumble 固有 API を隠す crate-private interface:
+core generic path では `M::KIND` を渡す。`ButtonKind as u8` をそのまま report bit offset として使わない。model 宣言で使用可能とされた全 button に mapping があることを table audit test で保証する。
+
+### 12.3 `ReportSender<M>`
+
+すべての HID interrupt output の唯一の送信点。
+
+所有する状態:
+
+- timer byte
+- connection session id
+- IMU encoding state
+- automatic input holdoff deadline
+- accepted counters
+
+規則:
+
+- bytes 構築と transport send を同じ serialized operation で行う
+- timer と IMU next state は acceptance 後だけ進める
+- reply prefix は send 直前の committed `InputState<M>` から取る
+- `0x40` ACK より新 mode の `0x30` を先行させない
+
+## 13. transport port
+
+Bumble 固有 API を隠す model 非依存 interface:
 
 ```rust
 trait TransportPort {
@@ -446,89 +545,41 @@ trait TransportPort {
 }
 ```
 
-実装時は borrow と event batching に合わせて signature を調整してよいが、次の意味は変えない。
+意味:
 
-- `send_*` success = local transport queue / L2CAP send path acceptance
-- air delivery / controller completed packets は success 条件外
+- send success は local transport queue / L2CAP path acceptance
+- air delivery / controller completed packet は成功条件外
 - `poll` は timeout 以内に戻る
 - `close` は冪等
-- peer key material は event の Debug に出さない
-- protocol layer は channel CID / PSM を知らない
+- protocol layer は CID / PSM を知らない
+- transport event は `Button<M>` や `InputState<M>` を含まない
 
-### 8.2 event
+## 14. Bumble 統合
 
-```rust
-enum TransportEvent {
-    ClassicConnectionRequested { peer: PeerIdentity },
-    ClassicConnected { peer: PeerIdentity, handle: u16 },
-    PairingComplete { peer: PeerIdentity, bond: Option<BondRecord> },
-    ChannelOpened { kind: HidChannelKind },
-    HidControlReceived(Vec<u8>),
-    HidInterruptReceived(Vec<u8>),
-    ChannelClosed { kind: HidChannelKind, reason: Option<u8> },
-    Disconnected { reason: Option<u8> },
-    TransportEnded,
-}
-```
-
-handle、CID、PSM は Bumble adapter 内部で必要だが、runtime 上位へ出す event は意味型へ正規化する。
-
-## 9. Bumble 統合
-
-### 9.1 transport open
-
-想定手順:
+### 14.1 open
 
 1. `AdapterSelector` を Bumble transport spec へ変換
-2. `bumble_transport::open_split_transport` で source / sink を分離
-3. `bumble_transport::ExternalHost::new`
-4. `bumble_host::Device::from_config`
+2. `open_split_transport`
+3. `ExternalHost::new`
+4. `Device::from_config`
 5. `ExternalHost::initialize_device`
 6. controller capabilities と local address を取得
-7. Classic discoverability / connectability の初期状態を off に保持
-8. worker event loop へ移行
+7. Classic discoverability / connectability を off に保持
+8. worker loop へ移行
 
-adapter open failure は context を加えて `TransportOpen` へ変換する。
+### 14.2 `DeviceConfiguration`
 
-`bumble-transport` 内の reader thread に加えて swbt worker thread を持つ。thread 数は docs と diagnostics に記録し、unbounded thread spawn をしない。
+- Classic enabled
+- accept-any は false
+- pairing window または stored peer に一致した incoming request だけ accept
+- local name、class of device、inquiry response は `M::SPEC` から builder 時に `TransportConfig` へ値として渡す
+- Bumble adapter 自体は generic `M` を知らない
 
-### 9.2 `DeviceConfiguration`
+### 14.3 SDP
 
-初期候補:
+PSM `0x0001`。model 固有 HID service record と descriptor は protocol/model layerで bytes または neutral descriptor に構築し、Bumble service はそれを配信する。
 
-- `classic_enabled = true`
-- `classic_accept_any = false`
-- `classic_smp_enabled` は Bumble pairing path に合わせて設定
-- local name、class of device、inquiry response は controller profile から構築
-- LE は NX HID 初期経路では無効または未使用
-
-worker は pending Classic connection request を取り出し、pairing window 中の peer、または保存済み bond と一致する peer だけに `accept_classic` を発行する。それ以外は reject / timeout させる。これにより immutable な `DeviceConfiguration` に動的 policy を埋め込まず、pairing window 終了後の新規 peer を受け入れない。
-
-### 9.3 SDP
-
-Classic SDP PSM は `0x0001`。
-
-`BumbleSdpService` は次を所有する。
-
-- controller kind 固有 HID service record
-- HID descriptor
-- service handle
-- incoming SDP channel ごとの server state
-- continuation state
-- accepted channel cleanup
-
-service record bytes / attributes は Python 基準断面から fixture 化し、Rust 側の semantic builder と byte-level snapshot の両方を test する。
-
-SDP request handling は HID report scheduler を block し続けない。1 worker iteration あたりの request 処理数に上限を設け、再度 loop へ戻る。
-
-### 9.4 HID control / interrupt
-
-PSM:
-
-- HID control: `0x0011`
-- HID interrupt: `0x0013`
-
-Bumble 基準断面の `bumble-hid` には `Message` codec、`DeviceRuntime`、`L2capTransport` がある。ただし external `Device` 経路との ownership が一致しないため、初期 adapter は次の形にする。
+### 14.4 HIDP bridge
 
 ```text
 bumble_host::Device Classic SDU API
@@ -536,88 +587,65 @@ bumble_host::Device Classic SDU API
 SwbtHidChannelBridge
   ↕ bumble_hid::Message
 bumble_hid::DeviceRuntime
-  ↕ data payload / control event
+  ↕ payload / control event
 TransportEvent
 ```
 
-`SwbtHidChannelBridge` の責務:
+bridge は PSM/CID、MTU、HIDP framing、control/interrupt routing を扱う。NX 意味は `SwitchHidProtocol<M>` が扱う。
 
-- accepted PSM と CID の対応付け
-- MTU 検査
-- complete SDU と HIDP message の encode / decode
-- control / interrupt の routing
-- `DeviceRuntime` の protocol request 応答
-- protocol data payload を上位 event にする
-- channel close cleanup
+### 14.5 pairing / key store
 
-HID report payload に NX 意味を付けるのは `SwitchHidProtocol` であり、bridge は HIDP framing までとする。
-
-上流 `L2capTransport` を直接再利用できる API が追加された場合も、transport contract test を維持したまま bridge 内だけを置換する。
-
-### 9.5 pairing と key store
-
-Classic pairing は `bumble_transport::ClassicPairingSession` と `bumble::keys::KeyStore` contract を使う。
-
-`SwbtProfileKeyStore` は Bumble trait adapter として実装し、次を守る。
+`SwbtProfileKeyStore<M>` は typed profile と Bumble key-store trait の adapter とする。
 
 - namespace は local controller address
-- current namespace の peer は最大 1 件
-- update は profile schema v2 envelope 全体を原子的に置換
-- unknown fields / unsupported schema を黙って消さない
-- link key material を log しない
+- current peer は最大 1 件
+- `PairingProfile<M>` 全体を原子的に更新
 - controller kind mismatch は adapter open 前に拒否
-- adapter-default profile では power on 後に得た local address を namespace とする
-- failed pairing 後も valid empty envelope を維持する
+- adapter-default は power-on 後の local address を namespace にする
+- key material を log しない
+- failed pairing 後も valid empty envelope を維持
 
-Python `PairingKeys.to_dict()` と Bumble Rust `StoredPairingKeys` の field / hex 表現を compatibility test で固定する。変換不能な key field を drop しない。
+## 15. profile persistence
 
-### 9.6 local address
-
-`adapter-default` は initial production path とする。controller が報告する public address を変更しない。
-
-`LocalAddress` path は次の gate を通るまで無効。
-
-- target adapter の vendor-specific command を識別
-- current address read-back
-- temporary / persistent write の意味を識別
-- failure 後の recovery 手順
-- expected-address guard
-- power cycle 後の状態確認
-- Python profile と namespace の互換確認
-- CSR8510 A10 / WinUSB 実機 test
-
-generic HCI API に address write が見つからないことを理由に、vendor command を protocol core へ埋め込まない。adapter identity backend は Bumble adapter 内の別 module とする。
-
-## 10. profile persistence
-
-profile document は `serde` 用 private DTO と、validated domain type を分ける。
+raw JSON DTO は `ControllerKind` を持つ。validation 後は `PairingProfile<M>` へ変換する。
 
 ```text
 JSON bytes
-  ↓ serde DTO
+  ↓ ProfileDocument { controller_kind: ControllerKind, ... }
 schema / shape validation
-  ↓
-PairingProfile domain
-  ↓
-Bumble key conversion
+  ↓ M::KIND comparison
+PairingProfile<M>
+  ↓ Bumble key conversion
 ```
 
 write 手順:
 
 1. parent directory を作成
-2. same directory に permission-restricted temporary file を作る
+2. same-directory temporary file を作る
 3. complete JSON を書く
-4. file flush
+4. flush
 5. `sync_all`
-6. create-new は no-replace operation、update は atomic replace
+6. create-new は no-replace、update は atomic replace
 7. 対応 OS では parent directory を sync
 8. temporary file を cleanup
 
-同じ profile を複数 process が更新する競合を検出するため、initial implementation は lock file または platform file lock を使う。lock を取得できない場合は `Busy` とし、last-writer-wins にしない。
+自動 backup、世代管理、復元機能は持たない。同一 profile の並行更新は lock で拒否する。
 
-詳細は [migration-strategy.md](migration-strategy.md) を参照する。
+## 16. dynamic boundary
 
-## 11. lifecycle state machine
+CLI の `--controller pro` のように model が実行時に決まる場合は、入口で 1 度だけ分岐する。
+
+```rust
+match kind {
+    ControllerKind::Pro => run::<model::Pro>(),
+    ControllerKind::JoyConL => run::<model::JoyConL>(),
+    ControllerKind::JoyConR => run::<model::JoyConR>(),
+}
+```
+
+分岐後は typed path を維持する。`AnyController`、model 非依存 `Button`、model 非依存 `InputState` は初期 core API に追加しない。
+
+## 17. lifecycle state machine
 
 ```text
 Configured
@@ -627,63 +655,40 @@ Open
    │ pair / reconnect / connect
    ▼
 Connecting
-   ├─ failure ───────────────► Open または Failed
-   │
+   ├─ recoverable failure ─────► Open
+   ├─ terminal failure ────────► Failed
    └─ protocol readiness
           ▼
         Ready
-          ├─ disconnect ─────► Open
-          ├─ connect command ─► Busy
+          ├─ disconnect ───────► Open
+          ├─ connect command ──► Busy
           └─ close
                 ▼
              Closing
                 ▼
               Closed
                 │ open
-                └────────────► Open
+                └──────────────► Open
 ```
 
-### 11.1 `Failed`
+connection session ごとに reset するもの:
 
-`Failed` は worker panic、transport terminal failure、internal invariant violation 等、同じ worker を安全に再利用できない状態である。
-
-connection timeout、peer reject、no bond は必ずしも `Failed` にしない。cleanup が完了すれば `Open` へ戻す。
-
-`Failed` でも `close()` は実行できる。再 `open()` は旧 worker を完全に join し、新 worker を作れる場合だけ許可する。
-
-### 11.2 connection session
-
-各 Classic ACL に monotonically increasing session id を割り当てる。
-
-session-scoped:
-
-- protocol handshake
+- handshake
 - report mode
 - player lights readiness
 - IMU mode / encoding state
-- vibration enable state
 - timer byte
 - holdoff deadline
-- HID channel CIDs
-- disconnect reason
+- HID channel IDs
+- committed `InputState<M>` を neutral baseline へ戻す
 
-controller-scoped:
+model type `M` と reporting type `R` は controller lifetime 中に変化しない。
 
-- immutable profile kind / colors
-- profile path
-- adapter selector
-- committed input state。ただし new session 開始時に neutral へ reset
-- cumulative diagnostics counters
-
-旧 session の event は id mismatch で破棄し、status counter に stale event として記録する。
-
-## 12. shutdown ordering
-
-正常 close:
+## 18. shutdown ordering
 
 1. new command acceptance を停止
 2. tap / scheduler を停止
-3. connected なら trailing neutral を interrupt channel へ送る
+3. connected なら typed neutral state を encode して送る
 4. pending interrupt ACL を bounded timeout で drain
 5. HID interrupt channel を閉じる
 6. HID control channel を閉じる
@@ -692,85 +697,46 @@ controller-scoped:
 9. `Device` を final poll
 10. HCI transport sink を flush / close
 11. reader termination を確認
-12. worker response を返し join
+12. worker response を返して join
 
-neutral send または drain が失敗した場合も、resource leak を避けるため後続 cleanup を続ける。ただし「neutral が送れた」とは記録しない。
+neutral send または drain が失敗しても後続 cleanup を続ける。`Drop` ではこの完全順序を保証しない。
 
-process termination、panic、`Drop` ではこの完全順序を保証しない。API 文書の明示 close 契約を優先する。
-
-## 13. timing
-
-使用する clock は monotonic。wall clock は trace timestamp と profile metadata にだけ使う。
-
-default:
+## 19. timing
 
 | 項目 | 値 |
 |---|---:|
 | periodic report | 8 ms |
 | bootstrap retry | 1 s |
 | public connect timeout | caller supplied |
-| HCI command timeout | transport constant、初期候補 5 s |
-| channel drain timeout | 初期候補 1 s |
-| worker idle poll upper bound | 実装 spike で 1 ms 以下を評価 |
+| HCI command timeout | initial candidate 5 s |
+| channel drain timeout | initial candidate 1 s |
+| worker idle poll upper bound | implementation spike で評価 |
 
-初期候補値は test と実機計測後に決定値へ更新する。public API の default timeout を magic number として複数箇所に複製しない。
+clock は monotonic。wall clock は diagnostics と運用記録だけに使う。
 
-## 14. diagnostics と security
+## 20. dependency / upstream policy
 
-- `tracing` event は worker から emit
-- packet payload は既定で記録しない
-- key material を含む型は custom `Debug` で redaction
-- adapter serial number は通常 status に含めず、explicit environment report だけに含める
-- profile file permission は owner read/write を目標にする
-- malformed inbound packet は panic せず protocol error event
-- size field、SPI address、continuation token、MTU を boundary check
-- `unsafe` は USB / upstream dependency 内に閉じ、swbt crate 自身では初期段階で使わない
-- `forbid(unsafe_code)` を crate root に設定する。必要になった場合は仕様変更と局所 safety comment を要求する
+Bumble は [source-baseline.md](source-baseline.md) の exact revision に固定する。同一 repository の Bumble crate を複数 revision で混在させない。
 
-## 15. dependency policy
+Bumble gap が見つかった場合:
 
-Bumble は [source-baseline.md](source-baseline.md) の exact revision に固定する。
+1. swbt transport contract test を作る
+2. minimal reproduction を Bumble test として作る
+3. upstream issue / PR
+4. 必要な期間だけ temporary fork revision
+5. upstream merge 後に official revision へ戻す
 
-`bumble-transport` の transitive dependency が大きいことは既知である。初期 architecture は次の順で対応する。
+型モデルを Bumble API の都合で崩さない。Bumble は bytes と transport event の境界に留める。
 
-1. correctness を確認
-2. build time / binary size / license inventory を測定
-3. upstream の feature gate 可否を確認
-4. 必要なら USB + ExternalHost を小さい crate へ切り出す upstream PR を作る
-5. fork を常態化させない
+## 21. 未検証事項
 
-local patch が必要な場合:
-
-- `patches/bumble-rs/<issue-id>/` のようなコピーは作らない
-- fork commit を exact rev で一時固定
-- upstream issue / PR を関連付ける
-- patch removal condition を roadmap に記載
-- protocol / transport contract test を先に追加
-
-## 16. 将来拡張に対する境界
-
-初期に public extension trait を出さないが、内部境界は次を想定する。
-
-- 別 Bluetooth backend: `TransportPort`
-- 別 scheduler: `Clock` / `ReportScheduler`
-- 別 controller profile: `protocol::profiles`
-- daemon / CLI: public controller API の薄い consumer
-- async wrapper: blocking controller を `spawn_blocking` で包む別 crate
-
-future async API のために現在の public method を generic future にしない。必要なら `swbt-async` wrapper を別 package として設計する。
-
-## 17. 未検証事項
-
-次は architecture 上の仮説であり、roadmap gate を通るまで保証しない。
-
-- `ExternalHost` activity と swbt command を低 jitter で同時待機できるか
+- `ExternalHost` activity と typed command channel の低 jitter 同時待機
 - `Device` API だけで SDP / HID accepted channel を完全に駆動できるか
-- `bumble-hid::DeviceRuntime` が Switch の HIDP control sequence を追加実装なしで処理できるか
-- Classic pairing link key JSON が Python Bumble と byte-level 互換か
-- Windows 11 / CSR8510 A10 / WinUSB で bumble-rs USB transport が同じ接続順を通るか
-- Switch 2 firmware 22.1.0 以外の実機
-- Linux libusb permission / driver detach
-- macOS USB backend
+- `bumble_hid::DeviceRuntime` の Switch HIDP control sequence 適合
+- Classic pairing key JSON の Python/Rust互換
+- Windows 11 / CSR8510 A10 / WinUSB 実機
 - explicit local address recovery
+- Linux permission / driver detach
+- model generic worker の binary size と compile time
 
-未検証事項は「予定」ではなく test item として [testing.md](testing.md) と [roadmap.md](roadmap.md) に結び付ける。
+未検証事項を理由に public type invariant を弱めない。必要なら transport adapter または build 構成を修正する。
