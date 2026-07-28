@@ -135,7 +135,7 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | refactor-skipped | 各 `M::SPEC` が device info、default colors、校正、IMU modes、pairing trigger を一意に投影する | new | model | red: `ModelSpec::protocol` 不在。green: 3 model の metadata projection 1 passed、MSRV pass。model macro 内の単一宣言として実装済みで追加の構造変更なし |
 | refactor-done | virtual SPI が model seed、custom colors、erased range、最大長、境界 error を再現する | new | protocol unit | red: SPI 型不在。green: 3 passed、MSRV pass。固定長 29-byte read と疎な seed 投影にし、SPI テストを専用 module へ分離 |
 | refactor-skipped | neutral state が決定的な 49-byte `0x30` と candidate next timer を生成し、timer が wrap する | new | protocol unit | red: neutral encoder 不在。green: 3 model と `0xFF -> 0x00` を含む 2 passed、MSRV pass。専用 module 内の小さい固定長変換で追加の構造変更なし |
-| todo | 3 model の全 supported button と stick が Python fixture と一致し、SL/SR と unavailable side を誤配置しない | characterization | protocol unit | logical code を wire offset に使わない |
+| refactor-done | 3 model の全 supported button と stick が Python fixture と一致し、SL/SR と unavailable side を誤配置しない | characterization | protocol unit | red: generic encoder 不在。green: 全 model button fixture と Pro/Joy-Con stick を含む 4 passed、MSRV pass。neutral encoder を generic encoder へ委譲し、wire stick accessor は crate-private |
 | todo | disabled / standard IMU が zero block、3 raw frames、順序、candidate next state を生成する | new | protocol unit | input report builder と mode selection を分離 |
 | todo | quaternion modes が identity、正負回転、3 sample、時刻逆行、reset candidate を Python と一致させる | characterization | protocol unit | mode `0x02..=0x05` |
 | todo | parser が `0x01` / `0x10` の field を保持し、empty、unknown、truncated、arbitrary bytes で panic しない | new | protocol unit | raw rumble を解釈しない |
@@ -192,12 +192,14 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | TDD item 5 時点。通常 build と unit test build の双方で警告なし |
 | `cargo +1.87 test --locked protocol::tests::input_report` | pass | red は `encode_neutral_0x30` 不在。green は全 model の 49 bytes、candidate timer、wrap、共有 mutation 不在の 2 passed |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | TDD item 6 時点。通常 build と unit test build の双方で警告なし |
+| `cargo +1.87 test --locked --lib protocol::tests::input_report` | pass | red は `encode_0x30` 不在。green / refactor 後は全 model button、SL/SR、custom stick、Joy-Con unavailable side を含む 4 passed |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | TDD item 7 時点。公開 API 追加なし、通常 build と unit test build の双方で警告なし |
 | TDD item commands | not run | 各 item の red / green / refactor を追記する |
 | `cargo fmt --all --check` | not run | final gate |
 | `cargo +1.87 check --all-targets --all-features --locked` | not run | MSRV |
 | `cargo check --all-targets --all-features --locked` | not run | stable |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | not run | static gate |
-| `cargo test --all-targets --all-features --locked` | pass | TDD item 6 時点で unit 8、integration 28、example 0 passed。final gate で再実行する |
+| `cargo test --all-targets --all-features --locked` | pass | TDD item 7 時点で unit 10、integration 28、example 0 passed。final gate で再実行する |
 | `cargo test --lib protocol:: --no-default-features --locked` | not run | Bumble-free protocol |
 | `cargo tree --no-default-features --edges normal` | not run | Bumble 不在を検査 |
 | `cargo +nightly miri test --lib protocol::` | not run | selected Miri |

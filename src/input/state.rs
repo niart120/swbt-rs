@@ -50,6 +50,10 @@ impl<M: ControllerModel> InputState<M> {
     pub const fn imu_frames(&self) -> &[ImuFrame; 3] {
         &self.imu_frames
     }
+
+    pub(crate) const fn wire_sticks(&self) -> (Stick, Stick) {
+        (self.left_stick, self.right_stick)
+    }
 }
 
 impl<M: HasLeftStick> InputState<M> {
