@@ -333,27 +333,12 @@ Rust profile support の導入順:
 3. Rust は profile を変更せず virtual reconnect に使う
 4. synthetic copy へ write
 5. Rust output を Python が read
-6. backup を伴う real profile update
+6. real profile update
 7. target hardware reconnect
 
 L4 完了前の Rust build は existing Python profile を read-only で開く feature gate を使ってよい。pairing key update が必要な operation は拒否する。
 
-### 5.2 backup
-
-最初に Rust が既存 Python profile を更新する前に、同じ directory に backup を作る。
-
-候補:
-
-```text
-switch-pro.json
-switch-pro.json.swbt-python-v0.6.0.bak
-```
-
-backup は create-new で作り、既存 backup を上書きしない。backup hash と source profile hash を migration record に残す。key material を log せず hash だけを記録する。
-
-安定後、毎回 backup を作るか初回だけにするかは運用 data で決める。`0.1.0` までは初回 backup を既定にする。
-
-### 5.3 atomic update
+### 5.2 atomic update
 
 - same-directory temp
 - flush + sync
@@ -365,26 +350,27 @@ backup は create-new で作り、既存 backup を上書きしない。backup h
 
 Windows と Unix の replace semantics を別 test で確認する。
 
-### 5.4 concurrent access
+### 5.3 concurrent access
 
 Python process と Rust process が同じ profile を同時使用しない。Rust は lock file を使い、lock metadata に PID / process start / hostname を含める。stale lock の自動削除は、process existence と age を安全に判断できる場合だけ行う。
 
 Python v0.6.0 は同じ Rust lock protocol を知らないため、dual-run 期間は operator が exclusive ownership を切り替える。profile の copy を分けて A/B test し、同じ file に同時書きしない。
 
-### 5.5 rollback
+### 5.4 failure recovery
 
-Rust run 後に reconnect / profile parse が失敗した場合:
+Rust library は既存 profile の自動複製や復元機能を持たない。更新中断では atomic update により、更新前または更新後のどちらか一方の valid file が残ることを契約とする。
+
+更新後に reconnect または profile parse が失敗した場合:
 
 1. controller process を停止
-2. current Rust-written profile を別名保存
-3. backup hash を確認
-4. backup を atomic restore
-5. Python v0.6.0 で profile load
-6. adapter identity を確認
-7. reconnect
-8. Rust-written file と trace を secret-safe location で調査
+2. current profile の parse 結果と hash を確認
+3. Python v0.6.0 で current profile を load
+4. adapter identity を確認
+5. reconnect を試す
+6. reconnect できない場合は明示的に fresh pairing を行う
+7. trace を secret-safe location で調査する
 
-bond が console / adapter 側で変わった場合、file rollback だけで reconnect が戻るとは限らない。fresh pairing を最後の復旧手段として明記する。
+利用者が別途管理する profile copy は使用できるが、作成・世代管理・復元は `swbt-rs` の公開機能に含めない。bond が console / adapter 側で変わった場合、file の差し替えだけで reconnect が戻るとは限らない。
 
 ## 6. dual implementation strategy
 
@@ -458,7 +444,7 @@ rollback command / config switch を維持する。
 
 - Rust supported release
 - target hardware matrix
-- profile backup
+- profile compatibility gate
 - operational docs
 - equivalent diagnostics
 - no unresolved S1
@@ -633,7 +619,7 @@ Python inheritance を generic alias で模倣せず、concrete newtype + sealed
 | Pro Periodic | 対応 | M5 | hardware gate 後 |
 | Pro Direct | 対応 | M6 | transaction + hardware |
 | Joy-Con L/R | 対応 | M7 | side別 evidence |
-| profile v2 | 対応 | M6 | round-trip + backup |
+| profile v2 | 対応 | M6 | round-trip + interruption test |
 | reconnect | 対応 | M6 | power-cycle evidence |
 | adapter-default | 対応 | M5 | first production path |
 | explicit local address | 限定対応 | 後続 gate | recovery verified 後 |
@@ -679,8 +665,7 @@ rollback checklist:
 - Rust controller close
 - worker process exit
 - adapter re-enumeration
-- profile hash
-- backup availability
+- profile hash / parse result
 - Python environment lock
 - Python reconnect
 - input neutral
@@ -737,7 +722,6 @@ new swbt-rs commit
 Bumble revision
 OS / adapter / driver / console firmware
 profile source hash
-backup hash
 fresh pairing or reconnect
 test result
 rollback result
