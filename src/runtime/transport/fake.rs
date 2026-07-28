@@ -12,7 +12,7 @@ use super::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ScriptedSendOutcome {
+pub(in crate::runtime) enum ScriptedSendOutcome {
     Accepted,
     Rejected,
     AcceptedThenDisconnect { reason: Option<u8> },
@@ -26,11 +26,11 @@ pub(super) struct FakeTransportCounters {
 }
 
 #[derive(Clone)]
-pub(super) struct FakeTransportControl {
+pub(in crate::runtime) struct FakeTransportControl {
     shared: Arc<Shared>,
 }
 
-pub(super) struct FakeTransport {
+pub(in crate::runtime) struct FakeTransport {
     shared: Arc<Shared>,
     events: Receiver<QueuedEvent>,
     max_poll_batch: usize,
@@ -64,7 +64,7 @@ enum Terminal {
 }
 
 impl FakeTransport {
-    pub(super) fn with_limits(
+    pub(in crate::runtime) fn with_limits(
         event_capacity: usize,
         max_poll_batch: usize,
     ) -> (Self, FakeTransportControl) {
@@ -244,11 +244,14 @@ impl TransportPort for FakeTransport {
 }
 
 impl FakeTransportControl {
-    pub(super) fn script_sends(&self, outcomes: impl IntoIterator<Item = ScriptedSendOutcome>) {
+    pub(in crate::runtime) fn script_sends(
+        &self,
+        outcomes: impl IntoIterator<Item = ScriptedSendOutcome>,
+    ) {
         lock(&self.shared.send_script).extend(outcomes);
     }
 
-    pub(super) fn accepted_interrupts(&self) -> Vec<Box<[u8]>> {
+    pub(in crate::runtime) fn accepted_interrupts(&self) -> Vec<Box<[u8]>> {
         lock(&self.shared.accepted_interrupts).clone()
     }
 

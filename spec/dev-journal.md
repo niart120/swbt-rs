@@ -177,3 +177,25 @@ T03 から T07 までは connection module に理由付き
 commit で module 全体の許可を削除し、未接続の `reset()` と `is_empty()` だけへ許可を狭める。
 `reset()` は T17 の session reset、`is_empty()` は T18 の handshake で実参照を作り、それぞれの
 commit で method 単位の許可を削除する。各段階で通常 build と clippy を確認する。
+
+## 2026-07-29: M2 ReportSender と worker 接続前 dead code
+
+### 現状
+
+T05 は `src/runtime/sender.rs` に crate-private の `ReportSender<M>` を追加する。sender は
+timer と committed protocol session を所有し、protocol と transport は送信ごとに借りる。
+通常コードから sender を所有する worker は T21 で実装する。
+
+### 観察
+
+T05 で M1 protocol の input preparation と session は sender から参照されるが、output parse と
+reply preparation を通常コードへ接続するのは T07、sender と transport を所有するのは T21
+である。T05 だけで M1 protocol、T02 transport、T05 sender の module-wide `dead_code` 許可を
+すべて外すと、まだ着手していない機能の未使用警告を避けるために不要な caller が必要になる。
+
+### 方針
+
+T05 から T21 までは sender module に理由付き
+`cfg_attr(not(test), allow(dead_code))` を置く。test build では抑制しない。T07 以降は各機能を
+仕様どおり接続し、T21 の worker caller を追加する commit で transport、sender、残る M1
+protocol の module-wide 許可を削除する。通常 build と clippy で実参照を確認する。

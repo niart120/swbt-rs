@@ -13,7 +13,7 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::time::Duration;
 
 #[cfg(test)]
-mod fake;
+pub(in crate::runtime) mod fake;
 #[cfg(test)]
 mod tests;
 
