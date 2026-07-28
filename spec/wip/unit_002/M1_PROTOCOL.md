@@ -132,7 +132,7 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | refactor-skipped | 固定 SHA 以外から fixture を生成せず、全 fixture が repository、commit、generator、model、semantic input、expected result を持つ | characterization | fixture | red: fixture 不在で compile 失敗。green: 45 cases、audit 2 passed。再生成前後の SHA-256 一致。追加の構造変更なし |
 | refactor-done | `Rgb24` が 24-bit 境界を保証し、`ControllerColors` が 4 色を RGB 順の 12 bytes にする | new | public value | red: root import 不在。green: 3 passed。SPI byte 検査を公開 contract test へ統合し、重複 unit test を除去 |
 | refactor-skipped | IMU の `0.070 dps/raw` と `1/4096 G/raw` が ties-to-even、finite、i16 overflow 契約を守る | new | public value | red: physical constructor/method 不在。green: 7 passed、MSRV pass。変換 helper は小さく追加の構造変更なし |
-| todo | 各 `M::SPEC` が device info、default colors、校正、IMU modes、pairing trigger を一意に投影する | new | model | protocol profile は crate-private |
+| refactor-skipped | 各 `M::SPEC` が device info、default colors、校正、IMU modes、pairing trigger を一意に投影する | new | model | red: `ModelSpec::protocol` 不在。green: 3 model の metadata projection 1 passed、MSRV pass。model macro 内の単一宣言として実装済みで追加の構造変更なし |
 | todo | virtual SPI が model seed、custom colors、erased range、最大長、境界 error を再現する | new | protocol unit | zero-length end read は Python と一致 |
 | todo | neutral state が決定的な 49-byte `0x30` と candidate next timer を生成し、timer が wrap する | new | protocol unit | report ID と layout を固定 |
 | todo | 3 model の全 supported button と stick が Python fixture と一致し、SL/SR と unavailable side を誤配置しない | characterization | protocol unit | logical code を wire offset に使わない |
@@ -185,6 +185,8 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | Python 3.13 generator の連続実行と SHA-256 比較 | pass | 45 cases。固定 checkout、clean、Bumble 非 import を generator 内でも検査 |
 | `cargo test --test colors_contract` | pass | red は `Rgb24` / `ControllerColors` root import 不在。green / refactor 後は 3 passed |
 | `cargo +1.87 test --test imu_contract --locked` | pass | red は physical conversion API 不在。green は raw/scale/rounding/error/preservation を含む 7 passed |
+| `cargo +1.87 test --locked model::tests::protocol_metadata_is_projected_from_each_model_declaration` | pass | red は `ModelSpec::protocol` 不在。green は model 別 device info、色、校正、IMU modes、pairing trigger を検査する 1 passed |
+| `cargo clippy --all-targets --all-features -- -D warnings` | pass | TDD item 4 時点。protocol metadata は crate-private のまま警告なし |
 | TDD item commands | not run | 各 item の red / green / refactor を追記する |
 | `cargo fmt --all --check` | not run | final gate |
 | `cargo +1.87 check --all-targets --all-features --locked` | not run | MSRV |
