@@ -79,6 +79,31 @@ impl ButtonKind {
     ];
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ButtonWirePosition {
+    _byte_index: usize,
+    _mask: u8,
+}
+
+impl ButtonWirePosition {
+    pub(crate) const fn new(byte_index: usize, mask: u8) -> Self {
+        Self {
+            _byte_index: byte_index,
+            _mask: mask,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn byte_index(self) -> usize {
+        self._byte_index
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn mask(self) -> u8 {
+        self._mask
+    }
+}
+
 /// Read-only model data shared by typed and dynamic boundaries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ModelSpec {
@@ -87,6 +112,7 @@ pub struct ModelSpec {
     has_left_stick: bool,
     has_right_stick: bool,
     supported_buttons: &'static [ButtonKind],
+    button_wire_mapping: &'static [(ButtonKind, ButtonWirePosition)],
 }
 
 impl ModelSpec {
@@ -96,6 +122,7 @@ impl ModelSpec {
         has_left_stick: bool,
         has_right_stick: bool,
         supported_buttons: &'static [ButtonKind],
+        button_wire_mapping: &'static [(ButtonKind, ButtonWirePosition)],
     ) -> Self {
         Self {
             kind,
@@ -103,6 +130,7 @@ impl ModelSpec {
             has_left_stick,
             has_right_stick,
             supported_buttons,
+            button_wire_mapping,
         }
     }
 
@@ -139,7 +167,16 @@ impl ModelSpec {
     /// Returns whether `button` is valid for this model.
     #[must_use]
     pub fn supports_button(self, button: ButtonKind) -> bool {
-        self.supported_buttons.contains(&button)
+        self.button_wire_mapping
+            .iter()
+            .any(|(kind, _)| *kind == button)
+    }
+
+    #[cfg(test)]
+    fn button_wire_position(self, button: ButtonKind) -> Option<ButtonWirePosition> {
+        self.button_wire_mapping
+            .iter()
+            .find_map(|(kind, position)| (*kind == button).then_some(*position))
     }
 }
 
@@ -166,7 +203,10 @@ macro_rules! controller_models {
                 left_stick: $left_stick:literal,
                 right_stick: $right_stick:literal,
                 buttons: [
-                    $($button_kind:ident => $button_const:ident),* $(,)?
+                    $(
+                        $button_kind:ident => $button_const:ident
+                            @ $byte_index:literal / $mask:literal
+                    ),* $(,)?
                 ],
             }
         )+
@@ -193,6 +233,13 @@ macro_rules! controller_models {
                     $(Self::$kind => $profile_name,)+
                 }
             }
+
+            #[cfg(test)]
+            pub(crate) const fn spec(self) -> &'static ModelSpec {
+                match self {
+                    $(Self::$kind => &$spec,)+
+                }
+            }
         }
 
         $(
@@ -206,6 +253,14 @@ macro_rules! controller_models {
                 $left_stick,
                 $right_stick,
                 &[$(ButtonKind::$button_kind),*],
+                &[
+                    $(
+                        (
+                            ButtonKind::$button_kind,
+                            ButtonWirePosition::new($byte_index, $mask),
+                        ),
+                    )*
+                ],
             );
 
             impl sealed::Sealed for $model {}
@@ -227,6 +282,14 @@ macro_rules! controller_models {
     };
 }
 
+#[cfg(test)]
+pub(crate) fn button_wire_position(
+    controller: ControllerKind,
+    button: ButtonKind,
+) -> Option<ButtonWirePosition> {
+    controller.spec().button_wire_position(button)
+}
+
 controller_models! {
     /// Pro Controller model.
     Pro {
@@ -236,24 +299,24 @@ controller_models! {
         left_stick: true,
         right_stick: true,
         buttons: [
-            A => A,
-            B => B,
-            X => X,
-            Y => Y,
-            L => L,
-            R => R,
-            ZL => ZL,
-            ZR => ZR,
-            Plus => PLUS,
-            Minus => MINUS,
-            Home => HOME,
-            Capture => CAPTURE,
-            LeftStick => LEFT_STICK,
-            RightStick => RIGHT_STICK,
-            DpadUp => DPAD_UP,
-            DpadDown => DPAD_DOWN,
-            DpadLeft => DPAD_LEFT,
-            DpadRight => DPAD_RIGHT,
+            A => A @ 3 / 0x08,
+            B => B @ 3 / 0x04,
+            X => X @ 3 / 0x02,
+            Y => Y @ 3 / 0x01,
+            L => L @ 5 / 0x40,
+            R => R @ 3 / 0x40,
+            ZL => ZL @ 5 / 0x80,
+            ZR => ZR @ 3 / 0x80,
+            Plus => PLUS @ 4 / 0x02,
+            Minus => MINUS @ 4 / 0x01,
+            Home => HOME @ 4 / 0x10,
+            Capture => CAPTURE @ 4 / 0x20,
+            LeftStick => LEFT_STICK @ 4 / 0x08,
+            RightStick => RIGHT_STICK @ 4 / 0x04,
+            DpadUp => DPAD_UP @ 5 / 0x02,
+            DpadDown => DPAD_DOWN @ 5 / 0x01,
+            DpadLeft => DPAD_LEFT @ 5 / 0x08,
+            DpadRight => DPAD_RIGHT @ 5 / 0x04,
         ],
     }
     /// Left Joy-Con model.
@@ -264,17 +327,17 @@ controller_models! {
         left_stick: true,
         right_stick: false,
         buttons: [
-            L => L,
-            ZL => ZL,
-            Minus => MINUS,
-            Capture => CAPTURE,
-            LeftStick => LEFT_STICK,
-            SL => SL,
-            SR => SR,
-            DpadUp => DPAD_UP,
-            DpadDown => DPAD_DOWN,
-            DpadLeft => DPAD_LEFT,
-            DpadRight => DPAD_RIGHT,
+            L => L @ 5 / 0x40,
+            ZL => ZL @ 5 / 0x80,
+            Minus => MINUS @ 4 / 0x01,
+            Capture => CAPTURE @ 4 / 0x20,
+            LeftStick => LEFT_STICK @ 4 / 0x08,
+            SL => SL @ 5 / 0x20,
+            SR => SR @ 5 / 0x10,
+            DpadUp => DPAD_UP @ 5 / 0x02,
+            DpadDown => DPAD_DOWN @ 5 / 0x01,
+            DpadLeft => DPAD_LEFT @ 5 / 0x08,
+            DpadRight => DPAD_RIGHT @ 5 / 0x04,
         ],
     }
     /// Right Joy-Con model.
@@ -285,17 +348,20 @@ controller_models! {
         left_stick: false,
         right_stick: true,
         buttons: [
-            A => A,
-            B => B,
-            X => X,
-            Y => Y,
-            R => R,
-            ZR => ZR,
-            Plus => PLUS,
-            Home => HOME,
-            RightStick => RIGHT_STICK,
-            SL => SL,
-            SR => SR,
+            A => A @ 3 / 0x08,
+            B => B @ 3 / 0x04,
+            X => X @ 3 / 0x02,
+            Y => Y @ 3 / 0x01,
+            R => R @ 3 / 0x40,
+            ZR => ZR @ 3 / 0x80,
+            Plus => PLUS @ 4 / 0x02,
+            Home => HOME @ 4 / 0x10,
+            RightStick => RIGHT_STICK @ 4 / 0x04,
+            SL => SL @ 3 / 0x20,
+            SR => SR @ 3 / 0x10,
         ],
     }
 }
+
+#[cfg(test)]
+mod tests;
