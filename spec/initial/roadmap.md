@@ -87,7 +87,7 @@ M9 portability / release
 - required public API の docs と examples
 - MSRV / stable CI
 - Windows supported matrix
-- profile rollback test
+- profile update interruption test
 - no unresolved severity-high protocol / cleanup defect
 - license 決定
 - release checklist と reproducible build metadata
@@ -391,7 +391,6 @@ virtual integration を通せない状態で実機 packet を手作業 patch し
 - key field preservation
 - atomic create / replace
 - lock contention
-- backup / rollback tool
 - controller kind mismatch
 - adapter-default namespace resolution
 - multiple current peer rejection
@@ -547,7 +546,6 @@ probe は public library の consumer とし、private transport API を直接�
 - changelog
 - semver policy
 - security contact
-- profile backup guidance
 - hardware matrix
 - known limitations
 - reproducible source baseline
@@ -560,7 +558,7 @@ probe は public library の consumer とし、private transport API を直接�
 - crate tarball に秘密 fixture / hardware trace がない
 - docs の全 command が current code で実行可能
 - release commit と Bumble revision が記録
-- rollback procedure がある
+- application backend rollback procedure がある
 
 ## 13. explicit local address milestone
 
