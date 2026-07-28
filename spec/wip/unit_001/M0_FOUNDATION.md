@@ -87,7 +87,7 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | package が `swbt` library target、Rust 1.87、MIT を公開し、placeholder binary を含まない | new | package | `source-baseline.md` の古い license 状態も同期する |
+| refactor-skipped | package が `swbt` library target、Rust 1.87、MIT を公開し、placeholder binary を含まない | new | package | red: `swbt` import 失敗。green: library target と metadata を確認。追加の構造変更なし |
 | todo | Pro / JoyConL / JoyConR と Periodic / Direct が sealed trait を通じて一意な kind/spec を投影する | new | unit | model 宣言 audit の基礎 |
 | todo | model ごとの supported `ButtonKind` だけが `Button<M>` へ変換され、`ButtonSet<M>` が重複を除いて論理順に列挙する | new | unit | 非対応は `UnsupportedInput` |
 | todo | 全 supported button が Python 基準 commit と一致する byte index / mask を持ち、非対応組み合わせに mapping がない | characterization | unit | Joy-Con L/R の SL/SR を含む |
@@ -131,6 +131,9 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 
 | command | result | notes |
 |---|---|---|
+| `cargo test --test library_target` | pass | red は `no external crate swbt`。library target 追加後は 1 passed |
+| `cargo metadata --no-deps --format-version 1` の package contract 検査 | pass | `rust_version=1.87`、`license=MIT`、library `swbt` が 1 件、binary が 0 件 |
+| `cargo test --doc --all-features` | pass | 0 doctests、crate-level rustdoc は compile 成功 |
 | `cargo fmt --check` | not run | 実装後に実行 |
 | `cargo +1.87 check --all-targets --all-features` | not run | MSRV |
 | `cargo check --all-targets --all-features` | not run | stable/current toolchain |
@@ -154,4 +157,4 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 - [x] 対象範囲と対象外を確認した
 - [ ] TDD Test List を更新した
 - [ ] 検証結果または未実行理由を記録した
-- [ ] package / release / public API に触れる場合の gate を記録した
+- [x] package / release / public API に触れる場合の gate を記録した

@@ -7,8 +7,8 @@ Bluetooth stack には
 
 ## 現在の状態
 
-このリポジトリは実装開始前の初期段階です。現在含まれているのは Rust バイナリ crate の
-最小構成と、仕様・テスト・品質確認を作業単位ごとに進めるための開発基盤です。
+このリポジトリは M0 の基盤実装段階です。Cargo package は library target `swbt` を公開し、
+仕様・テスト・品質確認を作業単位ごとに進めます。
 
 - Bluetooth transport、HID protocol、controller API は未実装です。
 - `bumble-rs` の依存追加と commit 固定は未実施です。
@@ -16,8 +16,7 @@ Bluetooth stack には
 
 ## 開発
 
-必要な Rust toolchain は、`Cargo.toml` と CI を導入する作業単位で確定します。
-現在のローカル確認は次の command で実行できます。
+MSRV は Rust 1.87 です。現在のローカル確認は次の command で実行できます。
 
 ```powershell
 cargo fmt --check

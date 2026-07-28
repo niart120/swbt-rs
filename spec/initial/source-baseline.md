@@ -114,9 +114,9 @@ revision 更新は専用 PR で行い、最低限次を実行する。
 
 ## 7. ライセンス gate
 
-`swbt-python` は MIT、Bumble 基準断面は Apache-2.0、`swbt-rs` は現時点でライセンス未設定である。
+`swbt-python` と `swbt-rs` は MIT、Bumble 基準断面は Apache-2.0 である。
 
-**決定:** 配布可能な crate を公開する前に repository license を確定する。推奨案は `MIT OR Apache-2.0` だが、これは maintainer の明示決定を必要とする。ライセンス未決のまま release artifact を公開しない。
+**決定:** `swbt-rs` は MIT で配布する。repository の `LICENSE` と `Cargo.toml` の `license = "MIT"` を正本とする。公開前には Bumble を含む依存関係の license inventory を確認する。
 
 ## 8. 基準断面の更新方法
 
