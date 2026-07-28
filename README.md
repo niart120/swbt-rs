@@ -30,6 +30,9 @@ git diff --check
 作業境界とリポジトリ固有の手順は [AGENTS.md](AGENTS.md) と
 [SKILLS.md](SKILLS.md) にあります。
 
+現在利用できる model-valid input 型は
+[examples/type_model.rs](examples/type_model.rs) で確認できます。
+
 ## ライセンス
 
 MIT ライセンスです。全文は [LICENSE](LICENSE) にあります。

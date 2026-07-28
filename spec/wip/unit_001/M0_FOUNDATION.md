@@ -96,7 +96,7 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | refactor-skipped | `InputState<M>` が model-valid button、stick 能力、3 IMU frame を含む neutral / replacement state を保持する | new | unit | red: state alias 不在。green: 3 passed。private 完全状態で不正な public constructor なし |
 | refactor-skipped | `Controller<M, R>`、`ControllerBuilder<M, R>` と 6 alias を公開 API から参照できる | new | integration | red: controller surface 不在。green: 2 passed。runtime method/field は M2 のまま |
 | refactor-done | Cargo が Bumble 基準 commit の direct dependency を単一 revision で解決し、lockfile に固定する | new | package | red: direct dependency 不在。green: metadata/lock/build。crates.io 同名 package との衝突を検出し publish を無効化 |
-| todo | M0 の公開 example と rustdoc が通常の build で compile する | new | integration | 不正コードの compile-fail fixture は作らない |
+| refactor-done | M0 の公開 example と rustdoc が通常の build で compile する | new | integration | red: example target 不在。green: example/doc/doctest。公開文面から milestone 内部語を除去 |
 | todo | GitHub Actions が MSRV/stable の fmt、clippy、test、doc、build gate を定義する | new | package | workflow 構文と実行結果を確認する |
 
 ## 7. 設計メモ
@@ -145,13 +145,14 @@ Rust 移植の最初の作業単位として、library crate、Bumble 依存、C
 | `cargo +1.87 build --all-features --locked` | pass | Rust 1.87.0 で git 版 Bumble を含めて build 成功 |
 | `cargo package --allow-dirty` | fail | git dependency に version がないため拒否。crates.io の同名別 package を使う偽の成功を避けるため `publish = false` |
 | `cargo metadata --no-deps --format-version 1` の package contract 検査 | pass | `rust_version=1.87`、`license=MIT`、library `swbt` が 1 件、binary が 0 件 |
-| `cargo test --doc --all-features` | pass | 0 doctests、crate-level rustdoc は compile 成功 |
+| `cargo check --example type_model --locked` | pass | red は example target 不在。恒久名へ整理後に compile 成功 |
+| `cargo test --doc --all-features --locked` | pass | crate-level example 1 passed |
+| `cargo doc --no-deps --all-features --locked` | pass | missing-docs warning なし |
 | `cargo fmt --check` | not run | 実装後に実行 |
 | `cargo +1.87 check --all-targets --all-features` | not run | MSRV |
 | `cargo check --all-targets --all-features` | not run | stable/current toolchain |
 | `cargo clippy --all-targets --all-features -- -D warnings` | not run | static gate |
 | `cargo test --all-features` | not run | unit / integration / doctest |
-| `cargo test --doc --all-features` | not run | rustdoc |
 | `cargo build --all-features` | not run | public API / metadata gate |
 | `cargo package` | not run | package 内容と metadata |
 | `git diff --check` | not run | whitespace |

@@ -7,16 +7,16 @@ use crate::reporting::{self, ReportingMode};
 
 /// A controller whose model and reporting mode are fixed by its type.
 ///
-/// Runtime construction and lifecycle operations are introduced by the typed
-/// runtime milestone.
+/// Runtime construction and lifecycle operations are not exposed in the
+/// current package surface.
 pub struct Controller<M: ControllerModel, R: ReportingMode> {
     _types: PhantomData<fn() -> (M, R)>,
 }
 
 /// Immutable construction settings for [`Controller<M, R>`].
 ///
-/// Adapter, profile, and runtime construction methods are introduced with
-/// their I/O contracts by the typed runtime milestone.
+/// Adapter, profile, and runtime construction methods are not exposed in the
+/// current package surface.
 pub struct ControllerBuilder<M: ControllerModel, R: ReportingMode> {
     _types: PhantomData<fn() -> (M, R)>,
 }

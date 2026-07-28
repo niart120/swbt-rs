@@ -1,9 +1,28 @@
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 //! Rust library for NX-compatible virtual Bluetooth HID input devices.
 //!
-//! The controller model, input values, protocol, and runtime are implemented in
-//! roadmap order. The M0 foundation establishes this library target before any
-//! Bluetooth transport is exposed.
+//! The current package surface provides typed controller identities and
+//! model-valid input values. Bluetooth transport and runtime operations are not
+//! exposed yet.
+//!
+//! # Model-valid input
+//!
+//! ```
+//! use swbt::{ButtonKind, ProButton, ProInputState, Stick};
+//!
+//! # fn main() -> swbt::Result<()> {
+//! let state = ProInputState::neutral()
+//!     .with_buttons([ProButton::A])
+//!     .with_left_stick(Stick::up(0.5)?);
+//!
+//! assert_eq!(
+//!     state.buttons().map(|button| button.kind()).collect::<Vec<_>>(),
+//!     [ButtonKind::A]
+//! );
+//! # Ok(())
+//! # }
+//! ```
 
 pub mod controller;
 pub mod error;
