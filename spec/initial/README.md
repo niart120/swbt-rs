@@ -8,7 +8,7 @@
 2. [type-modeling.md](type-modeling.md) — controller model、reporting mode、モデル固有入力能力の型表現
 3. [api.md](api.md) — Rust 利用者に公開する型と振る舞い
 4. [architecture.md](architecture.md) — レイヤ、所有権、Bumble 統合、状態機械
-5. [testing.md](testing.md) — compile-fail、差分テスト、仮想 Bluetooth、実機検証、CI
+5. [testing.md](testing.md) — model mapping、差分テスト、仮想 Bluetooth、実機検証、CI
 6. [migration-strategy.md](migration-strategy.md) — `swbt-python` との互換範囲と段階移行
 7. [roadmap.md](roadmap.md) — 実装単位、依存関係、完了条件
 
