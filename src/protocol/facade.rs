@@ -4,6 +4,8 @@ use crate::{input::InputState, model::ControllerModel, profile::ControllerColors
 
 use super::{
     error::ProtocolError,
+    imu::{ImuEncodingState, encode_imu_block},
+    input_report::{PreparedInputReport, encode_0x30},
     output_report::{OutputReport, RawRumble, SubcommandRequest, parse_output_report},
     session::ProtocolSession,
     spi::VirtualSpiFlash,
@@ -12,6 +14,29 @@ use super::{
         try_prepare_spi_reply, try_prepare_stateful_reply, try_prepare_stateless_reply,
     },
 };
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct InputPreparation {
+    report: PreparedInputReport,
+    next_imu_encoding_state: ImuEncodingState,
+}
+
+impl InputPreparation {
+    #[must_use]
+    pub(crate) const fn bytes(&self) -> &[u8; 49] {
+        self.report.bytes()
+    }
+
+    #[must_use]
+    pub(crate) const fn next_timer(self) -> u8 {
+        self.report.next_timer()
+    }
+
+    #[must_use]
+    pub(crate) const fn next_imu_encoding_state(self) -> ImuEncodingState {
+        self.next_imu_encoding_state
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum PreparedOutputAction {
@@ -47,6 +72,27 @@ impl<M: ControllerModel> SwitchHidProtocol<M> {
         Self {
             spi: VirtualSpiFlash::new(colors),
             device_info_address,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn prepare_input_report(
+        &self,
+        state: &InputState<M>,
+        timer: u8,
+        current_session: ProtocolSession,
+        now_ns: u64,
+    ) -> InputPreparation {
+        let imu = encode_imu_block(
+            current_session.imu_encoding_state(),
+            current_session.imu_mode(),
+            state.imu_frames(),
+            M::SPEC.protocol.gyroscope_calibration,
+            now_ns,
+        );
+        InputPreparation {
+            report: encode_0x30(state, timer, imu.block()),
+            next_imu_encoding_state: imu.next_state(),
         }
     }
 
