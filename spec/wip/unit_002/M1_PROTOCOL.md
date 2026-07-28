@@ -139,7 +139,7 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | refactor-skipped | disabled / standard IMU が zero block、3 raw frames、順序、candidate next state を生成する | new | protocol unit | red: IMU state/mode/encoder 不在。green: zero reset と3 frame signed LE fixture の 2 passed、MSRV pass。固定長変換は小さく追加の構造変更なし |
 | refactor-skipped | quaternion modes が identity、正負回転、3 sample、時刻逆行、reset candidate を Python と一致させる | characterization | protocol unit | red: calibration 引数、mode `0x02..=0x05`、state getter 不在。green: fixture、正負、順序、逆行、reset、bit/timestamp 境界を含む 8 passed、MSRV pass。数学・packing helper は分離済みで追加の構造変更なし |
 | refactor-skipped | parser が `0x01` / `0x10` の field を保持し、empty、unknown、truncated、arbitrary bytes で panic しない | new | protocol unit | red: parser、型、構造化 error 不在。green: fixture field、payload borrow、trailing 無視、全 ID × 長さ 1..=32 を含む 4 passed、MSRV pass。固定長 rumble と borrowed payload の専用 module で追加の構造変更なし |
-| todo | session が report mode、lights、IMU、vibration、readiness、unsupported mode を接続単位で保持する | new | protocol unit | lifecycle/session ID は M2 |
+| refactor-skipped | session が report mode、lights、IMU、vibration、readiness、unsupported mode を接続単位で保持する | new | protocol unit | red: session module / 型不在。green: 初期値、readiness 順序、zero lights、unsupported 保持、IMU epoch reset、接続間分離を含む 5 passed、MSRV pass。矛盾しない report mode enum と immutable candidate に収まり追加の構造変更なし。lifecycle/session ID は M2 |
 | todo | `0x21` envelope と `0x02/04/08/21` が model 別 bytes と typed state prefix を生成する | characterization | protocol unit | state を変更しない command |
 | todo | `0x10` SPI reply が request prefix と requested data を返し、session を変更しない | new | protocol unit | payload 5 bytes 未満は error |
 | todo | `0x03/30/40/48` が valid candidate state を返し、invalid payloadでは current state を保つ | new | protocol unit | accept 前に commit しない |
@@ -201,12 +201,14 @@ quaternion mode の実機互換範囲は Python 基準断面の hardware observa
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | TDD item 9 時点。公開 API 追加なし、通常 build と unit test build の双方で警告なし |
 | `cargo +1.87 test --locked --lib protocol::tests::output_report` | pass | red は parser、出力型、error variant 不在。green は `0x01` / `0x10` fixture、borrowed payload、構造化 error、全 report ID の短い任意 bytes を含む 4 passed |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | TDD item 10 時点。公開 API と allocation の追加なし、通常 build と unit test build の双方で警告なし |
+| `cargo +1.87 test --locked --lib protocol::tests::session` | pass | red は session module / 型不在。green は Python 初期 projection、順序非依存 readiness、unsupported raw mode、同一 IMU mode の epoch reset、接続間分離を含む 5 passed |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | pass | TDD item 11 時点。session は crate-private、model 非依存の値型で、通常 build と unit test build の双方で警告なし |
 | TDD item commands | not run | 各 item の red / green / refactor を追記する |
 | `cargo fmt --all --check` | not run | final gate |
 | `cargo +1.87 check --all-targets --all-features --locked` | not run | MSRV |
 | `cargo check --all-targets --all-features --locked` | not run | stable |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | not run | static gate |
-| `cargo test --all-targets --all-features --locked` | pass | TDD item 10 時点で unit 22、integration 28、example 0 passed。final gate で再実行する |
+| `cargo test --all-targets --all-features --locked` | pass | TDD item 11 時点で unit 27、integration 28、example 0 passed。final gate で再実行する |
 | `cargo test --lib protocol:: --no-default-features --locked` | not run | Bumble-free protocol |
 | `cargo tree --no-default-features --edges normal` | not run | Bumble 不在を検査 |
 | `cargo +nightly miri test --lib protocol::` | not run | selected Miri |
