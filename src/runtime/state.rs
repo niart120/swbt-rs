@@ -1,12 +1,5 @@
 use crate::{input::InputState, model::ControllerModel};
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T09 defines worker-owned input state before T11, T13, and T17 integration"
-    )
-)]
 pub(crate) struct InputStateStore<M: ControllerModel> {
     committed: InputState<M>,
 }
@@ -14,10 +7,7 @@ pub(crate) struct InputStateStore<M: ControllerModel> {
 impl<M: ControllerModel> InputStateStore<M> {
     #[cfg_attr(
         not(test),
-        allow(
-            dead_code,
-            reason = "T11 constructs the state store for periodic reporting"
-        )
+        allow(dead_code, reason = "T21 constructs the worker-owned state store")
     )]
     pub(crate) fn new() -> Self {
         Self {
@@ -26,13 +16,6 @@ impl<M: ControllerModel> InputStateStore<M> {
     }
 
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T11 snapshots the latest state for periodic reporting"
-        )
-    )]
     pub(crate) fn snapshot(&self) -> InputState<M> {
         self.committed.clone()
     }

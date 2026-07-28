@@ -1,52 +1,35 @@
-use std::time::Duration;
+use std::{error::Error as StdError, fmt, time::Duration};
 
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T10 defines scheduler outcomes before T11 periodic runtime integration"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TickDecision {
     NotDue,
     Due { skipped: u64 },
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T10 defines scheduler errors before T11 periodic runtime integration"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SchedulerError {
     ZeroPeriod,
     DeadlineOverflow,
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T10 defines the scheduler before T11 periodic runtime integration"
-    )
-)]
+impl fmt::Display for SchedulerError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ZeroPeriod => formatter.write_str("report period must be non-zero"),
+            Self::DeadlineOverflow => formatter.write_str("report deadline overflow"),
+        }
+    }
+}
+
+impl StdError for SchedulerError {}
+
 pub(crate) struct ReportScheduler {
     period: Duration,
     next_deadline: Duration,
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T10 defines scheduler operations before T11 periodic runtime integration"
-    )
-)]
 impl ReportScheduler {
     pub(crate) fn start(started_at: Duration, period: Duration) -> Result<Self, SchedulerError> {
         if period.is_zero() {
