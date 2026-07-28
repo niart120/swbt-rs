@@ -16,13 +16,6 @@ pub(crate) struct TapPlan<M: ControllerModel> {
 }
 
 impl<M: ControllerModel> TapPlan<M> {
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T14 and T15 consume validated Periodic and Direct tap plans"
-        )
-    )]
     pub(crate) fn into_parts(self) -> (InputState<M>, InputState<M>, Duration) {
         (self.pressed, self.released, self.duration)
     }

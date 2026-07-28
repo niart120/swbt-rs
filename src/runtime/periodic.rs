@@ -9,6 +9,7 @@
 use std::{error::Error as StdError, fmt, time::Duration};
 
 use crate::{
+    controller::input::TapPlan,
     input::InputState,
     model::ControllerModel,
     protocol::SwitchHidProtocol,
@@ -17,7 +18,7 @@ use crate::{
         scheduler::{ReportScheduler, SchedulerError, TickDecision},
         sender::ReportSender,
         state::InputStateStore,
-        transport::{SendAcceptance, TransportError, TransportPort},
+        transport::{SendAcceptance, TransportError, TransportPort, TransportResult},
     },
 };
 
@@ -28,6 +29,72 @@ pub(crate) fn commit_candidate<M: ControllerModel>(
     state: &mut InputStateStore<M>,
 ) {
     state.commit(candidate);
+}
+
+pub(crate) struct PendingPeriodicTap<M: ControllerModel> {
+    released: InputState<M>,
+    duration: Duration,
+    first_error: Option<TransportError>,
+}
+
+impl<M: ControllerModel> PendingPeriodicTap<M> {
+    #[must_use]
+    pub(crate) const fn duration(&self) -> Duration {
+        self.duration
+    }
+
+    pub(crate) fn finish(
+        self,
+        now_ns: u64,
+        state: &mut InputStateStore<M>,
+        protocol: &SwitchHidProtocol<M>,
+        sender: &mut ReportSender<M>,
+        transport: &mut dyn TransportPort,
+    ) -> Result<(), PeriodicError> {
+        let release_error =
+            commit_and_send_candidate(self.released, now_ns, state, protocol, sender, transport)
+                .err();
+
+        match self.first_error.or(release_error) {
+            Some(error) => Err(PeriodicError::Transport(error)),
+            None => Ok(()),
+        }
+    }
+}
+
+pub(crate) fn begin_tap<M: ControllerModel>(
+    ready: bool,
+    plan: TapPlan<M>,
+    now_ns: u64,
+    state: &mut InputStateStore<M>,
+    protocol: &SwitchHidProtocol<M>,
+    sender: &mut ReportSender<M>,
+    transport: &mut dyn TransportPort,
+) -> Result<PendingPeriodicTap<M>, PeriodicError> {
+    if !ready {
+        return Err(PeriodicError::NotReady);
+    }
+
+    let (pressed, released, duration) = plan.into_parts();
+    let first_error =
+        commit_and_send_candidate(pressed, now_ns, state, protocol, sender, transport).err();
+    Ok(PendingPeriodicTap {
+        released,
+        duration,
+        first_error,
+    })
+}
+
+fn commit_and_send_candidate<M: ControllerModel>(
+    candidate: InputState<M>,
+    now_ns: u64,
+    state: &mut InputStateStore<M>,
+    protocol: &SwitchHidProtocol<M>,
+    sender: &mut ReportSender<M>,
+    transport: &mut dyn TransportPort,
+) -> TransportResult<SendAcceptance> {
+    commit_candidate(candidate, state);
+    sender.send_input(protocol, &state.snapshot(), now_ns, transport)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +111,7 @@ pub(crate) enum AutomaticInput {
 
 #[derive(Debug)]
 pub(crate) enum PeriodicError {
+    NotReady,
     Scheduler(SchedulerError),
     ClockOverflow,
     Transport(TransportError),
@@ -64,6 +132,7 @@ impl From<TransportError> for PeriodicError {
 impl fmt::Display for PeriodicError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::NotReady => formatter.write_str("periodic input requires a ready runtime"),
             Self::Scheduler(error) => write!(formatter, "periodic scheduler error: {error}"),
             Self::ClockOverflow => formatter.write_str("monotonic clock exceeds nanosecond range"),
             Self::Transport(error) => write!(formatter, "periodic transport error: {error}"),
@@ -74,6 +143,7 @@ impl fmt::Display for PeriodicError {
 impl StdError for PeriodicError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
+            Self::NotReady => None,
             Self::Scheduler(error) => Some(error),
             Self::ClockOverflow => None,
             Self::Transport(error) => Some(error),
@@ -157,20 +227,23 @@ impl PeriodicPolicy {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::time::Duration;
 
     use crate::{
+        controller::input::tap_plan,
         input::{InputState, ProButton},
         model::{ButtonKind, Pro},
         protocol::{DeviceInfoBluetoothAddress, SwitchHidProtocol},
         runtime::{
             connection::ObservedSubcommands,
             output::{OutputHandling, OutputHandlingContext, OutputHandlingError, handle_output},
-            periodic::{AutomaticInput, PeriodicPolicy},
+            periodic::{AutomaticInput, PeriodicError, PeriodicPolicy, begin_tap},
             sender::ReportSender,
             state::InputStateStore,
             transport::{
-                HidChannel, TransportErrorKind, TransportPort, activity_channel,
+                ActivityNotifier, HidChannel, SendAcceptance, TransportError, TransportErrorKind,
+                TransportEvent, TransportPort, TransportResult, activity_channel,
                 fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
             },
         },
@@ -314,6 +387,95 @@ mod tests {
         );
     }
 
+    #[test]
+    fn periodic_tap_rejects_not_ready_before_press_or_send() {
+        let protocol = protocol();
+        let current = pressed_state(ButtonKind::ZL);
+        let plan =
+            tap_plan(&current, [ProButton::A], Duration::from_millis(80)).expect("valid tap plan");
+        let mut store = InputStateStore::new();
+        store.commit(current.clone());
+        let mut sender = ReportSender::new();
+        let session = sender.session();
+        let mut transport = FailingTransport::new([TransportErrorKind::SendRejected]);
+
+        let error = match begin_tap(
+            false,
+            plan,
+            0,
+            &mut store,
+            &protocol,
+            &mut sender,
+            &mut transport,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("non-ready tap must be rejected"),
+        };
+
+        assert!(matches!(error, PeriodicError::NotReady));
+        assert_eq!(store.snapshot(), current);
+        assert_eq!(sender.timer(), 0);
+        assert_eq!(sender.session(), session);
+        assert!(transport.attempts.is_empty());
+        assert_eq!(transport.failures.len(), 1);
+    }
+
+    #[test]
+    fn periodic_tap_commits_both_states_and_returns_the_first_send_error() {
+        let protocol = protocol();
+        let current = InputState::neutral().with_buttons([ProButton::A, ProButton::ZL]);
+        let plan = tap_plan(
+            &current,
+            [ProButton::A, ProButton::B],
+            Duration::from_millis(80),
+        )
+        .expect("valid tap plan");
+        let pressed =
+            InputState::neutral().with_buttons([ProButton::A, ProButton::B, ProButton::ZL]);
+        let released = pressed_state(ButtonKind::ZL);
+        let mut store = InputStateStore::new();
+        store.commit(current.clone());
+        let mut sender = ReportSender::new();
+        let mut transport =
+            FailingTransport::new([TransportErrorKind::SendRejected, TransportErrorKind::Closed]);
+
+        let pending = begin_tap(
+            true,
+            plan,
+            10,
+            &mut store,
+            &protocol,
+            &mut sender,
+            &mut transport,
+        )
+        .expect("ready tap starts even when its press send fails");
+
+        assert_eq!(store.snapshot(), pressed);
+        assert_eq!(pending.duration(), Duration::from_millis(80));
+        assert_eq!(transport.attempts.len(), 1);
+
+        let error = pending
+            .finish(20, &mut store, &protocol, &mut sender, &mut transport)
+            .expect_err("the first of two send failures must be returned");
+
+        let PeriodicError::Transport(error) = error else {
+            panic!("tap send failure must retain its transport error");
+        };
+        assert_eq!(error.kind(), TransportErrorKind::SendRejected);
+        assert_eq!(store.snapshot(), released);
+        assert_eq!(sender.timer(), 0);
+        assert_eq!(transport.attempts.len(), 2);
+        assert!(transport.failures.is_empty());
+        assert_eq!(
+            transport
+                .attempts
+                .iter()
+                .map(|report| (report[1], [report[3], report[4], report[5]]))
+                .collect::<Vec<_>>(),
+            [(0, [0x0C, 0x00, 0x80]), (0, [0x00, 0x00, 0x80])]
+        );
+    }
+
     struct Harness {
         policy: PeriodicPolicy,
         protocol: SwitchHidProtocol<Pro>,
@@ -393,5 +555,53 @@ mod tests {
         raw.push(subcommand_id);
         raw.extend_from_slice(payload);
         raw
+    }
+
+    fn protocol() -> SwitchHidProtocol<Pro> {
+        SwitchHidProtocol::new(
+            None,
+            DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
+        )
+    }
+
+    struct FailingTransport {
+        failures: VecDeque<TransportErrorKind>,
+        attempts: Vec<Box<[u8]>>,
+    }
+
+    impl FailingTransport {
+        fn new(failures: impl IntoIterator<Item = TransportErrorKind>) -> Self {
+            Self {
+                failures: failures.into_iter().collect(),
+                attempts: Vec::new(),
+            }
+        }
+    }
+
+    impl TransportPort for FailingTransport {
+        fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<()> {
+            Ok(())
+        }
+
+        fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+            Ok(Vec::new())
+        }
+
+        fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
+            self.attempts.push(Box::from(payload));
+            let kind = self
+                .failures
+                .pop_front()
+                .expect("test must script every send failure");
+            Err(TransportError::new(kind))
+        }
+
+        fn disconnect(&mut self) -> TransportResult<()> {
+            Ok(())
+        }
+
+        fn close(&mut self) -> TransportResult<()> {
+            Ok(())
+        }
     }
 }
