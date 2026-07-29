@@ -653,6 +653,10 @@ mod tests {
             Err(TransportError::new(kind))
         }
 
+        fn drain_interrupt(&mut self, _timeout: Duration) -> TransportResult<()> {
+            Ok(())
+        }
+
         fn disconnect(&mut self) -> TransportResult<()> {
             Ok(())
         }

@@ -222,6 +222,13 @@ impl TransportPort for FakeTransport {
         self.shared.send_interrupt_if_active(payload)
     }
 
+    fn drain_interrupt(&mut self, _timeout: Duration) -> TransportResult<()> {
+        if !self.is_open {
+            return Err(TransportError::new(TransportErrorKind::Closed));
+        }
+        self.shared.ensure_active()
+    }
+
     fn disconnect(&mut self) -> TransportResult<()> {
         if !self.is_open {
             return Err(TransportError::new(TransportErrorKind::Closed));

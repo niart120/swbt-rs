@@ -26,6 +26,10 @@ fn open_close_are_idempotent_and_send_requires_open() {
         .poll(Duration::ZERO)
         .expect_err("poll before open must fail");
     assert_error_kind(&error, TransportErrorKind::Closed);
+    let error = transport
+        .drain_interrupt(Duration::from_secs(1))
+        .expect_err("drain before open must fail");
+    assert_error_kind(&error, TransportErrorKind::Closed);
     let error = control
         .inject_connected()
         .expect_err("event injection before open must fail");
@@ -54,6 +58,9 @@ fn open_close_are_idempotent_and_send_requires_open() {
     transport
         .send_interrupt(b"accepted")
         .expect("open transport accepts the default send outcome");
+    transport
+        .drain_interrupt(Duration::from_secs(1))
+        .expect("open transport drains pending interrupt data");
     assert_eq!(control.accepted_interrupts(), [Box::from(*b"accepted")]);
 
     transport.close().expect("first close");
@@ -67,6 +74,10 @@ fn open_close_are_idempotent_and_send_requires_open() {
     let error = transport
         .poll(Duration::ZERO)
         .expect_err("poll after close must fail");
+    assert_error_kind(&error, TransportErrorKind::Closed);
+    let error = transport
+        .drain_interrupt(Duration::from_secs(1))
+        .expect_err("drain after close must fail");
     assert_error_kind(&error, TransportErrorKind::Closed);
     let error = control
         .inject_connected()

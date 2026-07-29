@@ -39,7 +39,7 @@ pub(crate) fn activity_channel() -> (ActivityNotifier, Receiver<()>) {
 pub(crate) struct SendAcceptance(());
 
 impl SendAcceptance {
-    const ACCEPTED: Self = Self(());
+    pub(in crate::runtime) const ACCEPTED: Self = Self(());
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,6 +130,8 @@ pub(crate) trait TransportPort: Send {
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>>;
 
     fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance>;
+
+    fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()>;
 
     fn disconnect(&mut self) -> TransportResult<()>;
 

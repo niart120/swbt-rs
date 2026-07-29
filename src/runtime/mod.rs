@@ -1,3 +1,4 @@
+pub(crate) mod cleanup;
 pub(crate) mod connection;
 pub(crate) mod direct;
 pub(crate) mod handshake;

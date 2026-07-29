@@ -801,6 +801,10 @@ mod tests {
             result
         }
 
+        fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+            self.inner.drain_interrupt(timeout)
+        }
+
         fn disconnect(&mut self) -> TransportResult<()> {
             self.inner.disconnect()
         }

@@ -676,6 +676,10 @@ mod tests {
             self.inner.send_interrupt(payload)
         }
 
+        fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+            self.inner.drain_interrupt(timeout)
+        }
+
         fn disconnect(&mut self) -> TransportResult<()> {
             self.inner.disconnect()
         }
