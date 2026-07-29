@@ -27,8 +27,8 @@ use crate::{
         command::{CommandClient, CommandEnqueueError, CommandResponse, command_channel},
         test_support::{TestTransport, TestTransportControl},
         transport::{
-            ActivityNotifier, HidChannel, SendAcceptance, TransportEvent, TransportPort,
-            TransportResult, activity_channel,
+            ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities, TransportEvent,
+            TransportPort, TransportResult, activity_channel,
         },
         worker::{
             ChannelWorkerWaiter, DirectCommand, MonotonicClock, PeriodicCommand, RuntimeCommand,
@@ -373,7 +373,7 @@ struct MeasuredTransport {
 }
 
 impl TransportPort for MeasuredTransport {
-    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         self.inner.open(activity)
     }
 
@@ -1722,7 +1722,7 @@ fn measurement_meta(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Valu
             "absolute Periodic deadlines under production 16/16/4 work budgets",
         ],
         "unmeasured_layers": [
-            "Controller, ReadyRuntime, and WorkerOwner wrapper overhead",
+            "Controller, ControllerRuntime, and WorkerOwner wrapper overhead",
             "Bumble backend and USB/HCI driver latency",
             "Bluetooth air delivery and Switch acknowledgement",
             "hardware long-run jitter and power management",

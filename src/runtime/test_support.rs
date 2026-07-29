@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use crate::runtime::transport::{
-    ActivityNotifier, HidChannel, SendAcceptance, TransportEvent, TransportPort, TransportResult,
+    ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities, TransportEvent,
+    TransportPort, TransportResult,
     fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
 };
 
@@ -49,10 +50,20 @@ impl TestTransport {
         let (inner, control) = FakeTransport::with_limits(event_capacity, max_poll_batch);
         (Self { inner }, TestTransportControl { inner: control })
     }
+
+    pub(crate) fn with_capabilities(
+        event_capacity: usize,
+        max_poll_batch: usize,
+        capabilities: TransportCapabilities,
+    ) -> (Self, TestTransportControl) {
+        let (inner, control) =
+            FakeTransport::with_capabilities(event_capacity, max_poll_batch, capabilities);
+        (Self { inner }, TestTransportControl { inner: control })
+    }
 }
 
 impl TransportPort for TestTransport {
-    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         self.inner.open(activity)
     }
 
@@ -106,5 +117,9 @@ impl TestTransportControl {
     pub(crate) fn counters(&self) -> (usize, usize, usize) {
         let counters = self.inner.counters();
         (counters.open, counters.disconnect, counters.close)
+    }
+
+    pub(crate) fn accepted_interrupts(&self) -> Vec<Box<[u8]>> {
+        self.inner.accepted_interrupts()
     }
 }

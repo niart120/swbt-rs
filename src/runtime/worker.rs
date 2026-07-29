@@ -59,10 +59,10 @@ pub(crate) enum WorkerWaitRequest {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WorkerWaitError {
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 activates channel disconnection through the production waiter"
+            reason = "feature-disabled builds do not run the channel waiter"
         )
     )]
     Disconnected,
@@ -77,10 +77,10 @@ pub(crate) trait WorkerWaiter: Send {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T24 worker thread construction owns the activity receiver"
+        reason = "feature-disabled builds do not run the channel waiter"
     )
 )]
 pub(crate) struct ChannelWorkerWaiter {
@@ -89,10 +89,10 @@ pub(crate) struct ChannelWorkerWaiter {
 
 impl ChannelWorkerWaiter {
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T24 worker thread construction owns the activity receiver"
+            reason = "feature-disabled builds do not construct the channel waiter"
         )
     )]
     pub(crate) const fn new(receiver: Receiver<()>) -> Self {
@@ -141,10 +141,10 @@ impl ShutdownRequest {
     }
 
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 activates bounded Drop through the production worker owner"
+            reason = "feature-disabled builds do not own a runtime worker"
         )
     )]
     pub(crate) const fn dropped() -> Self {
@@ -220,10 +220,7 @@ where
 {
     #[cfg_attr(
         not(test),
-        allow(
-            dead_code,
-            reason = "T33 test injection pairs through the worker before M3 supplies a concrete backend"
-        )
+        allow(dead_code, reason = "M4 connects public pairing to the worker command")
     )]
     Pair {
         timeout: Duration,
@@ -422,10 +419,10 @@ pub(crate) trait WorkerReporting<M: ControllerModel>: ReportingMode {
     type RuntimeState: Send + 'static;
 
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T33 tests build concrete workers before M3 supplies a backend"
+            reason = "feature-disabled builds do not construct concrete workers"
         )
     )]
     fn build_worker(
@@ -546,11 +543,8 @@ impl ReportingDue {
 }
 
 #[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T31 and T33 controller orchestration own the worker core"
-    )
+    not(any(test, feature = "bumble")),
+    allow(dead_code, reason = "feature-disabled builds do not own a worker core")
 )]
 pub(crate) struct WorkerCore<M, R>
 where
@@ -579,7 +573,7 @@ impl<M: ControllerModel> WorkerCore<M, Periodic> {
         not(test),
         allow(
             dead_code,
-            reason = "T31 and T33 controller orchestration construct the worker core"
+            reason = "tests construct isolated periodic workers without a shared status projection"
         )
     )]
     pub(crate) fn new_periodic(
@@ -621,7 +615,7 @@ impl<M: ControllerModel> WorkerCore<M, Direct> {
         not(test),
         allow(
             dead_code,
-            reason = "T31 and T33 controller orchestration construct the worker core"
+            reason = "tests construct isolated direct workers without a shared status projection"
         )
     )]
     pub(crate) fn new_direct(
@@ -694,7 +688,7 @@ where
         not(test),
         allow(
             dead_code,
-            reason = "T21 exposes the logical connection seam before T31 pairing commands"
+            reason = "M4 connects public pairing to the worker connection seam"
         )
     )]
     pub(crate) fn begin_connection(
@@ -2005,8 +1999,9 @@ mod tests {
             readiness::ReadinessError,
             status::status_projection,
             transport::{
-                ActivityNotifier, HidChannel, SendAcceptance, TransportErrorKind, TransportEvent,
-                TransportPort, TransportResult, activity_channel,
+                ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities,
+                TransportErrorKind, TransportEvent, TransportPort, TransportResult,
+                activity_channel,
                 fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
             },
             worker::{
@@ -3817,7 +3812,7 @@ mod tests {
     }
 
     impl TransportPort for TracingTransport {
-        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
         }
 

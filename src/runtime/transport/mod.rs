@@ -1,8 +1,22 @@
+#[cfg(feature = "bumble")]
+mod bumble;
+#[cfg(all(test, feature = "bumble"))]
+mod bumble_tests;
+mod capabilities;
+mod config;
+
 use std::error::Error as StdError;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::time::Duration;
+
+#[cfg(feature = "bumble")]
+pub(crate) use bumble::BumbleTransportPort;
+pub(crate) use capabilities::TransportCapabilities;
+#[cfg(any(feature = "bumble", test))]
+pub(crate) use capabilities::{ClassicAclBufferInfo, ControllerVersionInfo, UsbTransportMetadata};
+pub(crate) use config::TransportConfig;
 
 #[cfg(test)]
 pub(in crate::runtime) mod fake;
@@ -11,10 +25,10 @@ mod tests;
 
 #[derive(Clone)]
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M3 concrete transports and T24 worker construction share this notifier"
+        reason = "feature-disabled builds do not construct transport activity notifiers"
     )
 )]
 pub(crate) struct ActivityNotifier {
@@ -23,10 +37,10 @@ pub(crate) struct ActivityNotifier {
 
 impl ActivityNotifier {
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T23 commands, T25 shutdown, and M3 transports wake the worker"
+            reason = "feature-disabled builds do not notify transport activity"
         )
     )]
     pub(crate) fn notify(&self) {
@@ -54,22 +68,13 @@ pub(crate) struct SendAcceptance(());
 impl SendAcceptance {
     #[cfg_attr(
         not(test),
-        allow(
-            dead_code,
-            reason = "M3 concrete transports construct accepted send tokens"
-        )
+        allow(dead_code, reason = "M4 constructs accepted HID interrupt send tokens")
     )]
     pub(in crate::runtime) const ACCEPTED: Self = Self(());
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "M3 concrete transports produce HID channel events"
-    )
-)]
+#[cfg_attr(not(test), allow(dead_code, reason = "M4 produces HID channel events"))]
 pub(crate) enum HidChannel {
     Control,
     Interrupt,
@@ -78,7 +83,7 @@ pub(crate) enum HidChannel {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
     not(test),
-    allow(dead_code, reason = "M3 concrete transports produce runtime events")
+    allow(dead_code, reason = "M4 produces connection and HID runtime events")
 )]
 pub(crate) enum TransportEvent {
     Connected,
@@ -98,26 +103,40 @@ pub(crate) enum TransportEvent {
 pub(crate) enum TransportErrorKind {
     #[cfg_attr(
         not(test),
-        allow(dead_code, reason = "M3 concrete transports report closed ports")
+        allow(
+            dead_code,
+            reason = "T05 concrete transports report initialization failures"
+        )
+    )]
+    OpenFailed,
+    /// The controller returned an unusable all-zero public address.
+    InvalidControllerIdentity,
+    /// The controller lacks the Classic feature or ACL buffers required by NX.
+    UnsupportedController,
+    #[cfg_attr(
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not construct concrete closed ports"
+        )
     )]
     Closed,
     SendRejected,
     #[cfg_attr(
         not(test),
-        allow(
-            dead_code,
-            reason = "M3 concrete transports report event queue overflow"
-        )
+        allow(dead_code, reason = "M4 bounds the connection and HID event queue")
     )]
     EventQueueOverflow,
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 concrete transports report terminated event sources"
+            reason = "feature-disabled builds do not observe transport source termination"
         )
     )]
     SourceTerminated,
+    #[cfg(feature = "bumble")]
+    CloseFailed,
 }
 
 #[derive(Clone)]
@@ -128,18 +147,21 @@ pub(crate) struct TransportError {
 
 impl TransportError {
     #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "M3 concrete transports construct typed errors")
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not construct concrete transport errors"
+        )
     )]
     pub(crate) const fn new(kind: TransportErrorKind) -> Self {
         Self { kind, source: None }
     }
 
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 concrete transports preserve sanitized backend sources"
+            reason = "feature-disabled builds do not preserve concrete backend sources"
         )
     )]
     pub(crate) fn with_source(
@@ -169,10 +191,19 @@ impl fmt::Debug for TransportError {
 impl fmt::Display for TransportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self.kind {
+            TransportErrorKind::OpenFailed => "transport could not be opened or initialized",
+            TransportErrorKind::InvalidControllerIdentity => {
+                "transport controller returned an invalid identity"
+            }
+            TransportErrorKind::UnsupportedController => {
+                "transport controller lacks required Classic ACL capability"
+            }
             TransportErrorKind::Closed => "transport is closed",
             TransportErrorKind::SendRejected => "transport rejected the send",
             TransportErrorKind::EventQueueOverflow => "transport event queue overflowed",
             TransportErrorKind::SourceTerminated => "transport source terminated",
+            #[cfg(feature = "bumble")]
+            TransportErrorKind::CloseFailed => "transport could not be closed cleanly",
         };
         formatter.write_str(message)
     }
@@ -190,13 +221,13 @@ pub(crate) type TransportResult<T> = Result<T, TransportError>;
 
 pub(crate) trait TransportPort: Send {
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 concrete ports are opened by T31 orchestration"
+            reason = "feature-disabled builds do not open concrete transport ports"
         )
     )]
-    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()>;
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities>;
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>>;
 

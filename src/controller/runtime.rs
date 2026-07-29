@@ -1,5 +1,8 @@
 use std::{marker::PhantomData, sync::mpsc::Receiver, time::Duration};
 
+#[cfg(feature = "bumble")]
+use std::time::Instant;
+
 use crate::{
     error::{Error, ErrorKind},
     model::ControllerModel,
@@ -13,7 +16,9 @@ use crate::{
             map_worker_outcome,
         },
         status::StatusPublisher,
-        transport::{ActivityNotifier, TransportError, TransportPort, activity_channel},
+        transport::{
+            ActivityNotifier, TransportError, TransportErrorKind, TransportPort, activity_channel,
+        },
         worker::{
             MonotonicClock, PairingError, RuntimeCommand, WorkerBudget, WorkerCommandError,
             WorkerReporting, WorkerWaiter,
@@ -24,42 +29,48 @@ use crate::{
     },
 };
 
+#[cfg(any(test, feature = "bumble"))]
+use super::create::with_cleanup_error;
+#[cfg(feature = "bumble")]
+use crate::runtime::worker::ChannelWorkerWaiter;
+
 use super::{
     config::{BuilderConfig, ControllerConfig},
     create::{
-        CreateProfileRuntimeAttempt, CreateProfileRuntimeBackend, ReadyRuntime, ReadyRuntimePort,
+        ControllerRuntime, ControllerRuntimePort, CreateProfileRuntimeAttempt,
+        CreateProfileRuntimeBackend,
     },
 };
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M3 supplies the first non-test concrete runtime factory"
+        reason = "feature-disabled builds do not create command channels"
     )
 )]
 const COMMAND_CAPACITY: usize = 16;
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M3 supplies the first non-test concrete runtime factory"
+        reason = "feature-disabled builds do not construct worker budgets"
     )
 )]
 const COMMAND_BATCH: usize = 16;
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M3 supplies the first non-test concrete runtime factory"
+        reason = "feature-disabled builds do not construct worker budgets"
     )
 )]
 const POLL_BATCHES: usize = 4;
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M3 activates cleanup for transports not yet owned by a worker"
+        reason = "feature-disabled builds do not own partially opened transports"
     )
 )]
 const UNOWNED_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
@@ -70,10 +81,10 @@ pub(super) const fn default_runtime_tuning() -> (usize, usize, usize) {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T33 test injection drives pairing before M3 supplies a backend"
+        reason = "feature-disabled builds do not construct runtime factories"
     )
 )]
 pub(super) trait PairDriver {
@@ -81,10 +92,10 @@ pub(super) trait PairDriver {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T33 test injection supplies concrete resources before M3"
+        reason = "feature-disabled builds do not construct runtime components"
     )
 )]
 pub(super) struct RuntimeComponents<C, W, D> {
@@ -92,14 +103,13 @@ pub(super) struct RuntimeComponents<C, W, D> {
     clock: C,
     waiter: W,
     pair_driver: D,
-    device_info_address: [u8; 6],
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T33 test injection constructs components before M3"
+        reason = "feature-disabled builds do not construct runtime components"
     )
 )]
 impl<C, W, D> RuntimeComponents<C, W, D> {
@@ -108,14 +118,12 @@ impl<C, W, D> RuntimeComponents<C, W, D> {
         clock: C,
         waiter: W,
         pair_driver: D,
-        device_info_address: [u8; 6],
     ) -> Self {
         Self {
             transport,
             clock,
             waiter,
             pair_driver,
-            device_info_address,
         }
     }
 }
@@ -124,7 +132,7 @@ impl<C, W, D> RuntimeComponents<C, W, D> {
     not(test),
     allow(
         dead_code,
-        reason = "T33 tests inject the concrete backend before M3 supplies its factory"
+        reason = "M5 connects the concrete backend to profile creation"
     )
 )]
 pub(super) struct ConcreteRuntimeBackend<F> {
@@ -135,7 +143,7 @@ pub(super) struct ConcreteRuntimeBackend<F> {
     not(test),
     allow(
         dead_code,
-        reason = "T33 tests inject the concrete backend before M3 supplies its factory"
+        reason = "M5 connects the concrete backend to profile creation"
     )
 )]
 impl<F> ConcreteRuntimeBackend<F> {
@@ -147,10 +155,10 @@ impl<F> ConcreteRuntimeBackend<F> {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T33 tests exercise the concrete attempt before M3 supplies a backend"
+        reason = "feature-disabled builds do not own concrete runtime attempts"
     )
 )]
 pub(super) struct ConcreteRuntimeAttempt<M, R, F, C, W, D>
@@ -167,10 +175,10 @@ where
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T33 tests construct the concrete attempt before M3 supplies a backend"
+        reason = "feature-disabled builds do not construct concrete runtime attempts"
     )
 )]
 impl<M, R, F, C, W, D> ConcreteRuntimeAttempt<M, R, F, C, W, D>
@@ -192,6 +200,22 @@ where
     #[cfg(test)]
     pub(super) fn worker_is_finished(&self) -> bool {
         self.owner.as_ref().is_some_and(WorkerOwner::is_finished)
+    }
+
+    #[cfg(test)]
+    pub(super) const fn owns_worker(&self) -> bool {
+        self.owner.is_some()
+    }
+
+    fn into_open_runtime(mut self) -> ControllerRuntime<M, R>
+    where
+        R: WorkerReporting<M>,
+    {
+        let owner = self
+            .owner
+            .take()
+            .expect("open runtime attempt retains its worker owner");
+        ControllerRuntime::from_port(owner)
     }
 }
 
@@ -255,27 +279,36 @@ where
             clock,
             waiter,
             pair_driver,
-            device_info_address,
         } = factory(activity.clone(), activity_receiver)?;
 
         self.unowned_transport = Some(transport);
-        if let Err(source) = self
+        let capabilities = match self
             .unowned_transport
             .as_deref_mut()
             .expect("runtime attempt retains its transport during open")
             .open(activity.clone())
         {
+            Ok(capabilities) => capabilities,
+            Err(source) => {
+                return Err(Error::with_source(
+                    ErrorKind::TransportOpen,
+                    "controller transport could not be opened and initialized",
+                    source,
+                ));
+            }
+        };
+        if !capabilities.classic_capable() {
             return Err(Error::with_source(
-                ErrorKind::ConnectionFailed,
-                "controller transport could not be opened",
-                source,
+                ErrorKind::TransportOpen,
+                "controller transport does not support the required Classic ACL operations",
+                TransportError::new(TransportErrorKind::UnsupportedController),
             ));
         }
         let transport = self
             .unowned_transport
             .take()
             .expect("opened attempt retains its transport until worker transfer");
-        let protocol = SwitchHidProtocol::new(Some(config.colors), device_info_address);
+        let protocol = SwitchHidProtocol::new(Some(config.colors), capabilities.local_address());
         let worker = R::build_worker(
             protocol,
             transport,
@@ -345,12 +378,89 @@ where
         cleanup_unowned_transport(transport.as_mut())
     }
 
-    fn into_ready(mut self) -> ReadyRuntime<M, R> {
-        let owner = self
-            .owner
-            .take()
-            .expect("paired runtime attempt retains its worker owner");
-        ReadyRuntime::from_port(owner)
+    fn into_ready(self) -> ControllerRuntime<M, R> {
+        self.into_open_runtime()
+    }
+}
+
+#[cfg(any(test, feature = "bumble"))]
+pub(super) fn open_controller_runtime<M, R, F, C, W, D>(
+    config: &ControllerConfig<M, R>,
+    status: StatusPublisher<M>,
+    factory: F,
+) -> crate::Result<ControllerRuntime<M, R>>
+where
+    M: ControllerModel,
+    R: WorkerReporting<M>,
+    F: FnOnce(ActivityNotifier, Receiver<()>) -> crate::Result<RuntimeComponents<C, W, D>>,
+    C: MonotonicClock + 'static,
+    W: WorkerWaiter + 'static,
+    D: PairDriver,
+{
+    let mut attempt = ConcreteRuntimeAttempt::new(factory, status);
+    if let Err(primary) = attempt.open(config) {
+        return Err(with_cleanup_error(
+            primary,
+            attempt.cleanup_without_neutral(),
+        ));
+    }
+    Ok(attempt.into_open_runtime())
+}
+
+#[cfg(feature = "bumble")]
+pub(super) fn open_bumble_runtime<M, R>(
+    config: &ControllerConfig<M, R>,
+    status: StatusPublisher<M>,
+) -> crate::Result<ControllerRuntime<M, R>>
+where
+    M: ControllerModel,
+    R: WorkerReporting<M>,
+{
+    let selector = config.adapter.clone();
+    let transport_config = config.transport_config();
+    open_controller_runtime(config, status, move |_activity, activity_receiver| {
+        Ok(RuntimeComponents::new(
+            Box::new(crate::runtime::transport::BumbleTransportPort::new(
+                selector,
+                transport_config,
+            )),
+            SystemClock::new(),
+            ChannelWorkerWaiter::new(activity_receiver),
+            UnsupportedPairDriver,
+        ))
+    })
+}
+
+#[cfg(feature = "bumble")]
+struct SystemClock {
+    origin: Instant,
+}
+
+#[cfg(feature = "bumble")]
+impl SystemClock {
+    fn new() -> Self {
+        Self {
+            origin: Instant::now(),
+        }
+    }
+}
+
+#[cfg(feature = "bumble")]
+impl MonotonicClock for SystemClock {
+    fn now(&self) -> Duration {
+        self.origin.elapsed()
+    }
+}
+
+#[cfg(feature = "bumble")]
+struct UnsupportedPairDriver;
+
+#[cfg(feature = "bumble")]
+impl PairDriver for UnsupportedPairDriver {
+    fn after_pair_enqueued(&mut self) -> crate::Result<()> {
+        Err(crate::runtime::error_map::unsupported_capability(
+            "Bluetooth pairing",
+        ))
     }
 }
 
@@ -366,7 +476,7 @@ where
     }
 }
 
-impl<M, R> ReadyRuntimePort<M, R> for WorkerOwner<RuntimeCommand<M, R>>
+impl<M, R> ControllerRuntimePort<M, R> for WorkerOwner<RuntimeCommand<M, R>>
 where
     M: ControllerModel,
     R: WorkerReporting<M>,
@@ -387,10 +497,10 @@ where
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M3 activates the production ReadyRuntimePort implementation"
+        reason = "feature-disabled builds cannot deliver runtime commands"
     )
 )]
 fn receive_response(response: CommandResponse) -> crate::Result<()> {
@@ -402,10 +512,7 @@ fn receive_response(response: CommandResponse) -> crate::Result<()> {
 
 #[cfg_attr(
     not(test),
-    allow(
-        dead_code,
-        reason = "M3 activates terminal worker recovery through the production backend"
-    )
+    allow(dead_code, reason = "M4 activates terminal recovery while pairing")
 )]
 fn finish_terminal_owner<C>(
     owner: &mut Option<WorkerOwner<C>>,
@@ -421,10 +528,10 @@ fn finish_terminal_owner<C>(
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M3 activates worker spawning through the production backend"
+        reason = "feature-disabled builds do not spawn controller workers"
     )
 )]
 pub(super) fn map_worker_spawn_error(error: WorkerSpawnError) -> Error {
@@ -441,10 +548,10 @@ pub(super) fn map_worker_spawn_error(error: WorkerSpawnError) -> Error {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M3 activates cleanup for transports not yet owned by a worker"
+        reason = "feature-disabled builds do not own partially opened transports"
     )
 )]
 fn cleanup_unowned_transport(transport: &mut dyn TransportPort) -> crate::Result<()> {
@@ -468,10 +575,10 @@ fn cleanup_unowned_transport(transport: &mut dyn TransportPort) -> crate::Result
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M3 activates drop cleanup for transports not yet owned by a worker"
+        reason = "feature-disabled builds do not own partially opened transports"
     )
 )]
 fn cleanup_unowned_transport_for_drop(transport: &mut dyn TransportPort) {
@@ -480,10 +587,10 @@ fn cleanup_unowned_transport_for_drop(transport: &mut dyn TransportPort) {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M3 activates cleanup aggregation at the production backend boundary"
+        reason = "feature-disabled builds do not aggregate transport cleanup"
     )
 )]
 fn record_cleanup_failure(

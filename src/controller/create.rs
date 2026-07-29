@@ -98,8 +98,8 @@ struct ReopenedCreateProfilePlan<M: ControllerModel, R: ReportingMode> {
     pair_timeout: Duration,
 }
 
-/// Type-erased command and shutdown boundary for a ready controller runtime.
-pub(super) trait ReadyRuntimePort<M, R>: Send
+/// Type-erased command and shutdown boundary for an owned controller runtime.
+pub(super) trait ControllerRuntimePort<M, R>: Send
 where
     M: ControllerModel,
     R: ReportingMode,
@@ -114,20 +114,20 @@ where
     fn close(self: Box<Self>, mode: CloseMode) -> crate::Result<()>;
 }
 
-/// Runtime ownership returned only after a backend reports protocol readiness.
-pub(super) struct ReadyRuntime<M: ControllerModel, R: ReportingMode> {
-    port: Box<dyn ReadyRuntimePort<M, R>>,
+/// Worker ownership retained from HCI-open through explicit close.
+pub(super) struct ControllerRuntime<M: ControllerModel, R: ReportingMode> {
+    port: Box<dyn ControllerRuntimePort<M, R>>,
 }
 
-impl<M: ControllerModel, R: ReportingMode> ReadyRuntime<M, R> {
+impl<M: ControllerModel, R: ReportingMode> ControllerRuntime<M, R> {
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T33 runtime tests construct this port before M3 supplies a concrete backend"
+            reason = "feature-disabled builds cannot construct a concrete runtime port"
         )
     )]
-    pub(super) fn from_port(port: impl ReadyRuntimePort<M, R> + 'static) -> Self {
+    pub(super) fn from_port(port: impl ControllerRuntimePort<M, R> + 'static) -> Self {
         Self {
             port: Box::new(port),
         }
@@ -153,12 +153,12 @@ impl<M: ControllerModel, R: ReportingMode> ReadyRuntime<M, R> {
 #[cfg(test)]
 #[allow(
     dead_code,
-    reason = "the token is retained solely to verify ready runtime ownership and Drop"
+    reason = "the token is retained solely to verify runtime ownership and Drop"
 )]
 struct TestRuntimeToken<T: Send>(T);
 
 #[cfg(test)]
-impl<M, R, T> ReadyRuntimePort<M, R> for TestRuntimeToken<T>
+impl<M, R, T> ControllerRuntimePort<M, R> for TestRuntimeToken<T>
 where
     M: ControllerModel,
     R: ReportingMode,
@@ -218,7 +218,7 @@ pub(super) trait CreateProfileRuntimeAttempt<M: ControllerModel, R: ReportingMod
     fn cleanup_without_neutral(self) -> crate::Result<()>;
 
     /// Transfers a successfully paired attempt into controller ownership.
-    fn into_ready(self) -> ReadyRuntime<M, R>;
+    fn into_ready(self) -> ControllerRuntime<M, R>;
 }
 
 pub(super) fn create_profile<M, R>(
@@ -275,7 +275,7 @@ where
     ))
 }
 
-fn with_cleanup_error(primary: Error, cleanup: crate::Result<()>) -> Error {
+pub(super) fn with_cleanup_error(primary: Error, cleanup: crate::Result<()>) -> Error {
     match cleanup {
         Ok(()) => primary,
         Err(cleanup) => primary.with_related(cleanup),

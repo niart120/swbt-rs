@@ -24,21 +24,7 @@ pub(crate) trait ProfileReadPort {
 /// no-replace semantics and map a concurrent conflict to `ProfileAlreadyExists`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProfileCreateTargetState {
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T31 constructs the absent state in create-profile orchestration"
-        )
-    )]
     Absent,
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T31 maps create-profile target conflicts before persistence"
-        )
-    )]
     Existing,
 }
 

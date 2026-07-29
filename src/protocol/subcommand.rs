@@ -48,10 +48,10 @@ pub(crate) struct DeviceInfoBluetoothAddress([u8; 6]);
 impl DeviceInfoBluetoothAddress {
     #[must_use]
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T31 and T33 controller configuration supplies the device address"
+            reason = "feature-disabled builds do not construct the runtime protocol"
         )
     )]
     pub(crate) const fn from_wire_bytes(bytes: [u8; 6]) -> Self {

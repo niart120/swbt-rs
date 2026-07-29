@@ -32,10 +32,10 @@ const DROP_COMPLETION_TIMEOUT: Duration = Duration::from_millis(100);
 pub(crate) struct WorkerSpawnError {
     source: io::Error,
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 activates spawn cleanup through the production runtime backend"
+            reason = "feature-disabled builds do not map worker spawn cleanup"
         )
     )]
     cleanup: Option<CleanupFailure>,
@@ -48,10 +48,10 @@ impl WorkerSpawnError {
 
     #[must_use]
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 activates spawn error mapping at the production backend boundary"
+            reason = "feature-disabled builds do not map worker spawn errors"
         )
     )]
     pub(crate) fn into_parts(self) -> (io::Error, Option<CleanupFailure>) {
@@ -81,19 +81,15 @@ impl StdError for WorkerSpawnError {
 
 #[derive(Debug)]
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T26 maps worker thread failures to the public error boundary"
+        reason = "feature-disabled builds do not observe worker failure causes"
     )
 )]
 pub(crate) enum WorkerFailureCause {
     Core(WorkerCoreError),
     Wait(WorkerWaitError),
-    #[allow(
-        dead_code,
-        reason = "T26 preserves the typed command-delivery invariant failure"
-    )]
     CommandDelivery(CommandDeliveryError),
     Panicked,
     CompletionDisconnected,
@@ -101,10 +97,10 @@ pub(crate) enum WorkerFailureCause {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T26 maps the joined worker panic without exposing its payload"
+        reason = "feature-disabled builds do not join controller workers"
     )
 )]
 pub(crate) enum WorkerJoinError {
@@ -113,10 +109,10 @@ pub(crate) enum WorkerJoinError {
 
 #[derive(Debug)]
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T26 consumes joined worker outcomes at the controller boundary"
+        reason = "feature-disabled builds do not produce worker outcomes"
     )
 )]
 pub(crate) enum WorkerThreadOutcome {
@@ -146,10 +142,10 @@ struct WorkerCompletion {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M3 activates bounded completion waits through the production worker owner"
+        reason = "feature-disabled builds do not wait for worker completion"
     )
 )]
 enum WorkerCompletionWait {
@@ -160,10 +156,10 @@ enum WorkerCompletionWait {
 
 trait WorkerCompletionWaiter: Send {
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 activates bounded completion waits through the production worker owner"
+            reason = "feature-disabled builds do not wait for worker completion"
         )
     )]
     fn wait(
@@ -173,9 +169,12 @@ trait WorkerCompletionWaiter: Send {
     ) -> WorkerCompletionWait;
 }
 
-#[allow(
-    dead_code,
-    reason = "T31 constructs the production waiter; T25 and T35 inject scripted waiters"
+#[cfg_attr(
+    not(any(test, feature = "bumble")),
+    allow(
+        dead_code,
+        reason = "feature-disabled builds do not wait for worker completion"
+    )
 )]
 struct ChannelWorkerCompletionWaiter;
 
@@ -197,10 +196,10 @@ impl WorkerCompletionWaiter for ChannelWorkerCompletionWaiter {
 enum ShutdownState {
     Running,
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 activates priority shutdown through the production worker owner"
+            reason = "feature-disabled builds do not request worker shutdown"
         )
     )]
     Requested(ShutdownRequest),
@@ -208,10 +207,10 @@ enum ShutdownState {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T31 constructs the shared priority shutdown channel"
+        reason = "feature-disabled builds do not construct priority shutdown channels"
     )
 )]
 pub(crate) struct PriorityShutdownClient {
@@ -224,10 +223,10 @@ pub(crate) struct PriorityShutdownReceiver {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T31 constructs the shared priority shutdown channel"
+        reason = "feature-disabled builds do not construct priority shutdown channels"
     )
 )]
 pub(crate) fn priority_shutdown_channel(
@@ -245,10 +244,10 @@ pub(crate) fn priority_shutdown_channel(
 
 impl PriorityShutdownClient {
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 activates priority shutdown through the production worker owner"
+            reason = "feature-disabled builds do not request worker shutdown"
         )
     )]
     fn request(&self, request: ShutdownRequest) -> bool {
@@ -305,10 +304,10 @@ impl PriorityShutdown for PriorityShutdownReceiver {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T26 and T31 own the spawned worker until explicit completion"
+        reason = "feature-disabled builds do not own spawned workers"
     )
 )]
 pub(crate) struct WorkerThread {
@@ -323,10 +322,10 @@ impl WorkerThread {
     }
 
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T26 receives completion before consuming the join handle"
+            reason = "feature-disabled builds do not finish spawned workers"
         )
     )]
     pub(crate) fn finish(self) -> WorkerThreadOutcome {
@@ -338,10 +337,10 @@ impl WorkerThread {
     }
 
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 activates bounded Drop through the production worker owner"
+            reason = "feature-disabled builds do not own spawned workers"
         )
     )]
     fn finish_with_waiter(
@@ -393,10 +392,10 @@ fn finish_disconnected(join: JoinHandle<()>) -> WorkerThreadOutcome {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T31 owns the command and worker thread handles in the controller"
+        reason = "feature-disabled builds do not own controller workers"
     )
 )]
 pub(crate) struct WorkerOwner<C> {
@@ -409,12 +408,18 @@ pub(crate) struct WorkerOwner<C> {
 
 impl<C> WorkerOwner<C> {
     #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "T31 constructs the controller worker owner")
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not construct controller worker owners"
+        )
     )]
     #[cfg_attr(
         test,
-        allow(dead_code, reason = "T31 constructs the controller worker owner")
+        allow(
+            dead_code,
+            reason = "runtime tests construct owners through explicit waiter seams"
+        )
     )]
     pub(crate) fn new(
         commands: CommandClient<C>,
@@ -431,10 +436,10 @@ impl<C> WorkerOwner<C> {
     }
 
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 activates command delivery through the production worker owner"
+            reason = "feature-disabled builds do not deliver worker commands"
         )
     )]
     pub(crate) fn try_enqueue(&self, command: C) -> Result<CommandResponse, CommandEnqueueError> {
@@ -450,10 +455,10 @@ impl<C> WorkerOwner<C> {
     }
 
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M3 activates explicit close through the production worker owner"
+            reason = "feature-disabled builds do not close worker owners"
         )
     )]
     pub(crate) fn finish_explicit(mut self, mode: CloseMode) -> WorkerThreadOutcome {
@@ -467,10 +472,7 @@ impl<C> WorkerOwner<C> {
 
     #[cfg_attr(
         not(test),
-        allow(
-            dead_code,
-            reason = "M3 activates terminal recovery through the production worker owner"
-        )
+        allow(dead_code, reason = "M4 activates terminal recovery while pairing")
     )]
     pub(crate) fn finish_terminal(mut self) -> WorkerThreadOutcome {
         drop(self.commands.take());
@@ -512,10 +514,10 @@ impl<C> Drop for WorkerOwner<C> {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T31 constructs the worker after transport and profile validation"
+        reason = "feature-disabled builds do not spawn controller workers"
     )
 )]
 pub(crate) fn spawn_worker_thread<M, R, C, S, W>(
@@ -793,8 +795,8 @@ mod tests {
             command::{CommandResponseError, command_channel},
             direct::{DirectTapError, DirectTapInterruption},
             transport::{
-                ActivityNotifier, HidChannel, SendAcceptance, TransportEvent, TransportPort,
-                TransportResult, activity_channel,
+                ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities,
+                TransportEvent, TransportPort, TransportResult, activity_channel,
                 fake::{FakeTransport, FakeTransportControl},
             },
             worker::{
@@ -1532,7 +1534,7 @@ mod tests {
     }
 
     impl TransportPort for PanickingTransport {
-        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
         }
 
@@ -1566,7 +1568,7 @@ mod tests {
     }
 
     impl TransportPort for CleanupFailureAndPanicOnDropTransport {
-        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
         }
 
@@ -1605,8 +1607,8 @@ mod tests {
     }
 
     impl TransportPort for IgnoringActivityTransport {
-        fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<()> {
-            Ok(())
+        fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
+            Ok(TransportCapabilities::test_default())
         }
 
         fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
@@ -1652,7 +1654,7 @@ mod tests {
     }
 
     impl TransportPort for DropTracingTransport {
-        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
         }
 
@@ -1687,7 +1689,7 @@ mod tests {
     }
 
     impl TransportPort for ExplicitCloseTracingTransport {
-        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
         }
 

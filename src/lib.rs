@@ -8,19 +8,21 @@
 //! operations. Building a controller without a profile is ephemeral; selecting
 //! an existing profile reads and validates that document. Construction does not
 //! open an adapter or start a worker. A configured controller therefore returns
-//! [`ErrorKind::TransportClosed`] from input operations until a later lifecycle
-//! entrypoint installs a ready runtime. Public open, pair, and profile-creation
-//! entrypoints are available, but the current package has no concrete
-//! Bluetooth transport backend. Open and pair return
-//! [`ErrorKind::UnsupportedCapability`]. An otherwise valid profile-creation
-//! request returns the same error after its read-only target preflight and does
-//! not create a file. On a ready runtime, explicit close waits for cleanup
-//! completion, joins the worker, and returns cleanup or join failures. Dropping
-//! a controller instead uses bounded best-effort shutdown: it omits neutral
-//! reporting and pending-send draining and cannot report failures. Its internal
-//! wait duration is not a public timing guarantee. A new connection session
-//! resets the input snapshot to neutral and does not carry pre-connection or
-//! previous-session input state or stale events forward.
+//! [`ErrorKind::TransportClosed`] from input operations until [`Controller::open`]
+//! installs a runtime. With the `bumble` feature, [`list_adapters`] performs
+//! descriptor-only Bluetooth HCI USB discovery without opening or claiming a
+//! device, while `open` claims and initializes the selected HCI adapter and
+//! starts an owned worker. Without that feature, `open` returns
+//! [`ErrorKind::UnsupportedCapability`] before transport side effects. Pairing
+//! and profile creation remain unavailable; pairing leaves an open HCI runtime
+//! unchanged, and an otherwise valid profile-creation request stops after its
+//! read-only target preflight without creating a file. Explicit close waits for
+//! cleanup completion, joins the worker, and returns cleanup or join failures.
+//! Dropping a controller instead uses bounded best-effort shutdown: it omits
+//! neutral reporting and pending-send draining and cannot report failures. Its
+//! internal wait duration is not a public timing guarantee. A new connection
+//! session resets the input snapshot to neutral and does not carry
+//! pre-connection or previous-session input state or stale events forward.
 //!
 //! # Model-valid input
 //!
@@ -52,7 +54,7 @@ mod protocol;
 pub mod reporting;
 mod runtime;
 
-pub use adapter::AdapterSelector;
+pub use adapter::{AdapterInfo, AdapterSelector, list_adapters};
 pub use connection::CreateProfileOptions;
 pub use controller::{
     Controller, ControllerBuilder, DirectJoyConL, DirectJoyConR, DirectProController, JoyConL,
