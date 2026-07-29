@@ -793,8 +793,8 @@ mod tests {
             command::{CommandResponseError, command_channel},
             direct::{DirectTapError, DirectTapInterruption},
             transport::{
-                ActivityNotifier, HidChannel, SendAcceptance, TransportEvent, TransportPort,
-                TransportResult, activity_channel,
+                ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities,
+                TransportEvent, TransportPort, TransportResult, activity_channel,
                 fake::{FakeTransport, FakeTransportControl},
             },
             worker::{
@@ -1532,7 +1532,7 @@ mod tests {
     }
 
     impl TransportPort for PanickingTransport {
-        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
         }
 
@@ -1566,7 +1566,7 @@ mod tests {
     }
 
     impl TransportPort for CleanupFailureAndPanicOnDropTransport {
-        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
         }
 
@@ -1605,8 +1605,8 @@ mod tests {
     }
 
     impl TransportPort for IgnoringActivityTransport {
-        fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<()> {
-            Ok(())
+        fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
+            Ok(TransportCapabilities::test_default())
         }
 
         fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
@@ -1652,7 +1652,7 @@ mod tests {
     }
 
     impl TransportPort for DropTracingTransport {
-        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
         }
 
@@ -1687,7 +1687,7 @@ mod tests {
     }
 
     impl TransportPort for ExplicitCloseTracingTransport {
-        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
         }
 

@@ -35,7 +35,7 @@ resource cleanup である。Switch、pairing、SDP、HID channel、NX handshake
 | adapter discovery | opaque `AdapterSelector` だけ | `list_adapters()` と `AdapterInfo` | USB handle を open/claim しない |
 | selector | 文字列を保存するだけ | USB index、VID/PID、serial、occurrence、port path を open 時に検査 | Bumble selector 型を公開しない |
 | transport open | fake port だけ | Bumble USB split、`ExternalHost`、configured `Device`、HCI initialization | model 型を transport が保持しない |
-| capability | protocol 用 address を factory が先に注入 | `TransportPort::open` が local address と HCI/Classic capability を返す | HCI 初期化後の値だけを使う |
+| capability | protocol 用 address を factory が先に注入 | `TransportPort::open` が local address と HCI/Classic capability を返す | HCI 初期化後の値だけを使い、全ゼロ address と非 Classic controller は worker 起動前に拒否する |
 | wait | command/shutdown/fake event が coalescing notifier を起動 | Bumble reader enqueue 後も同じ notifier を起動 | idle short polling を導入しない |
 | terminal | fake source termination | USB unplug/read failure を sticky terminal state へ変換 | terminal を一度だけ通知し、worker を起こす |
 | cleanup | fake transport と outer worker を回収 | reader cancellation、host/device drop、USB release、outer worker join | repeated close と reopen で claim/thread を残さない |
@@ -191,10 +191,9 @@ USB release、worker 回収を試みる。cleanup failure は primary error を�
 
 `TransportPort::open` は `TransportCapabilities` を返す。
 
-- local public address `[u8; 6]`
-- optional HCI version/subversion
-- optional LMP version/subversion
-- company identifier
+- local public address `[u8; 6]`。表示順かつ M1 の NX device-info wire order
+- optional version snapshot。存在する場合は HCI version/subversion、LMP version/subversion、
+  company identifier の 5 field を一体で保持する
 - Classic capability
 - USB VID/PID/bus/device address
 
@@ -202,12 +201,20 @@ Classic capable は次をすべて満たす場合だけ true とする。
 
 - LMP feature page 0 が存在する
 - page 0 byte 4 の `BR/EDR Not Supported` mask `0x20` が clear
+- Classic ACL buffer information が存在する
 - Classic ACL packet length が 0 より大きい
 - Classic ACL packet count が 0 より大きい
 
+全ゼロ local address は controller identity として受け付けず、crate-private
+`InvalidControllerIdentity` を source に持つ `ErrorKind::TransportOpen` とする。Bumble の
+`Address::address_bytes()` は HCI little-endian order なので、T05 の Bumble 境界で一度だけ
+反転して表示/NX wire order にする。`TransportCapabilities` から `SwitchHidProtocol` へは
+そのまま渡し、二度目の反転を行わない。
+
 local address と HCI/LMP version は構造化 trace と adapter-only evidence に残す。pairing key、
 profile JSON、USB serial、OS instance ID は trace に出さない。NX device-info に渡す address
-byte order は M1 protocol fixture と照合してから接続し、未検証の並びを採用しない。
+byte order は M1 protocol fixture と照合する。汎用 `Debug` は local address を表示せず、
+診断時は明示した構造化 field として記録する。
 
 ### 5.6 error 分類
 
@@ -297,9 +304,11 @@ probe API の有無を M3 completion blocker にしない。
 - [x] **T03 — model-independent config projection**
   - Pro/Joy-Con L/Joy-Con R の name、Class of Device、extended inquiry response を検査する。
   - Classic/SSP/SC/LE/scan policy と、Periodic/Direct で結果が同じことを検査する。
-- [ ] **T04 — open returns initialized capabilities**
+- [x] **T04 — open returns initialized capabilities**
   - `TransportPort::open` を capability-returning contract にし、fake open ordering、
     local address、HCI/LMP、Classic判定、source-preserving error mapping を検査する。
+  - 非 Classic controller は worker 起動前に拒否し、開いた transport を cleanup する。
+  - capability の表示順 address が反転せず NX device-info 応答へ届くことを検査する。
 - [ ] **T05 — Bumble dependency and synchronous initialization**
   - fixed revision の transport/host/HCI dependency を feature gate する。
   - injected Bumble boundary で split→host→configured device→initialize→address/identity/
@@ -331,6 +340,7 @@ probe API の有無を M3 completion blocker にしない。
 | refactor-done | T01: no-open adapter discovery | red: `cargo test descriptor_discovery_returns_only_bluetooth_hci_without_opening_or_claiming` は `AdapterInfo`、descriptor probe、classification 未定義の compile error。green: descriptor success/source-failure の unit test 2件と feature-disabled public integration test が成功し、device-level または interface-level `E0/01/01` だけを stable `usb:N` candidate にした。inventory failure は `AdapterDiscovery` と typed source を保持し、公開 message へ source text を出さない。refactor: discovery に渡す capability を descriptor record の取得だけに限定し、USB open/claim method を境界から除外。production `rusb` path にも open/detach/claim はなく、device/config/interface descriptor、bus、取得できた port path、serial index だけを読む。取得不能な port path は実際の空 path と区別して `None` にする。device-level HCI class では config descriptor を要求しない。個別 device の descriptor 読み取り失敗は candidate から除外し、件数だけを `tracing` event に残す。`cargo test --all-targets --all-features --locked` と default は lib 217 passed / 1 ignored と integration/example 全件、clippy `-D warnings`、rustdoc `-D warnings` が成功 |
 | refactor-done | T02: USB selector grammar | red: `cargo test usb_selector_accepts_the_supported_bumble_subset --all-features --locked` は `UsbSelector`、`AdapterSelector::as_str` / `parse_usb`、`ErrorKind::TransportOpen` 未定義の compile error。green: supported subset、invalid/unsupported syntax、serial redaction の unit test 3件が成功。index、hex 1〜4桁の VID/PID、serial、occurrence、bus/port path を owned internal typeへ変換し、ASCII 数字、`u8` / `u16` / `usize` overflow、empty segment、非 USB scheme、`pyusb:`、force、SCO、dispatch metadata を `TransportOpen` にした。refactor: VID/PID の選択方法を `First` / `Serial` / `Occurrence` に分けて不可能状態を除き、raw/parsed selector と error の `Debug` / `Display` から serial を除外。`cargo test --all-targets --all-features --locked` と default は lib 220 passed / 1 ignored と integration/example 全件、clippy `-D warnings`、rustdoc `-D warnings` が成功 |
 | refactor-done | T03: model-independent config projection | red: `cargo test transport_config_projects_model_protocol_metadata_into_complete_local_name_eir --all-features --locked` は `ControllerConfig::transport_config` 未定義の compile error。green: 3 model の name、`0x002508` Class of Device、Complete Local Name AD、zero-padded 240-byte EIR、Classic/SSP/SC/LE/scan policy と、各 model の Periodic/Direct 同値性を unit test 2件で固定。refactor: generic `ControllerConfig<M, R>` から model metadata だけを owned、非 generic の `TransportConfig` へ投影し、raw AD と Classic EIR を同じ TLV から生成。固定 Bumble revision では raw AD を `DeviceConfiguration::advertising_data`、240 bytes を HCI `WriteExtendedInquiryResponse` へ別々に渡すことを確認。`cargo test --all-targets --all-features --locked` と default は lib 222 passed / 1 ignored と integration/example 全件、clippy `-D warnings` が成功 |
+| refactor-done | T04: open returns initialized capabilities | red: `cargo test initialized_capabilities_preserve_identity_versions_and_classic_requirements --all-features --locked` は capability 型、version/USB/Classic metadata、`FakeTransport::with_capabilities` が未定義の compile error。green: capability field と Classic 判定条件、Classic ACL metadata 不在、全ゼロ address、repeated fake open、非 Classic の worker 起動前拒否と cleanup、distinctive address の device-info 応答を unit test 4件で固定。partial-open error は public `TransportOpen`、crate-private `OpenFailed`、typed backend source の三段を保持した。refactor: `RuntimeComponents` の先行 address 注入を削除し、`TransportPort::open` の immutable snapshot だけを protocol 構築へ渡した。version は 5 field の atomic `Option`、Classic ACL metadata は `Option` にして upstream の不在をゼロ値に変換しない。`cargo test --all-features --locked` と default は lib 226 passed / 1 ignored と integration/doc test 全件、`cargo clippy --all-targets --all-features --locked -- -D warnings`、all-features/default build、rustdoc `-D warnings`、`cargo fmt --check`、`git diff --check` が成功 |
 
 ## 7. 設計メモ
 

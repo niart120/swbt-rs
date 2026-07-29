@@ -249,8 +249,8 @@ mod tests {
             lifecycle::{LifecycleAction, LifecycleState, LifecycleStateMachine},
             sender::ReportSender,
             transport::{
-                ActivityNotifier, SendAcceptance, TransportError, TransportErrorKind,
-                TransportEvent, TransportPort, TransportResult,
+                ActivityNotifier, SendAcceptance, TransportCapabilities, TransportError,
+                TransportErrorKind, TransportEvent, TransportPort, TransportResult,
             },
         },
     };
@@ -667,8 +667,8 @@ mod tests {
     }
 
     impl TransportPort for ScriptedCleanupPort {
-        fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<()> {
-            Ok(())
+        fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
+            Ok(TransportCapabilities::test_default())
         }
 
         fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {

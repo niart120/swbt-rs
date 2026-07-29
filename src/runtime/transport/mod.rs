@@ -1,3 +1,4 @@
+mod capabilities;
 mod config;
 
 use std::error::Error as StdError;
@@ -6,6 +7,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::time::Duration;
 
+pub(crate) use capabilities::TransportCapabilities;
+#[cfg(test)]
+pub(crate) use capabilities::{ClassicAclBufferInfo, ControllerVersionInfo, UsbTransportMetadata};
 pub(crate) use config::TransportConfig;
 
 #[cfg(test)]
@@ -102,6 +106,18 @@ pub(crate) enum TransportEvent {
 pub(crate) enum TransportErrorKind {
     #[cfg_attr(
         not(test),
+        allow(
+            dead_code,
+            reason = "T05 concrete transports report initialization failures"
+        )
+    )]
+    OpenFailed,
+    /// The controller returned an unusable all-zero public address.
+    InvalidControllerIdentity,
+    /// The controller lacks the Classic feature or ACL buffers required by NX.
+    UnsupportedController,
+    #[cfg_attr(
+        not(test),
         allow(dead_code, reason = "M3 concrete transports report closed ports")
     )]
     Closed,
@@ -173,6 +189,13 @@ impl fmt::Debug for TransportError {
 impl fmt::Display for TransportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self.kind {
+            TransportErrorKind::OpenFailed => "transport could not be opened or initialized",
+            TransportErrorKind::InvalidControllerIdentity => {
+                "transport controller returned an invalid identity"
+            }
+            TransportErrorKind::UnsupportedController => {
+                "transport controller lacks required Classic ACL capability"
+            }
             TransportErrorKind::Closed => "transport is closed",
             TransportErrorKind::SendRejected => "transport rejected the send",
             TransportErrorKind::EventQueueOverflow => "transport event queue overflowed",
@@ -200,7 +223,7 @@ pub(crate) trait TransportPort: Send {
             reason = "M3 concrete ports are opened by T31 orchestration"
         )
     )]
-    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()>;
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities>;
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>>;
 

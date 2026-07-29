@@ -27,8 +27,8 @@ use crate::{
         lifecycle::LifecycleCommandError,
         status::status_projection,
         transport::{
-            ActivityNotifier, HidChannel, SendAcceptance, TransportError, TransportErrorKind,
-            TransportEvent, TransportPort, TransportResult, activity_channel,
+            ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities, TransportError,
+            TransportErrorKind, TransportEvent, TransportPort, TransportResult, activity_channel,
             fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
         },
         worker::{
@@ -533,7 +533,7 @@ impl PollBlockControl {
 }
 
 impl TransportPort for BlockingPollTransport {
-    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         self.inner.open(activity)
     }
 

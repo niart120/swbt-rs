@@ -29,8 +29,9 @@ use crate::{
         readiness::ReadinessError,
         test_support::{TestTransport, TestTransportControl},
         transport::{
-            ActivityNotifier, HidChannel, SendAcceptance, TransportError, TransportErrorKind,
-            TransportEvent, TransportPort, TransportResult,
+            ActivityNotifier, ClassicAclBufferInfo, HidChannel, SendAcceptance,
+            TransportCapabilities, TransportError, TransportErrorKind, TransportEvent,
+            TransportPort, TransportResult, UsbTransportMetadata,
         },
         worker::{
             ChannelWorkerWaiter, MonotonicClock, WorkerReporting, WorkerWaitError,
@@ -205,7 +206,6 @@ fn pair_primary_and_concrete_cleanup_failure_remain_separately_traversable() {
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
             DisconnectingPairDriver { control },
-            DEVICE_INFO_ADDRESS,
         ))
     };
     let mut backend = ConcreteRuntimeBackend::new(factory);
@@ -283,7 +283,6 @@ fn terminal_pair_worker_failure_cleans_and_joins_with_typed_primary() {
                 fail_poll,
                 activity,
             },
-            DEVICE_INFO_ADDRESS,
         ))
     };
     let mut backend = ConcreteRuntimeBackend::new(factory);
@@ -386,7 +385,6 @@ fn pair_after_worker_finishes_before_enqueue_uses_actual_terminal_outcome() {
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
             UnusedPairDriver,
-            DEVICE_INFO_ADDRESS,
         ))
     };
     let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
@@ -457,6 +455,52 @@ fn pair_after_worker_finishes_before_enqueue_uses_actual_terminal_outcome() {
 }
 
 #[test]
+fn non_classic_capabilities_fail_before_worker_spawn_and_clean_up_transport() {
+    let controller = ProController::builder("fake-adapter")
+        .build()
+        .expect("build configured Pro controller");
+    let capabilities = TransportCapabilities::from_initialized_controller(
+        DEVICE_INFO_ADDRESS,
+        None,
+        Some([0, 0, 0, 0, 0x20, 0, 0, 0]),
+        Some(ClassicAclBufferInfo::new(1021, 8)),
+        UsbTransportMetadata::new(0x0a12, 0x0001, 1, 7),
+    )
+    .expect("non-Classic controller still has valid identity metadata");
+    let (transport, control) = TestTransport::with_capabilities(8, 3, capabilities);
+    let clock = ManualClock::at(Duration::ZERO);
+    let factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+        Ok::<_, Error>(RuntimeComponents::new(
+            Box::new(transport),
+            clock,
+            ChannelWorkerWaiter::new(activity_receiver),
+            UnusedPairDriver,
+        ))
+    };
+    let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
+
+    let error = attempt
+        .open(&controller.config)
+        .expect_err("non-Classic capability must fail during transport open");
+    assert_eq!(error.kind(), ErrorKind::TransportOpen);
+    let source = error
+        .source()
+        .and_then(|source| source.downcast_ref::<TransportError>())
+        .expect("typed unsupported-controller source");
+    assert_eq!(source.kind(), TransportErrorKind::UnsupportedController);
+    assert!(
+        !attempt.owns_worker(),
+        "worker must not start before validation"
+    );
+    assert_eq!(control.counters(), (1, 0, 0));
+
+    attempt
+        .cleanup_without_neutral()
+        .expect("opened unsupported transport is cleaned up");
+    assert_eq!(control.counters(), (1, 1, 1));
+}
+
+#[test]
 fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
     let (transport, control) = TestTransport::with_limits(8, 3);
     let observed_control = control.clone();
@@ -472,7 +516,6 @@ fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
             UnusedPairDriver,
-            DEVICE_INFO_ADDRESS,
         ))
     };
     let mut backend = ConcreteRuntimeBackend::new(factory);
@@ -492,12 +535,12 @@ fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
         Err(error) => error,
     };
 
-    assert_eq!(error.kind(), ErrorKind::ConnectionFailed);
+    assert_eq!(error.kind(), ErrorKind::TransportOpen);
     let source = error
         .source()
         .and_then(|source| source.downcast_ref::<TransportError>())
         .expect("typed transport open source");
-    assert_eq!(source.kind(), TransportErrorKind::SourceTerminated);
+    assert_eq!(source.kind(), TransportErrorKind::OpenFailed);
     assert_eq!(
         source.source().expect("backend open source").to_string(),
         "secret partial open detail"
@@ -548,7 +591,6 @@ fn partial_transport_open_attempt_drop_skips_drain_and_cleans_once() {
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
             UnusedPairDriver,
-            DEVICE_INFO_ADDRESS,
         ))
     };
     let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
@@ -556,7 +598,7 @@ fn partial_transport_open_attempt_drop_skips_drain_and_cleans_once() {
     let error = attempt
         .open(&controller.config)
         .expect_err("partially opened transport reports its open error");
-    assert_eq!(error.kind(), ErrorKind::ConnectionFailed);
+    assert_eq!(error.kind(), ErrorKind::TransportOpen);
     assert_eq!(control.counters(), (1, 0, 0));
 
     drop(attempt);
@@ -591,7 +633,6 @@ fn partial_transport_open_panic_is_guarded_for_drop_cleanup() {
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
             UnusedPairDriver,
-            DEVICE_INFO_ADDRESS,
         ))
     };
     let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
@@ -669,6 +710,34 @@ fn common_input_bridge_dispatches_for_periodic_and_direct_workers() {
 }
 
 #[test]
+fn initialized_address_feeds_device_info_reply_without_reversal() {
+    let local_address = [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc];
+    let capabilities = TransportCapabilities::from_initialized_controller(
+        local_address,
+        None,
+        Some([0; 8]),
+        Some(ClassicAclBufferInfo::new(1021, 8)),
+        UsbTransportMetadata::new(0x0a12, 0x0001, 1, 7),
+    )
+    .expect("valid custom controller capabilities");
+    let controller = ProController::builder("fake-adapter")
+        .build()
+        .expect("build configured Pro controller");
+    let (mut controller, control) =
+        install_fake_runtime_with_capabilities(controller, true, capabilities, true);
+
+    let device_info = control
+        .accepted_interrupts()
+        .into_iter()
+        .find(|report| report.get(14) == Some(&0x02))
+        .expect("worker emits the device-info reply");
+    assert_eq!(&device_info[19..25], local_address);
+
+    controller.close().expect("close custom-address worker");
+    assert_closed(&controller, &control);
+}
+
+#[test]
 fn configured_input_is_transport_closed_and_close_is_idempotent() {
     let mut periodic = ProController::builder("fake-adapter")
         .build()
@@ -735,8 +804,26 @@ where
 }
 
 fn install_fake_runtime<M, R>(
+    controller: Controller<M, R>,
+    periodic: bool,
+) -> (Controller<M, R>, TestTransportControl)
+where
+    M: ControllerModel,
+    R: ReportingMode + WorkerReporting<M>,
+{
+    install_fake_runtime_with_capabilities(
+        controller,
+        periodic,
+        TransportCapabilities::test_default(),
+        false,
+    )
+}
+
+fn install_fake_runtime_with_capabilities<M, R>(
     mut controller: Controller<M, R>,
     periodic: bool,
+    capabilities: TransportCapabilities,
+    request_device_info: bool,
 ) -> (Controller<M, R>, TestTransportControl)
 where
     M: ControllerModel,
@@ -745,7 +832,7 @@ where
     assert_eq!(controller.status().lifecycle, LifecycleState::Configured);
     assert_eq!(controller.snapshot(), InputState::neutral());
 
-    let (transport, control) = TestTransport::with_limits(16, 3);
+    let (transport, control) = TestTransport::with_capabilities(16, 3, capabilities);
     let observed_control = control.clone();
     let clock = ManualClock::at(Duration::ZERO);
     let worker_clock = clock.clone();
@@ -761,13 +848,13 @@ where
             activity,
             observed_requests,
             periodic,
+            request_device_info,
         };
         Ok::<_, Error>(RuntimeComponents::new(
             Box::new(transport),
             worker_clock,
             waiter,
             driver,
-            DEVICE_INFO_ADDRESS,
         ))
     };
     let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
@@ -786,7 +873,10 @@ where
     assert_eq!(status.report_mode, Some(0x30));
     assert_eq!(status.last_subcommand, Some(0x30));
     assert_eq!(status.input_reports_accepted, 1);
-    assert_eq!(status.replies_accepted, 2);
+    assert_eq!(
+        status.replies_accepted,
+        if request_device_info { 3 } else { 2 }
+    );
     assert_eq!(observed_control.counters(), (1, 0, 0));
     (controller, observed_control)
 }
@@ -808,6 +898,7 @@ struct FakePairDriver {
     activity: ActivityNotifier,
     observed_requests: Receiver<WorkerWaitRequest>,
     periodic: bool,
+    request_device_info: bool,
 }
 
 struct DisconnectingPairDriver {
@@ -839,6 +930,11 @@ impl PairDriver for FakePairDriver {
         self.control
             .inject_hid_channel_opened(HidChannel::Interrupt)
             .map_err(pair_driver_error)?;
+        if self.request_device_info {
+            self.control
+                .inject_hid_output(HidChannel::Control, &subcommand_report(0x02, &[]))
+                .map_err(pair_driver_error)?;
+        }
         self.control
             .inject_hid_output(HidChannel::Control, &subcommand_report(0x03, &[0x30]))
             .map_err(pair_driver_error)?;
@@ -957,7 +1053,7 @@ impl PairDriver for TerminalPairDriver {
 }
 
 impl TransportPort for TerminalPairTransport {
-    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         self.inner.open(activity)
     }
 
@@ -1002,10 +1098,10 @@ impl Drop for TerminalPairTransport {
 }
 
 impl TransportPort for PartiallyOpeningTransport {
-    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         self.inner.open(activity)?;
         Err(TransportError::with_source(
-            TransportErrorKind::SourceTerminated,
+            TransportErrorKind::OpenFailed,
             Arc::new(io::Error::other("secret partial open detail")),
         ))
     }
@@ -1035,7 +1131,7 @@ impl TransportPort for PartiallyOpeningTransport {
 }
 
 impl TransportPort for PanickingOpenTransport {
-    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         self.inner.open(activity).expect("open test transport");
         panic!("secret partial open panic");
     }
@@ -1065,7 +1161,7 @@ impl TransportPort for PanickingOpenTransport {
 }
 
 impl TransportPort for DrainFailingTransport {
-    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         self.inner.open(activity)
     }
 

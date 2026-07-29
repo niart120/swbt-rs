@@ -300,8 +300,9 @@ mod tests {
             sender::ReportSender,
             state::InputStateStore,
             transport::{
-                ActivityNotifier, HidChannel, SendAcceptance, TransportError, TransportErrorKind,
-                TransportEvent, TransportPort, TransportResult, activity_channel,
+                ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities,
+                TransportError, TransportErrorKind, TransportEvent, TransportPort, TransportResult,
+                activity_channel,
                 fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
             },
         },
@@ -650,8 +651,8 @@ mod tests {
     }
 
     impl TransportPort for FailingTransport {
-        fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<()> {
-            Ok(())
+        fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
+            Ok(TransportCapabilities::test_default())
         }
 
         fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {

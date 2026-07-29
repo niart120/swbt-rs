@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use super::{
-    ActivityNotifier, HidChannel, SendAcceptance, TransportError, TransportErrorKind,
-    TransportEvent, TransportPort, TransportResult,
+    ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities, TransportError,
+    TransportErrorKind, TransportEvent, TransportPort, TransportResult,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +36,7 @@ pub(in crate::runtime) struct FakeTransport {
     shared: Arc<Shared>,
     events: Receiver<QueuedEvent>,
     max_poll_batch: usize,
+    capabilities: TransportCapabilities,
     is_open: bool,
     source_terminal_observed: bool,
 }
@@ -71,6 +72,18 @@ impl FakeTransport {
         event_capacity: usize,
         max_poll_batch: usize,
     ) -> (Self, FakeTransportControl) {
+        Self::with_capabilities(
+            event_capacity,
+            max_poll_batch,
+            TransportCapabilities::test_default(),
+        )
+    }
+
+    pub(in crate::runtime) fn with_capabilities(
+        event_capacity: usize,
+        max_poll_batch: usize,
+        capabilities: TransportCapabilities,
+    ) -> (Self, FakeTransportControl) {
         assert!(event_capacity > 0, "event capacity must be positive");
         assert!(max_poll_batch > 0, "poll batch limit must be positive");
         let (event_sender, events) = sync_channel(event_capacity);
@@ -90,6 +103,7 @@ impl FakeTransport {
                 shared: Arc::clone(&shared),
                 events,
                 max_poll_batch,
+                capabilities,
                 is_open: false,
                 source_terminal_observed: false,
             },
@@ -136,9 +150,10 @@ impl FakeTransport {
 }
 
 impl TransportPort for FakeTransport {
-    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         if self.is_open {
-            return self.shared.ensure_active();
+            self.shared.ensure_active()?;
+            return Ok(self.capabilities);
         }
         {
             let mut lifecycle = lock(&self.shared.lifecycle);
@@ -152,7 +167,7 @@ impl TransportPort for FakeTransport {
         self.is_open = true;
         self.source_terminal_observed = false;
         lock(&self.shared.counters).open += 1;
-        Ok(())
+        Ok(self.capabilities)
     }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {

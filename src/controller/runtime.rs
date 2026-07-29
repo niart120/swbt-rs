@@ -13,7 +13,9 @@ use crate::{
             map_worker_outcome,
         },
         status::StatusPublisher,
-        transport::{ActivityNotifier, TransportError, TransportPort, activity_channel},
+        transport::{
+            ActivityNotifier, TransportError, TransportErrorKind, TransportPort, activity_channel,
+        },
         worker::{
             MonotonicClock, PairingError, RuntimeCommand, WorkerBudget, WorkerCommandError,
             WorkerReporting, WorkerWaiter,
@@ -92,7 +94,6 @@ pub(super) struct RuntimeComponents<C, W, D> {
     clock: C,
     waiter: W,
     pair_driver: D,
-    device_info_address: [u8; 6],
 }
 
 #[cfg_attr(
@@ -108,14 +109,12 @@ impl<C, W, D> RuntimeComponents<C, W, D> {
         clock: C,
         waiter: W,
         pair_driver: D,
-        device_info_address: [u8; 6],
     ) -> Self {
         Self {
             transport,
             clock,
             waiter,
             pair_driver,
-            device_info_address,
         }
     }
 }
@@ -193,6 +192,11 @@ where
     pub(super) fn worker_is_finished(&self) -> bool {
         self.owner.as_ref().is_some_and(WorkerOwner::is_finished)
     }
+
+    #[cfg(test)]
+    pub(super) const fn owns_worker(&self) -> bool {
+        self.owner.is_some()
+    }
 }
 
 impl<M, R, F, C, W, D> CreateProfileRuntimeBackend<M, R> for ConcreteRuntimeBackend<F>
@@ -255,27 +259,36 @@ where
             clock,
             waiter,
             pair_driver,
-            device_info_address,
         } = factory(activity.clone(), activity_receiver)?;
 
         self.unowned_transport = Some(transport);
-        if let Err(source) = self
+        let capabilities = match self
             .unowned_transport
             .as_deref_mut()
             .expect("runtime attempt retains its transport during open")
             .open(activity.clone())
         {
+            Ok(capabilities) => capabilities,
+            Err(source) => {
+                return Err(Error::with_source(
+                    ErrorKind::TransportOpen,
+                    "controller transport could not be opened and initialized",
+                    source,
+                ));
+            }
+        };
+        if !capabilities.classic_capable() {
             return Err(Error::with_source(
-                ErrorKind::ConnectionFailed,
-                "controller transport could not be opened",
-                source,
+                ErrorKind::TransportOpen,
+                "controller transport does not support the required Classic ACL operations",
+                TransportError::new(TransportErrorKind::UnsupportedController),
             ));
         }
         let transport = self
             .unowned_transport
             .take()
             .expect("opened attempt retains its transport until worker transfer");
-        let protocol = SwitchHidProtocol::new(Some(config.colors), device_info_address);
+        let protocol = SwitchHidProtocol::new(Some(config.colors), capabilities.local_address());
         let worker = R::build_worker(
             protocol,
             transport,

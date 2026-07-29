@@ -2005,8 +2005,9 @@ mod tests {
             readiness::ReadinessError,
             status::status_projection,
             transport::{
-                ActivityNotifier, HidChannel, SendAcceptance, TransportErrorKind, TransportEvent,
-                TransportPort, TransportResult, activity_channel,
+                ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities,
+                TransportErrorKind, TransportEvent, TransportPort, TransportResult,
+                activity_channel,
                 fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
             },
             worker::{
@@ -3817,7 +3818,7 @@ mod tests {
     }
 
     impl TransportPort for TracingTransport {
-        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
         }
 

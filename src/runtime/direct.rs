@@ -248,8 +248,9 @@ mod tests {
             sender::ReportSender,
             state::InputStateStore,
             transport::{
-                ActivityNotifier, HidChannel, SendAcceptance, TransportErrorKind, TransportEvent,
-                TransportPort, TransportResult, activity_channel,
+                ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities,
+                TransportErrorKind, TransportEvent, TransportPort, TransportResult,
+                activity_channel,
                 fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
             },
         },
@@ -674,7 +675,7 @@ mod tests {
     }
 
     impl TransportPort for RecordingTransport {
-        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
         }
 
