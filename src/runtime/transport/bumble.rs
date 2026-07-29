@@ -111,17 +111,17 @@ impl TransportPort for BumbleTransportPort {
     }
 
     fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
-        self.session
-            .as_mut()
-            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
-            .drain_interrupt(timeout)
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        session.drain_interrupt(timeout)
     }
 
     fn disconnect(&mut self) -> TransportResult<()> {
-        self.session
-            .as_mut()
-            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
-            .disconnect()
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        session.disconnect()
     }
 
     fn close(&mut self) -> TransportResult<()> {

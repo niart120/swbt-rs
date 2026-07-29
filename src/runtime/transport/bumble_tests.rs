@@ -67,6 +67,25 @@ fn target_adapter_reports_initialized_identity_version_and_classic_capability() 
 }
 
 #[test]
+fn unopened_bumble_transport_cleanup_is_idempotent() {
+    let config = TransportConfig::for_model::<Pro>();
+    let mut transport = BumbleTransportPort::new(AdapterSelector::from("invalid"), config);
+
+    transport
+        .drain_interrupt(Duration::ZERO)
+        .expect("unopened transport has no interrupt output to drain");
+    transport
+        .disconnect()
+        .expect("unopened transport has no controller link to disconnect");
+    transport
+        .close()
+        .expect("unopened transport has no reader to close");
+    transport
+        .close()
+        .expect("repeated close remains idempotent");
+}
+
+#[test]
 fn bumble_initialization_uses_configured_device_and_exact_hci_order() {
     let config = TransportConfig::for_model::<Pro>();
     let commands = Arc::new(Mutex::new(Vec::new()));
