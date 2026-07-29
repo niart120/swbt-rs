@@ -33,11 +33,28 @@ fn target_adapter_reports_initialized_identity_version_and_classic_capability() 
         .open(activity_channel().0)
         .expect("open and initialize target adapter");
 
-    assert_ne!(capabilities.local_address(), [0; 6]);
-    assert!(
-        capabilities.local_version().is_some(),
-        "target adapter reports HCI/LMP version metadata"
+    let local_address = capabilities.local_address();
+    let version = capabilities
+        .local_version()
+        .expect("target adapter reports HCI/LMP version metadata");
+    eprintln!(
+        "local_address={:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X} \
+         hci_version=0x{:02X} hci_subversion=0x{:04X} \
+         lmp_version=0x{:02X} company_identifier=0x{:04X} lmp_subversion=0x{:04X}",
+        local_address[0],
+        local_address[1],
+        local_address[2],
+        local_address[3],
+        local_address[4],
+        local_address[5],
+        version.hci_version(),
+        version.hci_subversion(),
+        version.lmp_version(),
+        version.company_identifier(),
+        version.lmp_subversion(),
     );
+
+    assert_ne!(local_address, [0; 6]);
     assert!(capabilities.classic_capable());
     assert_eq!(capabilities.usb().vendor_id(), 0x0a12);
     assert_eq!(capabilities.usb().product_id(), 0x0001);

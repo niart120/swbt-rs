@@ -370,7 +370,7 @@ probe API の有無を M3 completion blocker にしない。
   - ignored test で no-open discovery、selector aliases、HCI reset/capability/address、
     Classic capability、unplug、process reopen を検査する。
   - CSR8510 A10 で 100 回 open/init/close を実行し、全 iteration の close/join を記録する。
-- [ ] **T10 — package evidence**
+- [x] **T10 — package evidence**
   - Rust 1.87 all-features check/test/build、default/no-default build、rustdoc を通す。
   - default 対 all-features の clean build time と binary/rlib size を記録する。
   - dependency license report と Cargo.lock hash を保存する。
@@ -387,7 +387,8 @@ probe API の有無を M3 completion blocker にしない。
 | refactor-done | T06: reader wake、cancellation、terminal、join | red: `cargo test bumble_reader_enqueues_before_wake_and_coalesces_activity --all-features --locked` は `ActivityNotifier` を受ける初期化境界と `BumbleSession::poll` / `close` が未定義の compile error。green: fork revision `48f1bc36169b2692d2a61e87eda4223b126dca2b` を固定し、`ExternalHost::new_with_activity_callback` から M2 の bounded `ActivityNotifier` を queue enqueue 後に起動した。controlled source は wall-clock polling を使わず `Condvar` で packet/end/failure/shutdown を制御し、初期化中の複数 wake の coalescing、wake 後の zero-time poll、clean end と typed reader error の terminal wake 1回、同じ source を持つ sticky `SourceTerminated`、explicit/repeated close の cancellation/completion/join、source/sink 各1回の drop を 3 test で固定した。close 後の `BumbleRuntime` drop は host/device を同時に解放し、T07 の Controller 配線や M4 の HID event 変換は追加していない。refactor: `host` と `device` の別々の `Option` を `Option<BumbleRuntime>` にまとめ、不整合な半閉じ状態を除いた。`cargo test runtime::transport::bumble_tests --all-features --locked` は T05 を含む7件成功。`cargo test --all-targets --all-features --locked` は lib 233 passed / 1 ignored と integration/example 全件、`cargo test --locked` は default で lib 226 passed / 1 ignored と integration/doc test 全件が成功した。all-features/default clippy `-D warnings`、Rust 1.87 all-targets/all-features check、all-features/default build、rustdoc `-D warnings`、fmt、diff check も成功。実機 USB は未実行 |
 | refactor-done | T07: production Controller open/close | red: `cargo test controller_open_is_idempotent_preserves_open_on_unsupported_pair_and_reopens_after_join --all-features --locked` は `open_controller_runtime` と Controller の runtime install seam が未定義の compile error。green: `BumbleTransportPort` が selector と model 非依存 config を所有し、`TransportPort::open` で T06 の `BumbleSession` を生成する production path を追加した。reader terminal 後の poll/send/drain/disconnect は同じ typed source を返し、close は reader cleanup を続ける。`Controller::open()` は `bumble` feature で HCI 初期化と outer worker start の完了後に成功し、status は `Open` / `connected=false` になる。repeated open は factory を再実行せず、M3 の `pair()` は `UnsupportedCapability` を返して open runtime を維持する。fake transport の drop flag と open/drain/disconnect/close counter により、`close()` と `close_without_neutral()` が cleanup、worker completion、join を終えてから返ること、repeated close、同じ Controller の reopen を固定した。default feature の公開 open は従来どおり side effect 前に unsupported。refactor: Open から所有する内部値を `ReadyRuntime` ではなく `ControllerRuntime` とし、public generic `Controller<M, R>::open()` は sealed reporting dispatch で維持した。到達可能になった M2 の M3 向け `dead_code` 理由を除去し、M4/M5 の pairing/HID/profile 境界と feature-disabled build だけを未到達として区別した。README、crate rustdoc、public open/pair rustdoc も feature ごとの現状へ更新。`cargo test --all-targets --all-features --locked` は lib 233 passed / 1 ignored と integration/example 全件、`cargo test --locked` は default で lib 227 passed / 1 ignored と integration/doc test 全件が成功した。all-features/default clippy `-D warnings`、Rust 1.87 all-targets/all-features check、all-features/default build、rustdoc `-D warnings`、fmt、diff check も成功。USB claim/release、実 adapter reopen、process reopen は未実行で T09 の対象 |
 | refactor-skipped | T08: adapter error integration | red: 新しい失敗は発生しなかった。T08 の regression matrix を追加した最初の targeted run で4 testが成功し、T01 の discovery、T02 の selector、T04 の公開 `TransportOpen` mapping、T05 の HCI initialization がすでに要求を実装していた。green: discovery inventory failure は既存 test で `AdapterDiscovery` と typed source を保持する。invalid selector は公開 `Controller::open()` を通して `TransportOpen` となり、runtime を install しない。production path は selector parse を opener より前に実行する。決定的に注入した Bumble の not-found `InvalidSpec`、permission `rusb::Error::Access`、driver `NotSupported`、claim `Busy` は public `Error` → `TransportError::OpenFailed` → typed `bumble_transport::Error` の source chain を保持する。failed Reset は typed Bumble source、incomplete/failed ReadBdAddr は typed initialization source を持つ `OpenFailed` になり、公開および transport error の `Display` / `Debug` に selector/backend text を出さない。production code の変更が不要だったため refactor は追加していない。`cargo test --all-targets --all-features --locked` は lib 237 passed / 1 ignored と integration/example 全件、`cargo test --locked` は default で lib 227 passed / 1 ignored と integration/doc test 全件が成功した。all-features/default clippy `-D warnings`、Rust 1.87 all-targets/all-features check、all-features/default build、rustdoc `-D warnings`、fmt、diff check も成功。T09 は current WinUSB の成功経路を実機確認したが、permission/driver failure を作る device/driver 状態変更は行っていない |
-| refactor-done | T09: adapter-only hardware lifecycle | red: `cargo test --features adapter-tests --test adapter_open -- --ignored` は `adapter-tests` feature 不在で失敗した。green: Windows 11 が CSR8510 A10 `0A12:0001` を `WinUSB` / `libwdi` device として認識した状態で、ignored hardware target を実行した。descriptor-only discovery は2回同じ target を返して 0.04 s で成功。candidate index、VID/PID、`#0` occurrence、bus/port path の4 alias は各 open/init/close に成功し、serial descriptor がないため serial alias の実機検査は対象外。crate 内 capability test は non-zero local address、HCI/LMP version metadata、Classic ACL capability、USB VID/PID を確認して 0.34 s で成功した。別 process 2回の open/init/close は 0.70 s、100回の連続 lifecycle は全 iteration の `close_without_neutral()` 完了後に次へ進み 31.77 s で成功した。物理 unplug は reader terminal と outer worker failure/cleanup を 19.23 s で検出し、挿し直し後は Windows の `OK` 再認識と別 process 2回の reopen 0.71 s を確認した。refactor: `adapter-tests = ["bumble"]` を hardware suite の opt-in 境界にし、production initialization の secret-free `tracing` event に local address、HCI/LMP version、Classic capability、USB VID/PID/bus/address を明示 field として追加した。test 実行時は subscriber output を保存していない。permission/driver failure を作る device/driver 状態変更は未実行で、typed classification は T08 の決定的 test を根拠とする。`cargo test --all-targets --all-features --locked` は lib 236 passed / 2 ignored、hardware target 5 ignored と integration/example 全件、`cargo test --locked` は default で lib 227 passed / 1 ignored と integration/doc test 全件が成功した。all-features/default clippy `-D warnings`、Rust 1.87 all-targets/all-features check、all-features/default build、rustdoc `-D warnings`、fmt、diff check も成功 |
+| refactor-done | T09: adapter-only hardware lifecycle | red: `cargo test --features adapter-tests --test adapter_open -- --ignored` は `adapter-tests` feature 不在で失敗した。green: Windows 11 が CSR8510 A10 `0A12:0001` を `WinUSB` / `libwdi` device として認識した状態で、ignored hardware target を実行した。descriptor-only discovery は2回同じ target を返して 0.04 s で成功。candidate index、VID/PID、`#0` occurrence、bus/port path の4 alias は各 open/init/close に成功し、serial descriptor がないため serial alias の実機検査は対象外。crate 内 capability test は local address `00:1B:DC:F9:9F:7D`、HCI `0x06/0x22BB`、LMP `0x06/0x22BB`、company `0x000A`、Classic ACL capability、USB VID/PID を記録して 0.34 s で成功した。別 process 2回の open/init/close は 0.70 s、100回の連続 lifecycle は全 iteration の `close_without_neutral()` 完了後に次へ進み 31.77 s で成功した。物理 unplug は reader terminal と outer worker failure/cleanup を 19.23 s で検出し、挿し直し後は Windows の `OK` 再認識と別 process 2回の reopen 0.71 s を確認した。refactor: `adapter-tests = ["bumble"]` を hardware suite の opt-in 境界にし、production initialization の secret-free `tracing` event に local address、HCI/LMP version、Classic capability、USB VID/PID/bus/address を明示 field として追加した。test 実行時は subscriber output を保存していない。permission/driver failure を作る device/driver 状態変更は未実行で、typed classification は T08 の決定的 test を根拠とする。`cargo test --all-targets --all-features --locked` は lib 236 passed / 2 ignored、hardware target 5 ignored と integration/example 全件、`cargo test --locked` は default で lib 227 passed / 1 ignored と integration/doc test 全件が成功した。all-features/default clippy `-D warnings`、Rust 1.87 all-targets/all-features check、all-features/default build、rustdoc `-D warnings`、fmt、diff check も成功 |
+| refactor-skipped | T10: package evidence | red: `cargo deny check` は host に command がなく失敗し、platform filter なしの offline metadata は未取得 target-specific `atomic-polyfill 1.0.3` を要求して停止した。green: Rust 1.87.0 の all-features check/test/build、default/no-default build、rustdoc `-D warnings` が成功した。空の別 target directory と共用 source cache を使う一回の clean release build は default 3.53 s / rlib 2,580,250 bytes、all-features 21.71 s / 4,028,046 bytes。Windows target に絞った metadata inventory は211 package、license metadata 欠落0件で、Bumble 21 package は Apache-2.0、`serialport 4.9.0` は MPL-2.0。`Cargo.lock` SHA-256 は `1B5C4504519933A22B78C8B2CABBAB112A26AF8CE360C3559385DBF7EFEE9BE9`。測定方法、全 license expression、非 MIT/Apache 系 package、未検証範囲は [package evidence](evidence/package-windows-msvc-20260730.md) に保存した。production behavior を変えない evidence item のため refactor は追加していない |
 
 ## 7. 設計メモ
 
@@ -410,8 +411,9 @@ virtual integration まで direct dependency に追加しない。
 
 `bumble-transport` は transport ごとの Cargo feature 分割がなく、Tokio、tonic、WebSocket、
 audio 関連も依存 graph に入る。T05 の Cargo.lock では package が 27 から 236（+209）へ
-増えた。既存 package の版更新は含まない。build time/size/license は T10 で測定し、依存削減を
-未測定の印象で判断しない。
+増えた。既存 package の版更新は含まない。T10 の Windows clean release build では
+all-features の wall time は default の 6.15 倍、rlib は 56.1% 増だった。license inventory
+と測定条件は [package evidence](evidence/package-windows-msvc-20260730.md) を正本とする。
 
 ### 7.2 ownership
 
@@ -428,9 +430,9 @@ HCI `ReadBdAddr` 後に構築する。未検証の placeholder address は使わ
 
 ### 7.3 target adapter
 
-2026-07-29 の read-only PnP 調査では次を確認した。
+2026-07-30 の PnP と T09 実機調査では次を確認した。
 
-- CSR8510 A10 `0A12:0001`: `E0/01/01`、WinUSB、状態 OK/Started
+- CSR8510 A10 `0A12:0001`: `E0/01/01`、WinUSB / libwdi、状態 OK/Started
 - MediaTek `0489:E13A`: `E0/01/01`、BTHUSB、状態 OK/Started
 
 M3 で claim/reset するのは CSR8510 A10 だけとする。MediaTek は Windows Bluetooth stack が
@@ -485,8 +487,13 @@ cargo test --features adapter-tests --test adapter_open -- --ignored
 package evidence:
 
 ```powershell
-cargo deny check
+cargo metadata --offline --all-features --locked `
+  --filter-platform x86_64-pc-windows-msvc --format-version 1
+Get-FileHash Cargo.lock -Algorithm SHA256
 ```
+
+`cargo-deny` が導入済みなら `cargo deny check` も実行する。未導入の場合は global tool を
+暗黙に追加せず、metadata inventory の範囲と deny/advisory 未実行を evidence に残す。
 
 実行した command、target adapter、driver、Bumble revision、Cargo.lock hash、iteration 数、
 unplug 手順、build time/size、license report を completion evidence に記録する。通常 CI や
