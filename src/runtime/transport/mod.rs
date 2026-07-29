@@ -12,7 +12,10 @@ mod tests;
 #[derive(Clone)]
 #[cfg_attr(
     not(test),
-    allow(dead_code, reason = "T22 registers the coalescing activity notifier")
+    allow(
+        dead_code,
+        reason = "M3 concrete transports and T24 worker construction share this notifier"
+    )
 )]
 pub(crate) struct ActivityNotifier {
     sender: SyncSender<()>,
@@ -21,7 +24,10 @@ pub(crate) struct ActivityNotifier {
 impl ActivityNotifier {
     #[cfg_attr(
         not(test),
-        allow(dead_code, reason = "T22 wakes the worker without blocking producers")
+        allow(
+            dead_code,
+            reason = "T23 commands, T25 shutdown, and M3 transports wake the worker"
+        )
     )]
     pub(crate) fn notify(&self) {
         match self.sender.try_send(()) {
@@ -32,7 +38,10 @@ impl ActivityNotifier {
 
 #[cfg_attr(
     not(test),
-    allow(dead_code, reason = "T22 constructs the coalescing activity channel")
+    allow(
+        dead_code,
+        reason = "T24 worker construction creates the shared activity channel"
+    )
 )]
 pub(crate) fn activity_channel() -> (ActivityNotifier, Receiver<()>) {
     let (sender, receiver) = sync_channel(1);

@@ -1,4 +1,8 @@
-use std::{marker::PhantomData, time::Duration};
+use std::{
+    marker::PhantomData,
+    sync::mpsc::{Receiver, RecvTimeoutError},
+    time::Duration,
+};
 
 use crate::{
     controller::input::{neutral_candidate, press_candidate, release_candidate, tap_plan},
@@ -42,6 +46,74 @@ pub(crate) trait MonotonicClock {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WorkerWaitRequest {
+    Activity,
+    ActivityOrDeadline(Duration),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WorkerWaitError {
+    Disconnected,
+}
+
+pub(crate) trait WorkerWaiter {
+    fn wait(
+        &mut self,
+        request: WorkerWaitRequest,
+        clock: &dyn MonotonicClock,
+    ) -> Result<(), WorkerWaitError>;
+}
+
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "T24 worker thread construction owns the activity receiver"
+    )
+)]
+pub(crate) struct ChannelWorkerWaiter {
+    receiver: Receiver<()>,
+}
+
+impl ChannelWorkerWaiter {
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T24 worker thread construction owns the activity receiver"
+        )
+    )]
+    pub(crate) const fn new(receiver: Receiver<()>) -> Self {
+        Self { receiver }
+    }
+}
+
+impl WorkerWaiter for ChannelWorkerWaiter {
+    fn wait(
+        &mut self,
+        request: WorkerWaitRequest,
+        clock: &dyn MonotonicClock,
+    ) -> Result<(), WorkerWaitError> {
+        match request {
+            WorkerWaitRequest::Activity => self
+                .receiver
+                .recv()
+                .map_err(|_| WorkerWaitError::Disconnected),
+            WorkerWaitRequest::ActivityOrDeadline(deadline) => {
+                let now = clock.now();
+                if deadline <= now {
+                    return Ok(());
+                }
+                match self.receiver.recv_timeout(deadline - now) {
+                    Ok(()) | Err(RecvTimeoutError::Timeout) => Ok(()),
+                    Err(RecvTimeoutError::Disconnected) => Err(WorkerWaitError::Disconnected),
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ExplicitCloseRequest {
     mode: CloseMode,
 }
@@ -73,7 +145,7 @@ pub(crate) struct WorkerBudget {
 impl WorkerBudget {
     #[cfg_attr(
         not(test),
-        allow(dead_code, reason = "T22 and T33 configure bounded worker batches")
+        allow(dead_code, reason = "T33 configures bounded worker batches")
     )]
     pub(crate) const fn new(command_batch: usize, poll_batches: usize) -> Self {
         assert!(command_batch > 0, "worker command batch must be positive");
@@ -187,11 +259,39 @@ impl StepProgress {
             operation_errors: Vec::new(),
         }
     }
+
+    pub(crate) fn wait_request(&self, now: Duration) -> Option<WorkerWaitRequest> {
+        if self.immediate || self.next_deadline.is_some_and(|deadline| deadline <= now) {
+            return None;
+        }
+        Some(self.next_deadline.map_or(
+            WorkerWaitRequest::Activity,
+            WorkerWaitRequest::ActivityOrDeadline,
+        ))
+    }
+}
+
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "T24 worker thread loop consumes each completed step"
+    )
+)]
+pub(crate) fn wait_for_next_iteration(
+    progress: &StepProgress,
+    clock: &dyn MonotonicClock,
+    waiter: &mut dyn WorkerWaiter,
+) -> Result<(), WorkerWaitError> {
+    let Some(request) = progress.wait_request(clock.now()) else {
+        return Ok(());
+    };
+    waiter.wait(request, clock)
 }
 
 #[allow(
     dead_code,
-    reason = "T22 and T24 worker loop and join handling consume step outcomes"
+    reason = "T24 worker loop and join handling consume step outcomes"
 )]
 pub(crate) enum WorkerStep {
     Continue(StepProgress),
@@ -493,7 +593,7 @@ where
         not(test),
         allow(
             dead_code,
-            reason = "T21 defines deterministic stepping before T22 owns the wait loop"
+            reason = "T24 worker thread loop consumes deterministic steps"
         )
     )]
     pub(crate) fn step(
@@ -1604,10 +1704,11 @@ mod tests {
                 fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
             },
             worker::{
-                CommandSource, CommonCommand, DirectCommand, ExplicitCloseRequest, MonotonicClock,
-                PeriodicCommand, PriorityShutdown, WorkerBudget, WorkerCommandError,
-                WorkerCommandProgress, WorkerCore, WorkerCoreError, WorkerOperationError,
-                WorkerStep, periodic_tap_times,
+                ChannelWorkerWaiter, CommandSource, CommonCommand, DirectCommand,
+                ExplicitCloseRequest, MonotonicClock, PeriodicCommand, PriorityShutdown,
+                StepProgress, WorkerBudget, WorkerCommandError, WorkerCommandProgress, WorkerCore,
+                WorkerCoreError, WorkerOperationError, WorkerStep, WorkerWaitError,
+                WorkerWaitRequest, WorkerWaiter, periodic_tap_times, wait_for_next_iteration,
             },
         },
     };
@@ -1616,6 +1717,163 @@ mod tests {
     const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
     const REPORT_PERIOD: Duration = Duration::from_millis(8);
     const CONNECTION_TIMEOUT: Duration = Duration::from_secs(2);
+
+    #[test]
+    fn queued_command_transport_and_shutdown_activity_wakes_the_idle_worker() {
+        let (mut transport, control) = FakeTransport::with_limits(8, 2);
+        let (activity, receiver) = activity_channel();
+        transport
+            .open(activity.clone())
+            .expect("open with the worker activity notifier");
+        let command_activity = activity.clone();
+        let shutdown_activity = activity;
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let mut worker = WorkerCore::new_direct(
+            protocol(),
+            Box::new(TracingTransport {
+                inner: transport,
+                trace: Arc::clone(&trace),
+            }),
+            WorkerBudget::new(2, 1),
+            observer(Arc::clone(&trace)),
+        );
+        let clock = FakeClock::at(Duration::ZERO);
+        let mut waiter = ChannelWorkerWaiter::new(receiver);
+        let mut shutdown = ShutdownLatch::default();
+        let mut commands = TracedCommands::new([], Arc::clone(&trace));
+
+        let WorkerStep::Continue(idle) = worker.step(&clock, &mut shutdown, &mut commands) else {
+            panic!("an open worker without work must remain idle");
+        };
+        assert_eq!(
+            idle.wait_request(clock.now()),
+            Some(WorkerWaitRequest::Activity)
+        );
+
+        let mut commands = TracedCommands::new(
+            [("neutral", DirectCommand::Common(CommonCommand::Neutral))],
+            Arc::clone(&trace),
+        );
+        command_activity.notify();
+        control
+            .inject_connected()
+            .expect("publish transport work before its notification");
+        wait_for_next_iteration(&idle, &clock, &mut waiter)
+            .expect("coalesced command and transport activity wakes the worker");
+
+        let WorkerStep::Continue(progress) = worker.step(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("non-terminal activity must keep the worker running");
+        };
+        assert_eq!(progress.commands, 1);
+        assert_eq!(progress.hci_events, 1);
+        assert_eq!(commands.remaining(), 0);
+        assert_eq!(progress.wait_request(clock.now()), None);
+
+        let WorkerStep::Continue(idle) = worker.step(&clock, &mut shutdown, &mut commands) else {
+            panic!("the immediate follow-up step must return to idle");
+        };
+        assert_eq!(
+            idle.wait_request(clock.now()),
+            Some(WorkerWaitRequest::Activity)
+        );
+
+        let mut shutdown = ShutdownLatch::new(ExplicitCloseRequest::new(CloseMode::WithoutNeutral));
+        shutdown_activity.notify();
+        wait_for_next_iteration(&idle, &clock, &mut waiter)
+            .expect("shutdown activity wakes the idle worker");
+        assert!(matches!(
+            worker.step(&clock, &mut shutdown, &mut commands),
+            WorkerStep::Closed { .. }
+        ));
+    }
+
+    #[test]
+    fn pending_notifications_coalesce_to_one_activity_token() {
+        let (activity, receiver) = activity_channel();
+        let command_activity = activity.clone();
+        let transport_activity = activity.clone();
+        let shutdown_activity = activity;
+
+        command_activity.notify();
+        transport_activity.notify();
+        shutdown_activity.notify();
+        drop(command_activity);
+        drop(transport_activity);
+        drop(shutdown_activity);
+
+        let clock = FakeClock::at(Duration::ZERO);
+        let mut waiter = ChannelWorkerWaiter::new(receiver);
+        assert_eq!(waiter.wait(WorkerWaitRequest::Activity, &clock), Ok(()));
+        assert_eq!(
+            waiter.wait(WorkerWaitRequest::Activity, &clock),
+            Err(WorkerWaitError::Disconnected)
+        );
+    }
+
+    #[test]
+    fn immediate_progress_and_due_deadlines_bypass_the_waiter() {
+        let clock = FakeClock::at(Duration::from_millis(310));
+        let mut waiter = ScriptedWaiter::new(clock.clone());
+        let immediate = progress_for_wait(true, Some(Duration::from_millis(318)));
+        let due_now = progress_for_wait(false, Some(Duration::from_millis(310)));
+        let overdue = progress_for_wait(false, Some(Duration::from_millis(309)));
+
+        wait_for_next_iteration(&immediate, &clock, &mut waiter)
+            .expect("immediate progress continues without waiting");
+        wait_for_next_iteration(&due_now, &clock, &mut waiter)
+            .expect("a due deadline continues without waiting");
+        wait_for_next_iteration(&overdue, &clock, &mut waiter)
+            .expect("an overdue deadline continues without waiting");
+
+        assert!(waiter.requests.is_empty());
+        assert_eq!(clock.now(), Duration::from_millis(310));
+    }
+
+    #[test]
+    fn idle_and_future_deadline_waits_are_recorded_without_wall_clock_time() {
+        let clock = FakeClock::at(Duration::from_millis(310));
+        let mut waiter = ScriptedWaiter::new(clock.clone());
+        let idle = progress_for_wait(false, None);
+
+        wait_for_next_iteration(&idle, &clock, &mut waiter)
+            .expect("idle progress requests activity");
+        assert_eq!(waiter.requests, [WorkerWaitRequest::Activity]);
+        assert_eq!(clock.now(), Duration::from_millis(310));
+
+        let deadline = Duration::from_millis(318);
+        let scheduled = progress_for_wait(false, Some(deadline));
+        wait_for_next_iteration(&scheduled, &clock, &mut waiter)
+            .expect("scripted deadline advances the fake clock");
+        assert_eq!(
+            waiter.requests,
+            [
+                WorkerWaitRequest::Activity,
+                WorkerWaitRequest::ActivityOrDeadline(deadline),
+            ]
+        );
+        assert_eq!(clock.now(), deadline);
+    }
+
+    #[test]
+    fn deadline_reached_at_channel_wait_does_not_consume_activity() {
+        let (activity, receiver) = activity_channel();
+        activity.notify();
+        drop(activity);
+        let now = Duration::from_millis(318);
+        let clock = FakeClock::at(now);
+        let mut waiter = ChannelWorkerWaiter::new(receiver);
+
+        assert_eq!(
+            waiter.wait(WorkerWaitRequest::ActivityOrDeadline(now), &clock),
+            Ok(())
+        );
+        assert_eq!(waiter.wait(WorkerWaitRequest::Activity, &clock), Ok(()));
+        assert_eq!(
+            waiter.wait(WorkerWaitRequest::Activity, &clock),
+            Err(WorkerWaitError::Disconnected)
+        );
+    }
 
     #[test]
     fn shutdown_preempts_pending_tap_commands_transport_and_deadline() {
@@ -2930,6 +3188,41 @@ mod tests {
         fn now(&self) -> Duration {
             *lock(&self.now)
         }
+    }
+
+    struct ScriptedWaiter {
+        clock: FakeClock,
+        requests: Vec<WorkerWaitRequest>,
+    }
+
+    impl ScriptedWaiter {
+        fn new(clock: FakeClock) -> Self {
+            Self {
+                clock,
+                requests: Vec::new(),
+            }
+        }
+    }
+
+    impl WorkerWaiter for ScriptedWaiter {
+        fn wait(
+            &mut self,
+            request: WorkerWaitRequest,
+            _clock: &dyn MonotonicClock,
+        ) -> Result<(), WorkerWaitError> {
+            self.requests.push(request);
+            if let WorkerWaitRequest::ActivityOrDeadline(deadline) = request {
+                self.clock.set(deadline);
+            }
+            Ok(())
+        }
+    }
+
+    fn progress_for_wait(immediate: bool, next_deadline: Option<Duration>) -> StepProgress {
+        let mut progress = StepProgress::new();
+        progress.immediate = immediate;
+        progress.next_deadline = next_deadline;
+        progress
     }
 
     #[derive(Clone, Debug, PartialEq, Eq)]
