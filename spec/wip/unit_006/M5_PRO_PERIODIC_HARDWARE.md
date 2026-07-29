@@ -179,7 +179,7 @@ accepted counter に限定する。
   - real filesystem で parent create、exact bytes、typed reopen を検査する。
   - existing file/directory/symlink と create-new race を置換しない。
   - temporary file が成功後と既知 failure 後に残らない。
-- [ ] **T02 — production create-profile wiring**
+- [x] **T02 — production create-profile wiring**
   - `bumble` feature で public `create_profile()` を concrete backend へ接続する。
   - production pair continuation を no-op hook とし、worker の pairing command を駆動する。
   - feature-disabled backend unavailable は target を作らない。
@@ -210,7 +210,7 @@ accepted counter に限定する。
 | phase | item | evidence |
 |---|---|---|
 | refactor-done | T01 | red: `cargo test profile::store::tests --all-features --locked` は production `FileProfileStore` が存在せず compile error。green: real filesystem で nested parent 作成、complete JSON の exact read、typed Pro reopen、racing file、existing directory、dangling symlink の no-replace、一時 file cleanup を検査する3 test が成功。refactor: target inspection と create/read を同じ `FileProfileStore` に統合し、same-directory temporary file の write/flush/`sync_all` 後に hard link で target を no-replace 公開する。Unix rename の既存 target 置換差異を避け、成功時と既知 conflict 時に temporary file を削除する。all-feature test 265 passed / 2 ignored、default test 234 passed / 1 ignored、Rust 1.87 all-feature check、all/default clippy、fmt、diff check が成功 |
-| pending | T02 | red/green/refactor 後に追記する |
+| refactor-done | T02 | red: all-feature targeted test は production pair continuation `ProductionPairDriver` が未定義で compile error。green: feature 有効時の public `create_profile()` が production file store と `ConcreteRuntimeBackend` を使い、invalid selector で USB access 前の typed `TransportOpen` まで到達し、valid empty Pro profile を先に残す。production pair continuation は worker の Pair command を上書きせず `Ok(())` を返す。feature 無効時の既存 test は target absent と `UnsupportedCapability` を維持。refactor: runtime factory へ generic controller 全体ではなく owned `RuntimeFactoryConfig { selector, transport }` だけを渡し、public reporting dispatch は `open()` と同じ sealed Periodic/Direct 境界へ統一。open と create-profile は同じ Bumble component builder を使う。README、crate rustdoc、public method docs を feature ごとの挙動、実機未検証、M6 の key persistence 境界へ更新。all-feature test 266 passed / 2 ignored、default test 234 passed / 1 ignored、all/default clippy が成功 |
 | pending | T03 | red/green/refactor 後に追記する |
 | pending | T04 | red/green/refactor 後に追記する |
 | pending | T05 | 実機実行後に追記する |

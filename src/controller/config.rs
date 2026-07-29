@@ -92,7 +92,7 @@ pub(super) struct ControllerConfig<M: ControllerModel, R: ReportingMode> {
         not(test),
         allow(
             dead_code,
-            reason = "M5 supplies the pairing profile to the controller runtime"
+            reason = "M6 supplies pairing keys from the profile to the controller runtime"
         )
     )]
     pub(super) profile: ProfileConfig<M>,
@@ -135,7 +135,7 @@ pub(super) enum ProfileConfig<M: ControllerModel> {
             not(test),
             allow(
                 dead_code,
-                reason = "M5 retains the profile path for runtime persistence"
+                reason = "M6 uses the profile path for atomic key persistence"
             )
         )]
         path: PathBuf,
@@ -143,7 +143,7 @@ pub(super) enum ProfileConfig<M: ControllerModel> {
             not(test),
             allow(
                 dead_code,
-                reason = "M5 supplies the validated pairing profile to the runtime"
+                reason = "M6 adapts the validated profile to the Bumble key store"
             )
         )]
         profile: PairingProfile<M>,

@@ -32,6 +32,8 @@ use crate::{
 #[cfg(any(test, feature = "bumble"))]
 use super::create::with_cleanup_error;
 #[cfg(feature = "bumble")]
+use crate::runtime::transport::TransportConfig;
+#[cfg(feature = "bumble")]
 use crate::runtime::worker::ChannelWorkerWaiter;
 
 use super::{
@@ -129,10 +131,52 @@ impl<C, W, D> RuntimeComponents<C, W, D> {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M5 connects the concrete backend to profile creation"
+        reason = "feature-disabled builds do not construct runtime factory projections"
+    )
+)]
+pub(super) struct RuntimeFactoryConfig {
+    #[cfg(feature = "bumble")]
+    selector: crate::AdapterSelector,
+    #[cfg(feature = "bumble")]
+    transport: TransportConfig,
+}
+
+#[cfg_attr(
+    not(any(test, feature = "bumble")),
+    allow(
+        dead_code,
+        reason = "feature-disabled builds do not construct runtime factory projections"
+    )
+)]
+impl RuntimeFactoryConfig {
+    fn from_controller<M, R>(config: &ControllerConfig<M, R>) -> Self
+    where
+        M: ControllerModel,
+        R: ReportingMode,
+    {
+        #[cfg(feature = "bumble")]
+        {
+            Self {
+                selector: config.adapter.clone(),
+                transport: config.transport_config(),
+            }
+        }
+        #[cfg(not(feature = "bumble"))]
+        {
+            let _ = config;
+            Self {}
+        }
+    }
+}
+
+#[cfg_attr(
+    not(any(test, feature = "bumble")),
+    allow(
+        dead_code,
+        reason = "feature-disabled builds do not construct concrete runtime backends"
     )
 )]
 pub(super) struct ConcreteRuntimeBackend<F> {
@@ -140,10 +184,10 @@ pub(super) struct ConcreteRuntimeBackend<F> {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M5 connects the concrete backend to profile creation"
+        reason = "feature-disabled builds do not construct concrete runtime backends"
     )
 )]
 impl<F> ConcreteRuntimeBackend<F> {
@@ -223,7 +267,11 @@ impl<M, R, F, C, W, D> CreateProfileRuntimeBackend<M, R> for ConcreteRuntimeBack
 where
     M: ControllerModel,
     R: WorkerReporting<M>,
-    F: FnOnce(ActivityNotifier, Receiver<()>) -> crate::Result<RuntimeComponents<C, W, D>>,
+    F: FnOnce(
+        RuntimeFactoryConfig,
+        ActivityNotifier,
+        Receiver<()>,
+    ) -> crate::Result<RuntimeComponents<C, W, D>>,
     C: MonotonicClock + 'static,
     W: WorkerWaiter + 'static,
     D: PairDriver,
@@ -255,7 +303,11 @@ impl<M, R, F, C, W, D> CreateProfileRuntimeAttempt<M, R>
 where
     M: ControllerModel,
     R: WorkerReporting<M>,
-    F: FnOnce(ActivityNotifier, Receiver<()>) -> crate::Result<RuntimeComponents<C, W, D>>,
+    F: FnOnce(
+        RuntimeFactoryConfig,
+        ActivityNotifier,
+        Receiver<()>,
+    ) -> crate::Result<RuntimeComponents<C, W, D>>,
     C: MonotonicClock + 'static,
     W: WorkerWaiter + 'static,
     D: PairDriver,
@@ -279,7 +331,11 @@ where
             clock,
             waiter,
             pair_driver,
-        } = factory(activity.clone(), activity_receiver)?;
+        } = factory(
+            RuntimeFactoryConfig::from_controller(config),
+            activity.clone(),
+            activity_receiver,
+        )?;
 
         self.unowned_transport = Some(transport);
         let capabilities = match self
@@ -392,7 +448,11 @@ pub(super) fn open_controller_runtime<M, R, F, C, W, D>(
 where
     M: ControllerModel,
     R: WorkerReporting<M>,
-    F: FnOnce(ActivityNotifier, Receiver<()>) -> crate::Result<RuntimeComponents<C, W, D>>,
+    F: FnOnce(
+        RuntimeFactoryConfig,
+        ActivityNotifier,
+        Receiver<()>,
+    ) -> crate::Result<RuntimeComponents<C, W, D>>,
     C: MonotonicClock + 'static,
     W: WorkerWaiter + 'static,
     D: PairDriver,
@@ -416,19 +476,33 @@ where
     M: ControllerModel,
     R: WorkerReporting<M>,
 {
-    let selector = config.adapter.clone();
-    let transport_config = config.transport_config();
-    open_controller_runtime(config, status, move |_activity, activity_receiver| {
-        Ok(RuntimeComponents::new(
-            Box::new(crate::runtime::transport::BumbleTransportPort::new(
-                selector,
-                transport_config,
-            )),
-            SystemClock::new(),
-            ChannelWorkerWaiter::new(activity_receiver),
-            UnsupportedPairDriver,
-        ))
-    })
+    open_controller_runtime(config, status, bumble_runtime_components)
+}
+
+#[cfg(feature = "bumble")]
+pub(super) fn bumble_runtime_backend<M, R>() -> impl CreateProfileRuntimeBackend<M, R>
+where
+    M: ControllerModel,
+    R: WorkerReporting<M>,
+{
+    ConcreteRuntimeBackend::new(bumble_runtime_components)
+}
+
+#[cfg(feature = "bumble")]
+fn bumble_runtime_components(
+    config: RuntimeFactoryConfig,
+    _activity: ActivityNotifier,
+    activity_receiver: Receiver<()>,
+) -> crate::Result<RuntimeComponents<SystemClock, ChannelWorkerWaiter, ProductionPairDriver>> {
+    Ok(RuntimeComponents::new(
+        Box::new(crate::runtime::transport::BumbleTransportPort::new(
+            config.selector,
+            config.transport,
+        )),
+        SystemClock::new(),
+        ChannelWorkerWaiter::new(activity_receiver),
+        ProductionPairDriver,
+    ))
 }
 
 #[cfg(feature = "bumble")]
@@ -453,14 +527,12 @@ impl MonotonicClock for SystemClock {
 }
 
 #[cfg(feature = "bumble")]
-struct UnsupportedPairDriver;
+pub(super) struct ProductionPairDriver;
 
 #[cfg(feature = "bumble")]
-impl PairDriver for UnsupportedPairDriver {
+impl PairDriver for ProductionPairDriver {
     fn after_pair_enqueued(&mut self) -> crate::Result<()> {
-        Err(crate::runtime::error_map::unsupported_capability(
-            "Bluetooth pairing",
-        ))
+        Ok(())
     }
 }
 

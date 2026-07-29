@@ -59,6 +59,16 @@ const PERIODIC_READY_AT: Duration = Duration::from_millis(300);
 const DEADLOCK_WATCHDOG: Duration = Duration::from_secs(2);
 const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
 
+#[cfg(feature = "bumble")]
+#[test]
+fn production_pair_driver_leaves_the_worker_pair_command_in_control() {
+    let mut driver = super::runtime::ProductionPairDriver;
+
+    driver
+        .after_pair_enqueued()
+        .expect("production pairing needs no test-only continuation");
+}
+
 #[cfg(not(feature = "bumble"))]
 #[test]
 fn unavailable_public_lifecycle_keeps_the_runtime_owner_uninstalled() {
@@ -95,17 +105,18 @@ fn controller_open_is_idempotent_and_reopens_after_join() {
     let first_dropped = Arc::new(AtomicBool::new(false));
     let first_drop_observer = Arc::clone(&first_dropped);
     let first_clock = ManualClock::at(Duration::ZERO);
-    let first_factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
-        Ok::<_, Error>(RuntimeComponents::new(
-            Box::new(DropTrackingTransport {
-                inner: first_transport,
-                dropped: first_drop_observer,
-            }),
-            first_clock,
-            ChannelWorkerWaiter::new(activity_receiver),
-            UnusedPairDriver,
-        ))
-    };
+    let first_factory =
+        move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+            Ok::<_, Error>(RuntimeComponents::new(
+                Box::new(DropTrackingTransport {
+                    inner: first_transport,
+                    dropped: first_drop_observer,
+                }),
+                first_clock,
+                ChannelWorkerWaiter::new(activity_receiver),
+                UnusedPairDriver,
+            ))
+        };
 
     controller
         .open_with(|config, status| open_controller_runtime(config, status, first_factory))
@@ -136,17 +147,18 @@ fn controller_open_is_idempotent_and_reopens_after_join() {
     let second_dropped = Arc::new(AtomicBool::new(false));
     let second_drop_observer = Arc::clone(&second_dropped);
     let second_clock = ManualClock::at(Duration::ZERO);
-    let second_factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
-        Ok::<_, Error>(RuntimeComponents::new(
-            Box::new(DropTrackingTransport {
-                inner: second_transport,
-                dropped: second_drop_observer,
-            }),
-            second_clock,
-            ChannelWorkerWaiter::new(activity_receiver),
-            UnusedPairDriver,
-        ))
-    };
+    let second_factory =
+        move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+            Ok::<_, Error>(RuntimeComponents::new(
+                Box::new(DropTrackingTransport {
+                    inner: second_transport,
+                    dropped: second_drop_observer,
+                }),
+                second_clock,
+                ChannelWorkerWaiter::new(activity_receiver),
+                UnusedPairDriver,
+            ))
+        };
 
     controller
         .open_with(|config, status| open_controller_runtime(config, status, second_factory))
@@ -349,7 +361,7 @@ fn pair_primary_and_concrete_cleanup_failure_remain_separately_traversable() {
     let (transport, control) = TestTransport::with_limits(8, 3);
     let observed_control = control.clone();
     let clock = ManualClock::at(Duration::ZERO);
-    let factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         Ok::<_, Error>(RuntimeComponents::new(
             Box::new(DrainFailingTransport { inner: transport }),
             clock,
@@ -419,7 +431,7 @@ fn terminal_pair_worker_failure_cleans_and_joins_with_typed_primary() {
     let cleanup_trace = Arc::new(Mutex::new(Vec::new()));
     let transport_cleanup_trace = Arc::clone(&cleanup_trace);
     let clock = ManualClock::at(Duration::ZERO);
-    let factory = move |activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+    let factory = move |_config, activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         Ok::<_, Error>(RuntimeComponents::new(
             Box::new(TerminalPairTransport {
                 inner: transport,
@@ -524,7 +536,7 @@ fn pair_after_worker_finishes_before_enqueue_uses_actual_terminal_outcome() {
     let cleanup_trace = Arc::new(Mutex::new(Vec::new()));
     let transport_cleanup_trace = Arc::clone(&cleanup_trace);
     let clock = ManualClock::at(Duration::ZERO);
-    let factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         Ok::<_, Error>(RuntimeComponents::new(
             Box::new(TerminalPairTransport {
                 inner: transport,
@@ -618,7 +630,7 @@ fn non_classic_capabilities_fail_before_worker_spawn_and_clean_up_transport() {
     .expect("non-Classic controller still has valid identity metadata");
     let (transport, control) = TestTransport::with_capabilities(8, 3, capabilities);
     let clock = ManualClock::at(Duration::ZERO);
-    let factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         Ok::<_, Error>(RuntimeComponents::new(
             Box::new(transport),
             clock,
@@ -667,16 +679,17 @@ fn bumble_usb_open_failures_map_to_sanitized_public_transport_errors() {
             .build()
             .expect("build configured Pro controller");
         let clock = ManualClock::at(Duration::ZERO);
-        let factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
-            Ok::<_, Error>(RuntimeComponents::new(
-                Box::new(BumbleOpenErrorTransport {
-                    source: Some(backend_error),
-                }),
-                clock,
-                ChannelWorkerWaiter::new(activity_receiver),
-                UnusedPairDriver,
-            ))
-        };
+        let factory =
+            move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+                Ok::<_, Error>(RuntimeComponents::new(
+                    Box::new(BumbleOpenErrorTransport {
+                        source: Some(backend_error),
+                    }),
+                    clock,
+                    ChannelWorkerWaiter::new(activity_receiver),
+                    UnusedPairDriver,
+                ))
+            };
 
         let error = match open_controller_runtime(
             &controller.config,
@@ -745,7 +758,7 @@ fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
     let cleanup_trace = Arc::new(Mutex::new(Vec::new()));
     let transport_cleanup_trace = Arc::clone(&cleanup_trace);
     let clock = ManualClock::at(Duration::ZERO);
-    let factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         Ok::<_, Error>(RuntimeComponents::new(
             Box::new(PartiallyOpeningTransport {
                 inner: transport,
@@ -820,7 +833,7 @@ fn partial_transport_open_attempt_drop_skips_drain_and_cleans_once() {
     let cleanup_trace = Arc::new(Mutex::new(Vec::new()));
     let transport_cleanup_trace = Arc::clone(&cleanup_trace);
     let clock = ManualClock::at(Duration::ZERO);
-    let factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         Ok::<_, Error>(RuntimeComponents::new(
             Box::new(PartiallyOpeningTransport {
                 inner: transport,
@@ -862,7 +875,7 @@ fn partial_transport_open_panic_is_guarded_for_drop_cleanup() {
     let cleanup_trace = Arc::new(Mutex::new(Vec::new()));
     let transport_cleanup_trace = Arc::clone(&cleanup_trace);
     let clock = ManualClock::at(Duration::ZERO);
-    let factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         Ok::<_, Error>(RuntimeComponents::new(
             Box::new(PanickingOpenTransport {
                 inner: transport,
@@ -1074,7 +1087,7 @@ where
     let observed_control = control.clone();
     let clock = ManualClock::at(Duration::ZERO);
     let worker_clock = clock.clone();
-    let factory = move |activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+    let factory = move |_config, activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         let (requests, observed_requests) = sync_channel(16);
         let waiter = ObservedWaiter {
             inner: ChannelWorkerWaiter::new(activity_receiver),
@@ -1130,7 +1143,7 @@ fn open_public_pair_controller(
     let clock = ManualClock::at(Duration::ZERO);
     let worker_clock = clock.clone();
     let scripts = scripts.into_iter().collect();
-    let factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         Ok::<_, Error>(RuntimeComponents::new(
             Box::new(PublicPairTransport {
                 inner,

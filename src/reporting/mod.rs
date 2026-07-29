@@ -26,6 +26,12 @@ pub(crate) mod sealed {
         ) -> crate::Result<()>
         where
             Self: Sized + super::ReportingMode;
+        fn create_profile<M: ControllerModel>(
+            builder: crate::controller::ControllerBuilder<M, Self>,
+            options: crate::CreateProfileOptions,
+        ) -> crate::Result<crate::controller::Controller<M, Self>>
+        where
+            Self: Sized + super::ReportingMode;
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,6 +138,13 @@ impl sealed::Sealed for Periodic {
     ) -> crate::Result<()> {
         controller.open_supported_runtime()
     }
+
+    fn create_profile<M: crate::model::ControllerModel>(
+        builder: crate::controller::ControllerBuilder<M, Self>,
+        options: crate::CreateProfileOptions,
+    ) -> crate::Result<crate::controller::Controller<M, Self>> {
+        builder.create_profile_supported(options)
+    }
 }
 
 impl ReportingMode for Periodic {
@@ -163,6 +176,13 @@ impl sealed::Sealed for Direct {
         controller: &mut crate::controller::Controller<M, Self>,
     ) -> crate::Result<()> {
         controller.open_supported_runtime()
+    }
+
+    fn create_profile<M: crate::model::ControllerModel>(
+        builder: crate::controller::ControllerBuilder<M, Self>,
+        options: crate::CreateProfileOptions,
+    ) -> crate::Result<crate::controller::Controller<M, Self>> {
+        builder.create_profile_supported(options)
     }
 }
 

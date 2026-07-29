@@ -45,9 +45,12 @@ descriptor-only adapter discovery を実装しています。
   policy、SDP/HID control/interrupt session は crate 内の Bumble `LocalLink` packet path
   で検査しています。production USB runtime の poll/send/cleanup に同じ Classic session
   を接続していますが、実 adapter と Switch を使う pairing は未検証です。
-- `create_profile()` は builder、path、identity、target の存在を検査した後、file を作る
-  前に `ErrorKind::UnsupportedCapability` で停止し、既存 target を上書きしません。
-- Bluetooth adapter の claim/reset と対象機器を使う実機検証は未実施です。
+- `bumble` feature の `create_profile()` は既存 target を置換せず、valid empty envelope を
+  USB open より先に保存してから pairing と NX readiness を待ちます。feature 無効時は file を
+  作らず `ErrorKind::UnsupportedCapability` を返します。pairing key の file 更新と既存
+  profile からの reconnect は未実装です。
+- CSR8510 A10 の claim/reset、100回の open/init/close、unplug/reopen は確認済みです。
+  Switch 実機の pairing と入力反映は未検証です。
 
 ## 開発
 

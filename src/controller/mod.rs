@@ -405,10 +405,10 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     }
 
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "crate-private tests exercise successful profile creation before M5 supplies production persistence"
+            reason = "feature-disabled builds cannot construct a successful profile runtime backend"
         )
     )]
     fn create_profile_with(
@@ -425,9 +425,9 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     ///
     /// Builder settings, the required profile path, the requested identity,
     /// and target existence are checked in that order. An existing target is
-    /// never replaced. The current package has no concrete Bluetooth
-    /// transport backend, so an otherwise valid request stops before creating
-    /// the profile file.
+    /// never replaced. With the `bumble` feature, a valid empty profile is
+    /// persisted before opening the selected adapter, then pairing waits for
+    /// normal-input readiness.
     ///
     /// # Errors
     ///
@@ -436,12 +436,33 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     /// selected, [`crate::ErrorKind::UnsupportedCapability`] for an unsupported
     /// identity or unavailable Bluetooth transport,
     /// [`crate::ErrorKind::ProfileAlreadyExists`] when the target already
-    /// exists, or [`crate::ErrorKind::Internal`] when the target cannot be
-    /// inspected.
+    /// exists, [`crate::ErrorKind::TransportOpen`] when the adapter cannot be
+    /// opened and initialized, or a structured profile I/O, pairing,
+    /// connection, transport, protocol, cleanup, or worker error from the
+    /// corresponding stage.
     pub fn create_profile(self, options: CreateProfileOptions) -> crate::Result<Controller<M, R>> {
-        let mut target = FileProfileStore;
-        let plan = self.validate_create_profile_target(options, &mut target)?;
-        create::reject_unavailable_backend(plan)
+        <R as reporting::sealed::Sealed>::create_profile(self, options)
+    }
+
+    pub(crate) fn create_profile_supported(
+        self,
+        options: CreateProfileOptions,
+    ) -> crate::Result<Controller<M, R>>
+    where
+        R: WorkerReporting<M>,
+    {
+        #[cfg(feature = "bumble")]
+        {
+            let mut store = FileProfileStore;
+            let mut backend = runtime::bumble_runtime_backend::<M, R>();
+            self.create_profile_with(options, &mut store, &mut backend)
+        }
+        #[cfg(not(feature = "bumble"))]
+        {
+            let mut store = FileProfileStore;
+            let plan = self.validate_create_profile_target(options, &mut store)?;
+            create::reject_unavailable_backend(plan)
+        }
     }
 
     /// Builds a configured controller without opening its adapter or starting a worker.
