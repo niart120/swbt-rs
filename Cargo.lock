@@ -1765,9 +1765,11 @@ name = "swbt-rs"
 version = "0.1.0"
 dependencies = [
  "bumble",
+ "bumble-controller",
  "bumble-hci",
  "bumble-hid",
  "bumble-host",
+ "bumble-l2cap",
  "bumble-sdp",
  "bumble-transport",
  "rusb",

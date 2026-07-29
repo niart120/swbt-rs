@@ -1,4 +1,6 @@
-use bumble_hid::{DeviceDelegate, DeviceEvent, DeviceRuntime, Message, ReportType, device_data};
+use bumble_hid::{
+    DeviceDelegate, DeviceEvent, DeviceRuntime, Handshake, Message, ReportType, device_data,
+};
 
 use super::HidChannel;
 
@@ -83,6 +85,17 @@ impl HidpBridge {
             }
         })?;
         check_peer_mtu(HidChannel::Interrupt, encoded, self.interrupt_peer_mtu)
+    }
+
+    pub(super) fn set_peer_mtu(&mut self, channel: HidChannel, peer_mtu: usize) {
+        match channel {
+            HidChannel::Control => self.control_peer_mtu = peer_mtu,
+            HidChannel::Interrupt => self.interrupt_peer_mtu = peer_mtu,
+        }
+    }
+
+    pub(super) fn invalid_parameter_response(&self) -> Result<Box<[u8]>, HidpBridgeError> {
+        self.encode_control(Message::Handshake(Handshake::ERR_INVALID_PARAMETER))
     }
 
     fn translate_event(

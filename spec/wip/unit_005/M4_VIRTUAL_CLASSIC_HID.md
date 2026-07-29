@@ -292,7 +292,7 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 - [x] **T03 — HIDP bridge**
   - `0xA2` control/interrupt output を header なし NX payload へ変換する。
   - control response、unsupported、malformed、input `0xA1` encode、peer MTU reject を固定する。
-- [ ] **T04 — Classic device session**
+- [x] **T04 — Classic device session**
   - PSM 3件の一度だけの登録、reverse HID channel order、one-shot open event を固定する。
   - Connected/HID output/Disconnected と旧 CID 破棄、64 event overflow を固定する。
 - [ ] **T05 — pairing contract and public pair**
@@ -319,7 +319,8 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 | refactor-done | T01 | red: `TransportConfig` に `hid_service` がなく compile error。green: Python `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` の clean tree から、Bumble を import せず descriptor 203 bytes、SHA-256 `25f0b3b7e59bdfec05e8cced16e43a8878509865a0cb223f05025c556f3bedba`、3 model の SDP policy を生成し、fixture audit と 3 model projection test が成功。refactor: descriptor/policy の正本を `src/model/hid.rs`、owned runtime projection を `TransportConfig` に分離。生成器再実行前後の fixture SHA-256 は `2F2376E21498163662EF83506EA1EA37EBDCC5CE34D9F4723396393131B9EC4F` で一致。`cargo test --all-targets --all-features --locked`、default test、all/default clippy、Rust 1.87 all-feature check、fmt、diff check が成功 |
 | refactor-done | T02 | red: `HidSdpChannel`、service record handle、`bumble` / `bumble-sdp` 依存、`TransportConfig.hid_service` の transport 内可視性がなく compile error。green: fork `48f1bc36169b2692d2a61e87eda4223b126dca2b` の `bumble-sdp::SdpServer` を channel ごとに所有し、3 model の全 service attributes、small MTU continuation、2 channel の continuation 分離、truncated/unknown/length mismatch の `INVALID_REQUEST_SYNTAX` を検査する3 test が成功。refactor: record builder、完全 PDU 長検査、server ownership を private `runtime::transport::sdp` に分離し、Bumble 型を public API へ公開しない。all-feature test 240 passed / 2 ignored、default test 228 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、fmt、diff check が成功 |
 | refactor-done | T03 | red: `HidpBridge`、typed event/error がなく compile error。green: fork `48f1bc36169b2692d2a61e87eda4223b126dca2b` の `bumble-hid::DeviceRuntime` で control/interrupt `0xA2` を decode し、NX payload から header を除去、unsupported control response `0x03`、unknown event、malformed/trailing bytes、input `0xA1` encode、control/interrupt peer MTU reject を検査する5 test が成功。refactor: codec/dispatch は fork に委譲し、swbt private bridge は header 境界、typed event、MTU だけを所有。all-feature test 245 passed / 2 ignored、default test 228 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、fmt、diff check が成功 |
-| pending | T04-T09 | 各 item の red、green、refactor、command/result を実装 commit ごとに追記する |
+| refactor-done | T04 | red: `ClassicDeviceSession`、3 PSM 定数、`bumble-controller` / `bumble-l2cap` 依存がなく compile error。green: actual `Device + LocalLink` path で PSM `0x0001` / `0x0011` / `0x0013` の一度だけの登録、interrupt→control open、CID one-shot、control/interrupt `0xA2`、malformed control `0x04` response、interrupt noise discard、`0xA1` send と peer MTU、1 poll 16 SDP SDU と再通知、disconnect/旧 handle 破棄、64件 queue の65件目 overflow を検査する6 test が成功。refactor: connection handle/peer、SDP channel ごとの continuation、HID CID/MTU、worker event queue を private session に集約。all-feature test 251 passed / 2 ignored、default test 228 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、fmt、diff check が成功 |
+| pending | T05-T09 | 各 item の red、green、refactor、command/result を実装 commit ごとに追記する |
 
 ## 8. 対象ファイル
 
@@ -376,15 +377,15 @@ M5 の実機調整へ先送りしない。
 
 - [ ] T01-T09 がすべて完了している
 - [x] Python revision と HID/SDP fixture provenance を記録した
-- [ ] public API に Bumble/L2CAP/HIDP/SDP 型を公開していない
-- [ ] PSM `0x0001` / `0x0011` / `0x0013` を実 packet path で検査した
+- [x] public API に Bumble/L2CAP/HIDP/SDP 型を公開していない
+- [x] PSM `0x0001` / `0x0011` / `0x0013` を実 packet path で検査した
 - [x] SDP continuation と malformed request を検査した
-- [ ] HIDP control/interrupt、reverse order、MTU を検査した
+- [x] HIDP control/interrupt、reverse order、MTU を検査した
 - [ ] pairing window と NoInputNoOutput policy を検査した
 - [ ] stored key の virtual pairing/reconnect を検査し、key bytes を出力していない
 - [ ] Pro Periodic が virtual packet path で NX Ready へ到達した
 - [ ] 6 model×reporting の共通 suite が成功した
-- [ ] disconnect cleanup と旧 session event 破棄を検査した
+- [x] disconnect cleanup と旧 session event 破棄を検査した
 - [ ] production Bumble send/drain/disconnect/close を検査した
 - [ ] Rust 1.87 と通常 quality gate が成功した
 - [ ] upstream PR を作成していない
