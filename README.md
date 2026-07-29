@@ -52,6 +52,32 @@ descriptor-only adapter discovery を実装しています。
 - CSR8510 A10 の claim/reset、100回の open/init/close、unplug/reopen は確認済みです。
   Switch 実機の pairing と入力反映は未検証です。
 
+## Pro Periodic 実機 runner
+
+M5 の実機確認には
+[`examples/pro_periodic_hardware.rs`](examples/pro_periodic_hardware.rs) を使います。Switch の
+「持ちかた／順番を変える」画面を開き、WinUSB driver を割り当てた CSR8510 A10 を接続してから
+実行します。次の例は run 1、pair timeout 60 秒です。profile path は実行前に存在していては
+いけません。
+
+```powershell
+$runStamp = Get-Date -Format yyyyMMdd-HHmmss
+$profilePath = Join-Path $env:TEMP "swbt-m5-$runStamp-run-01.json"
+$evidencePath = Join-Path $env:TEMP "swbt-m5-$runStamp-run-01.ndjson"
+cargo run --locked --example pro_periodic_hardware --features bumble -- `
+  --adapter usb:0a12:0001 `
+  --profile $profilePath `
+  --pair-timeout-secs 60 `
+  --run 1 | Tee-Object -FilePath $evidencePath
+```
+
+runner は A と L+R を各 500 ms、左右 stick を独立に4方向へ各500 ms、non-neutral IMU を
+1秒送った後、neutral、close、profile 検査、adapter reopen を実行します。標準出力は
+schema `swbt.m5.pro-periodic` version 1 の NDJSON です。adapter selector、profile path、
+raw profile、key material、USB serial、error source は出力しません。report accepted counter と
+command 成功は Switch UI の変化を証明しないため、`ui_observed` は `null` のまま出力し、人の
+観測結果は別に記録します。終了 event は `runner_complete` で、`success` が run の機械判定です。
+
 ## 開発
 
 MSRV は Rust 1.87 です。現在のローカル確認は次の command で実行できます。
