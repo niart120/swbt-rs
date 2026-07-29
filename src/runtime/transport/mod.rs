@@ -1,8 +1,12 @@
+mod config;
+
 use std::error::Error as StdError;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::time::Duration;
+
+pub(crate) use config::TransportConfig;
 
 #[cfg(test)]
 pub(in crate::runtime) mod fake;

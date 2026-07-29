@@ -10,6 +10,7 @@ use crate::{
     model::ControllerModel,
     profile::{ControllerColors, PairingProfile},
     reporting::{self, ReportingMode},
+    runtime::transport::TransportConfig,
 };
 
 #[derive(Debug)]
@@ -111,6 +112,19 @@ pub(super) struct ControllerConfig<M: ControllerModel, R: ReportingMode> {
         )
     )]
     pub(super) mode: <R as reporting::sealed::Sealed>::Config,
+}
+
+impl<M: ControllerModel, R: ReportingMode> ControllerConfig<M, R> {
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T07 opens the concrete transport from the validated controller configuration"
+        )
+    )]
+    pub(super) fn transport_config(&self) -> TransportConfig {
+        TransportConfig::for_model::<M>()
+    }
 }
 
 #[derive(Debug)]

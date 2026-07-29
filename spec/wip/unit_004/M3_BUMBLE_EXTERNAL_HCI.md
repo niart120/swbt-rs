@@ -144,15 +144,21 @@ usb:<bus decimal>-<port decimal>[.<port decimal>...]
 
 - local name
 - 24-bit Class of Device
+- complete local name advertising data
 - 240-byte extended inquiry response
 - Classic enabled
-- accept-any false
+- Classic accept-any false
 - connectable false
 - discoverable false
+- Classic Secure Connections false
+- Secure Simple Pairing enabled
+- LE / simultaneous LE false
 
 `M::SPEC.protocol` から local name と Class of Device を投影し、complete local name AD structure
-を extended inquiry response に格納する。Pro、Joy-Con L、Joy-Con R の値は reporting mode
-で変えない。Bumble port は generic `M` を型引数に持たない。
+を一度生成する。raw AD は `DeviceConfiguration::advertising_data` に設定し、同じ bytes を
+zero padding した extended inquiry response に格納する。Bumble の default name
+`"Bumble"` を含む advertising data を残さない。Pro、Joy-Con L、Joy-Con R の値は
+reporting mode で変えない。Bumble port は generic `M` を型引数に持たない。
 
 ### 5.4 open と初期化順序
 
@@ -162,8 +168,8 @@ open は次の順序を守る。
 2. `open_split_transport`
 3. reader activity/cancellation boundary を組み込んだ `ExternalHost` を生成
 4. `DeviceConfiguration` に Classic enabled、accept-any/connectable/discoverable false、
-   Classic Secure Connections false、LE/simultaneous false、model 由来 name/Class of
-   Device を設定
+   Classic Secure Connections false、Secure Simple Pairing enabled、LE/simultaneous
+   false、model 由来 name/Class of Device/advertising data を設定
 5. `Device::from_config(0, config)`
 6. `ExternalHost::initialize_device` で HCI Reset、capability、packet pool を初期化
 7. `ReadBdAddr` で controller public address を取得
@@ -288,9 +294,9 @@ probe API の有無を M3 completion blocker にしない。
 - [x] **T02 — USB selector grammar**
   - index、VID/PID、serial、occurrence、port path、case variationを受け付ける。
   - invalid/unsupported/forced/SCO selector を typed open error にする。
-- [ ] **T03 — model-independent config projection**
+- [x] **T03 — model-independent config projection**
   - Pro/Joy-Con L/Joy-Con R の name、Class of Device、extended inquiry response を検査する。
-  - Periodic/Direct で結果が同じであることを検査する。
+  - Classic/SSP/SC/LE/scan policy と、Periodic/Direct で結果が同じことを検査する。
 - [ ] **T04 — open returns initialized capabilities**
   - `TransportPort::open` を capability-returning contract にし、fake open ordering、
     local address、HCI/LMP、Classic判定、source-preserving error mapping を検査する。
@@ -324,6 +330,7 @@ probe API の有無を M3 completion blocker にしない。
 |---|---|---|
 | refactor-done | T01: no-open adapter discovery | red: `cargo test descriptor_discovery_returns_only_bluetooth_hci_without_opening_or_claiming` は `AdapterInfo`、descriptor probe、classification 未定義の compile error。green: descriptor success/source-failure の unit test 2件と feature-disabled public integration test が成功し、device-level または interface-level `E0/01/01` だけを stable `usb:N` candidate にした。inventory failure は `AdapterDiscovery` と typed source を保持し、公開 message へ source text を出さない。refactor: discovery に渡す capability を descriptor record の取得だけに限定し、USB open/claim method を境界から除外。production `rusb` path にも open/detach/claim はなく、device/config/interface descriptor、bus、取得できた port path、serial index だけを読む。取得不能な port path は実際の空 path と区別して `None` にする。device-level HCI class では config descriptor を要求しない。個別 device の descriptor 読み取り失敗は candidate から除外し、件数だけを `tracing` event に残す。`cargo test --all-targets --all-features --locked` と default は lib 217 passed / 1 ignored と integration/example 全件、clippy `-D warnings`、rustdoc `-D warnings` が成功 |
 | refactor-done | T02: USB selector grammar | red: `cargo test usb_selector_accepts_the_supported_bumble_subset --all-features --locked` は `UsbSelector`、`AdapterSelector::as_str` / `parse_usb`、`ErrorKind::TransportOpen` 未定義の compile error。green: supported subset、invalid/unsupported syntax、serial redaction の unit test 3件が成功。index、hex 1〜4桁の VID/PID、serial、occurrence、bus/port path を owned internal typeへ変換し、ASCII 数字、`u8` / `u16` / `usize` overflow、empty segment、非 USB scheme、`pyusb:`、force、SCO、dispatch metadata を `TransportOpen` にした。refactor: VID/PID の選択方法を `First` / `Serial` / `Occurrence` に分けて不可能状態を除き、raw/parsed selector と error の `Debug` / `Display` から serial を除外。`cargo test --all-targets --all-features --locked` と default は lib 220 passed / 1 ignored と integration/example 全件、clippy `-D warnings`、rustdoc `-D warnings` が成功 |
+| refactor-done | T03: model-independent config projection | red: `cargo test transport_config_projects_model_protocol_metadata_into_complete_local_name_eir --all-features --locked` は `ControllerConfig::transport_config` 未定義の compile error。green: 3 model の name、`0x002508` Class of Device、Complete Local Name AD、zero-padded 240-byte EIR、Classic/SSP/SC/LE/scan policy と、各 model の Periodic/Direct 同値性を unit test 2件で固定。refactor: generic `ControllerConfig<M, R>` から model metadata だけを owned、非 generic の `TransportConfig` へ投影し、raw AD と Classic EIR を同じ TLV から生成。固定 Bumble revision では raw AD を `DeviceConfiguration::advertising_data`、240 bytes を HCI `WriteExtendedInquiryResponse` へ別々に渡すことを確認。`cargo test --all-targets --all-features --locked` と default は lib 222 passed / 1 ignored と integration/example 全件、clippy `-D warnings` が成功 |
 
 ## 7. 設計メモ
 
