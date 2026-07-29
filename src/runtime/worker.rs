@@ -58,6 +58,13 @@ pub(crate) enum WorkerWaitRequest {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WorkerWaitError {
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 activates channel disconnection through the production waiter"
+        )
+    )]
     Disconnected,
 }
 
@@ -133,6 +140,13 @@ impl ShutdownRequest {
         Self::Explicit(mode)
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 activates bounded Drop through the production worker owner"
+        )
+    )]
     pub(crate) const fn dropped() -> Self {
         Self::Dropped
     }

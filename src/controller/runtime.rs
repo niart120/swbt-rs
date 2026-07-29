@@ -55,6 +55,13 @@ const COMMAND_BATCH: usize = 16;
     )
 )]
 const POLL_BATCHES: usize = 4;
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "M3 activates cleanup for transports not yet owned by a worker"
+    )
+)]
 const UNOWNED_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[cfg(test)]
@@ -379,6 +386,13 @@ where
     }
 }
 
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "M3 activates the production ReadyRuntimePort implementation"
+    )
+)]
 fn receive_response(response: CommandResponse) -> crate::Result<()> {
     response
         .recv()
@@ -386,6 +400,13 @@ fn receive_response(response: CommandResponse) -> crate::Result<()> {
         .map_err(map_command_error)
 }
 
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "M3 activates terminal worker recovery through the production backend"
+    )
+)]
 fn finish_terminal_owner<C>(
     owner: &mut Option<WorkerOwner<C>>,
     fallback: Error,
@@ -399,6 +420,13 @@ fn finish_terminal_owner<C>(
     }
 }
 
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "M3 activates worker spawning through the production backend"
+    )
+)]
 pub(super) fn map_worker_spawn_error(error: WorkerSpawnError) -> Error {
     let (source, cleanup) = error.into_parts();
     let mut error = Error::with_source(
@@ -412,6 +440,13 @@ pub(super) fn map_worker_spawn_error(error: WorkerSpawnError) -> Error {
     error
 }
 
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "M3 activates cleanup for transports not yet owned by a worker"
+    )
+)]
 fn cleanup_unowned_transport(transport: &mut dyn TransportPort) -> crate::Result<()> {
     let mut first_failure = None;
     record_cleanup_failure(
@@ -432,11 +467,25 @@ fn cleanup_unowned_transport(transport: &mut dyn TransportPort) -> crate::Result
     first_failure.map_or(Ok(()), |failure| Err(map_cleanup_error(failure)))
 }
 
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "M3 activates drop cleanup for transports not yet owned by a worker"
+    )
+)]
 fn cleanup_unowned_transport_for_drop(transport: &mut dyn TransportPort) {
     let _ = transport.disconnect();
     let _ = transport.close();
 }
 
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "M3 activates cleanup aggregation at the production backend boundary"
+    )
+)]
 fn record_cleanup_failure(
     first_failure: &mut Option<CleanupFailure>,
     phase: CleanupPhase,

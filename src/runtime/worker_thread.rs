@@ -31,6 +31,13 @@ const DROP_COMPLETION_TIMEOUT: Duration = Duration::from_millis(100);
 
 pub(crate) struct WorkerSpawnError {
     source: io::Error,
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 activates spawn cleanup through the production runtime backend"
+        )
+    )]
     cleanup: Option<CleanupFailure>,
 }
 
@@ -40,6 +47,13 @@ impl WorkerSpawnError {
     }
 
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 activates spawn error mapping at the production backend boundary"
+        )
+    )]
     pub(crate) fn into_parts(self) -> (io::Error, Option<CleanupFailure>) {
         (self.source, self.cleanup)
     }
@@ -131,6 +145,13 @@ struct WorkerCompletion {
     delivery_error: Option<CommandDeliveryError>,
 }
 
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "M3 activates bounded completion waits through the production worker owner"
+    )
+)]
 enum WorkerCompletionWait {
     Completed(WorkerCompletion),
     TimedOut,
@@ -138,6 +159,13 @@ enum WorkerCompletionWait {
 }
 
 trait WorkerCompletionWaiter: Send {
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 activates bounded completion waits through the production worker owner"
+        )
+    )]
     fn wait(
         &mut self,
         completion: &Receiver<WorkerCompletion>,
@@ -168,6 +196,13 @@ impl WorkerCompletionWaiter for ChannelWorkerCompletionWaiter {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShutdownState {
     Running,
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 activates priority shutdown through the production worker owner"
+        )
+    )]
     Requested(ShutdownRequest),
     Taken,
 }
@@ -209,6 +244,13 @@ pub(crate) fn priority_shutdown_channel(
 }
 
 impl PriorityShutdownClient {
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 activates priority shutdown through the production worker owner"
+        )
+    )]
     fn request(&self, request: ShutdownRequest) -> bool {
         let mut state = self
             .state
@@ -295,6 +337,13 @@ impl WorkerThread {
         finish_completed(completion, join)
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 activates bounded Drop through the production worker owner"
+        )
+    )]
     fn finish_with_waiter(
         self,
         waiter: &mut dyn WorkerCompletionWaiter,
@@ -381,6 +430,13 @@ impl<C> WorkerOwner<C> {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 activates command delivery through the production worker owner"
+        )
+    )]
     pub(crate) fn try_enqueue(&self, command: C) -> Result<CommandResponse, CommandEnqueueError> {
         self.commands
             .as_ref()
@@ -393,6 +449,13 @@ impl<C> WorkerOwner<C> {
         self.thread.as_ref().is_some_and(WorkerThread::is_finished)
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 activates explicit close through the production worker owner"
+        )
+    )]
     pub(crate) fn finish_explicit(mut self, mode: CloseMode) -> WorkerThreadOutcome {
         drop(self.commands.take());
         let _ = self.shutdown.request(ShutdownRequest::explicit(mode));
@@ -402,6 +465,13 @@ impl<C> WorkerOwner<C> {
             .finish()
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 activates terminal recovery through the production worker owner"
+        )
+    )]
     pub(crate) fn finish_terminal(mut self) -> WorkerThreadOutcome {
         drop(self.commands.take());
         self.thread
