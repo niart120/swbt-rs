@@ -671,6 +671,10 @@ mod tests {
             Ok(TransportCapabilities::test_default())
         }
 
+        fn start_pairing(&mut self) -> TransportResult<()> {
+            Ok(())
+        }
+
         fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
             Ok(Vec::new())
         }

@@ -256,6 +256,8 @@ pub(crate) trait TransportPort: Send {
     )]
     fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities>;
 
+    fn start_pairing(&mut self) -> TransportResult<()>;
+
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>>;
 
     fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance>;

@@ -67,6 +67,10 @@ impl TransportPort for TestTransport {
         self.inner.open(activity)
     }
 
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        self.inner.start_pairing()
+    }
+
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
         self.inner.poll(timeout)
     }
@@ -117,6 +121,10 @@ impl TestTransportControl {
     pub(crate) fn counters(&self) -> (usize, usize, usize) {
         let counters = self.inner.counters();
         (counters.open, counters.disconnect, counters.close)
+    }
+
+    pub(crate) fn pairing_starts(&self) -> usize {
+        self.inner.counters().start_pairing
     }
 
     pub(crate) fn accepted_interrupts(&self) -> Vec<Box<[u8]>> {

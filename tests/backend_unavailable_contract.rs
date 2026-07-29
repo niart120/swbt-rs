@@ -15,7 +15,7 @@ static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(not(feature = "bumble"))]
 #[test]
-fn public_open_and_pair_report_missing_backend_without_installing_a_runtime() {
+fn public_open_reports_missing_backend_and_pair_requires_an_open_runtime() {
     macro_rules! assert_unavailable_lifecycle {
         ($controller:expr) => {{
             let mut controller = $controller;
@@ -33,7 +33,7 @@ fn public_open_and_pair_report_missing_backend_without_installing_a_runtime() {
             for _ in 0..2 {
                 assert_error_kind(
                     controller.pair(Duration::from_secs(2)),
-                    ErrorKind::UnsupportedCapability,
+                    ErrorKind::TransportClosed,
                 );
                 assert_eq!(controller.status(), configured_status);
                 assert_eq!(controller.snapshot(), configured_snapshot);

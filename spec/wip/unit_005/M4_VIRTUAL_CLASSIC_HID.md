@@ -295,7 +295,7 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 - [x] **T04 — Classic device session**
   - PSM 3件の一度だけの登録、reverse HID channel order、one-shot open event を固定する。
   - Connected/HID output/Disconnected と旧 CID 破棄、64 event overflow を固定する。
-- [ ] **T05 — pairing contract and public pair**
+- [x] **T05 — pairing contract and public pair**
   - worker Pair command が `start_pairing` を先に呼び、begin failure を typed error にする。
   - NoInputNoOutput command、peer latch、window 外/2 peer目 reject、key redaction を固定する。
   - public `pair()` を open runtime へ接続し、closed/timeout/disconnect/repeated call を検査する。
@@ -320,7 +320,8 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 | refactor-done | T02 | red: `HidSdpChannel`、service record handle、`bumble` / `bumble-sdp` 依存、`TransportConfig.hid_service` の transport 内可視性がなく compile error。green: fork `48f1bc36169b2692d2a61e87eda4223b126dca2b` の `bumble-sdp::SdpServer` を channel ごとに所有し、3 model の全 service attributes、small MTU continuation、2 channel の continuation 分離、truncated/unknown/length mismatch の `INVALID_REQUEST_SYNTAX` を検査する3 test が成功。refactor: record builder、完全 PDU 長検査、server ownership を private `runtime::transport::sdp` に分離し、Bumble 型を public API へ公開しない。all-feature test 240 passed / 2 ignored、default test 228 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、fmt、diff check が成功 |
 | refactor-done | T03 | red: `HidpBridge`、typed event/error がなく compile error。green: fork `48f1bc36169b2692d2a61e87eda4223b126dca2b` の `bumble-hid::DeviceRuntime` で control/interrupt `0xA2` を decode し、NX payload から header を除去、unsupported control response `0x03`、unknown event、malformed/trailing bytes、input `0xA1` encode、control/interrupt peer MTU reject を検査する5 test が成功。refactor: codec/dispatch は fork に委譲し、swbt private bridge は header 境界、typed event、MTU だけを所有。all-feature test 245 passed / 2 ignored、default test 228 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、fmt、diff check が成功 |
 | refactor-done | T04 | red: `ClassicDeviceSession`、3 PSM 定数、`bumble-controller` / `bumble-l2cap` 依存がなく compile error。green: actual `Device + LocalLink` path で PSM `0x0001` / `0x0011` / `0x0013` の一度だけの登録、interrupt→control open、CID one-shot、control/interrupt `0xA2`、malformed control `0x04` response、interrupt noise discard、`0xA1` send と peer MTU、1 poll 16 SDP SDU と再通知、disconnect/旧 handle 破棄、64件 queue の65件目 overflow を検査する6 test が成功。refactor: connection handle/peer、SDP channel ごとの continuation、HID CID/MTU、worker event queue を private session に集約。all-feature test 251 passed / 2 ignored、default test 228 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、fmt、diff check が成功 |
-| pending | T05-T09 | 各 item の red、green、refactor、command/result を実装 commit ごとに追記する |
+| refactor-done | T05 | red: `TransportPort::start_pairing` がなく worker の開始順 test は trait method 不在の compile error。green: worker が connection session 作成前に transport pairing を開始し、開始失敗を typed `PairingError::Begin` として返す。Classic session は pairing window の冪等開始、最初の peer latch、window 外と2 peer目の reject、IO capability `0x03` / OOB `0x00` / auth requirements `0x02`、confirmation positive、PIN/passkey/OOB negative、認証失敗時の即時終了を検査した。link-key request/notification は Bumble `Device` key-store path に残し、swbt の command/error/debug へ key bytes を渡さない。public `pair()` は open runtime の bounded Pair command へ接続し、closed、timeout、Ready 前 disconnect、disconnect 後の2回目成功を検査した。refactor: pairing policy は private `ClassicDeviceSession`、public command ownership は `ControllerRuntimePort`、test transport の開始観測は fake counter に分離。all-feature test 257 passed / 2 ignored、default test 231 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、all/default build、rustdoc、fmt、diff check が成功 |
+| pending | T06-T09 | 各 item の red、green、refactor、command/result を実装 commit ごとに追記する |
 
 ## 8. 対象ファイル
 
@@ -381,7 +382,7 @@ M5 の実機調整へ先送りしない。
 - [x] PSM `0x0001` / `0x0011` / `0x0013` を実 packet path で検査した
 - [x] SDP continuation と malformed request を検査した
 - [x] HIDP control/interrupt、reverse order、MTU を検査した
-- [ ] pairing window と NoInputNoOutput policy を検査した
+- [x] pairing window と NoInputNoOutput policy を検査した
 - [ ] stored key の virtual pairing/reconnect を検査し、key bytes を出力していない
 - [ ] Pro Periodic が virtual packet path で NX Ready へ到達した
 - [ ] 6 model×reporting の共通 suite が成功した

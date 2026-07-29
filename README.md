@@ -9,8 +9,8 @@ Bluetooth stack の実装基盤には
 
 ## 現在の状態
 
-このリポジトリは M2 の controller runtime と profile frontend を完了し、M3 の external
-HCI bring-up に着手しています。Cargo package は library target `swbt` を提供し、
+このリポジトリは M3 の external HCI bring-up を完了し、M4 の仮想 Classic HID 経路を
+実装中です。Cargo package は library target `swbt` を提供し、
 model-valid input、crate 内部の Switch HID protocol と runtime、公開 controller builder、
 descriptor-only adapter discovery を実装しています。
 
@@ -37,11 +37,16 @@ descriptor-only adapter discovery を実装しています。
 - `bumble` feature の公開 `open()` は USB HCI adapter を claim し、HCI 初期化と worker
   起動を完了して lifecycle `Open` を返します。同じ controller に対する repeated open は
   adapter や worker を追加せず成功し、close 後は同じ controller を reopen できます。
-- feature 無効時の `open()` と、現在の `pair()` / `create_profile()` は
-  `ErrorKind::UnsupportedCapability` を返します。`pair()` は開いている HCI runtime を
-  維持します。`create_profile()` は builder、path、identity、target の存在を検査した後、
-  file を作る前に停止し、既存 target を上書きしません。
-- incoming Classic connection、pairing、SDP、HID control/interrupt channel は未実装です。
+- feature 無効時の `open()` は `ErrorKind::UnsupportedCapability` を返します。
+  `pair()` は open runtime がなければ `ErrorKind::TransportClosed`、open runtime では
+  bounded worker command として pairing window の開始から NX readiness まで待ちます。
+  timeout と Ready 前の disconnect は成功に変換しません。
+- model 固有 HID descriptor と SDP record、Classic pairing window、NoInputNoOutput SSP
+  policy、SDP/HID control/interrupt session は crate 内の Bumble `LocalLink` packet path
+  で検査しています。これらを実 USB runtime の poll/send/cleanup へ接続する production
+  統合と実 adapter 上の pairing は未完了です。
+- `create_profile()` は builder、path、identity、target の存在を検査した後、file を作る
+  前に `ErrorKind::UnsupportedCapability` で停止し、既存 target を上書きしません。
 - Bluetooth adapter の claim/reset と対象機器を使う実機検証は未実施です。
 
 ## 開発

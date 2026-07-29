@@ -481,6 +481,13 @@ where
     M: ControllerModel,
     R: WorkerReporting<M>,
 {
+    fn pair(&mut self, timeout: Duration) -> crate::Result<()> {
+        let response = self
+            .try_enqueue(RuntimeCommand::Pair { timeout })
+            .map_err(map_enqueue_error)?;
+        receive_response(response)
+    }
+
     fn request(
         &mut self,
         command: <R as reporting::sealed::Sealed>::Command<M>,

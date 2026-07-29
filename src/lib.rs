@@ -13,11 +13,14 @@
 //! descriptor-only Bluetooth HCI USB discovery without opening or claiming a
 //! device, while `open` claims and initializes the selected HCI adapter and
 //! starts an owned worker. Without that feature, `open` returns
-//! [`ErrorKind::UnsupportedCapability`] before transport side effects. Pairing
-//! and profile creation remain unavailable; pairing leaves an open HCI runtime
-//! unchanged, and an otherwise valid profile-creation request stops after its
-//! read-only target preflight without creating a file. Explicit close waits for
-//! cleanup completion, joins the worker, and returns cleanup or join failures.
+//! [`ErrorKind::UnsupportedCapability`] before transport side effects.
+//! [`Controller::pair`] requires an open runtime and waits for one connection
+//! session to complete NX readiness; timeout and pre-readiness disconnect are
+//! returned as failures. Production USB integration of the Classic pairing,
+//! SDP, and HID session remains in progress. Profile creation remains
+//! unavailable: an otherwise valid request stops after its read-only target
+//! preflight without creating a file. Explicit close waits for cleanup
+//! completion, joins the worker, and returns cleanup or join failures.
 //! Dropping a controller instead uses bounded best-effort shutdown: it omits
 //! neutral reporting and pending-send draining and cannot report failures. Its
 //! internal wait duration is not a public timing guarantee. A new connection

@@ -87,6 +87,17 @@ impl TransportPort for BumbleTransportPort {
         Ok(capabilities)
     }
 
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
+        match session.terminal_error() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
         self.session
             .as_mut()

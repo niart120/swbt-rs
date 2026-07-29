@@ -765,7 +765,12 @@ where
                 progress.commands += 1;
                 let result = match command {
                     RuntimeCommand::Pair { timeout } => {
-                        match self.begin_connection(clock.now(), timeout) {
+                        match self
+                            .transport
+                            .start_pairing()
+                            .map_err(WorkerCoreError::Transport)
+                            .and_then(|()| self.begin_connection(clock.now(), timeout))
+                        {
                             Ok(_) => {
                                 self.pair_pending = true;
                                 WorkerCommandProgress::Pending
@@ -2175,6 +2180,51 @@ mod tests {
     }
 
     #[test]
+    fn pair_starts_the_transport_before_connection_state_and_preserves_begin_failure() {
+        let (mut transport, _control, trace) = tracing_transport();
+        transport.start_pairing_error = Some(TransportErrorKind::SourceTerminated);
+        let clock = FakeClock::at(Duration::ZERO);
+        let mut worker = WorkerCore::new_direct(
+            protocol(),
+            Box::new(transport),
+            WorkerBudget::new(1, 1),
+            observer(Arc::clone(&trace)),
+        );
+        let (activity, _wakes) = activity_channel();
+        let (client, mut commands) = command_channel(1, activity);
+        let response = client
+            .try_enqueue(RuntimeCommand::<Pro, Direct>::Pair {
+                timeout: CONNECTION_TIMEOUT,
+            })
+            .expect("pair command fits");
+        let mut shutdown = ShutdownLatch::default();
+
+        let WorkerStep::Continue(mut rejected) =
+            worker.step_runtime(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("pair begin rejection must remain a command failure");
+        };
+
+        assert_eq!(worker.lifecycle_state(), LifecycleState::Open);
+        assert_eq!(lock(&trace).first(), Some(&Trace::StartPairing));
+        assert!(matches!(
+            rejected.command_results.as_slice(),
+            [WorkerCommandProgress::Complete(Err(
+                WorkerCommandError::Pair(PairingError::Begin(WorkerCoreError::Transport(error)))
+            ))] if error.kind() == TransportErrorKind::SourceTerminated
+        ));
+        commands
+            .deliver_progress(&mut rejected)
+            .expect("deliver typed pair begin failure");
+        assert!(matches!(
+            response.try_recv(),
+            Ok(Err(WorkerCommandError::Pair(PairingError::Begin(
+                WorkerCoreError::Transport(error)
+            )))) if error.kind() == TransportErrorKind::SourceTerminated
+        ));
+    }
+
+    #[test]
     fn pair_timeout_completes_the_retained_response_once() {
         let (transport, _control, trace) = tracing_transport();
         let clock = FakeClock::at(Duration::ZERO);
@@ -2256,6 +2306,7 @@ mod tests {
             Box::new(TracingTransport {
                 inner: transport,
                 trace: Arc::clone(&trace),
+                start_pairing_error: None,
             }),
             WorkerBudget::new(2, 1),
             observer(Arc::clone(&trace)),
@@ -3790,6 +3841,7 @@ mod tests {
     #[derive(Clone, Debug, PartialEq, Eq)]
     enum Trace {
         Command(&'static str),
+        StartPairing,
         Poll(usize),
         Observe {
             channel: HidChannel,
@@ -3809,11 +3861,20 @@ mod tests {
     struct TracingTransport {
         inner: FakeTransport,
         trace: Arc<Mutex<Vec<Trace>>>,
+        start_pairing_error: Option<TransportErrorKind>,
     }
 
     impl TransportPort for TracingTransport {
         fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
+        }
+
+        fn start_pairing(&mut self) -> TransportResult<()> {
+            lock(&self.trace).push(Trace::StartPairing);
+            match self.start_pairing_error {
+                Some(kind) => Err(crate::runtime::transport::TransportError::new(kind)),
+                None => self.inner.start_pairing(),
+            }
         }
 
         fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
@@ -3862,6 +3923,7 @@ mod tests {
             TracingTransport {
                 inner,
                 trace: Arc::clone(&trace),
+                start_pairing_error: None,
             },
             control,
             trace,

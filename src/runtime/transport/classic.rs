@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use bumble::Address;
-use bumble_host::{Device, DeviceEvent, HostTransport};
+use bumble_hci::Command;
+use bumble_host::{ClassicPairingEvent, Device, DeviceEvent, HostTransport};
 use bumble_l2cap::{ClassicChannelSpec, ClassicChannelState};
 
 use super::config::{HidServiceConfig, TransportConfig};
@@ -20,14 +21,25 @@ pub(super) const HID_INTERRUPT_PSM: u32 = 0x0013;
 const SERVER_MTU: u16 = 672;
 const MAX_SDP_SDUS_PER_POLL: usize = 16;
 const EVENT_QUEUE_CAPACITY: usize = 64;
+const CONNECTION_REJECTED_UNACCEPTABLE_ADDRESS: u8 = 0x0F;
+const AUTHENTICATION_FAILURE: u8 = 0x05;
+const NO_INPUT_NO_OUTPUT: u8 = 0x03;
+const OOB_DATA_ABSENT: u8 = 0x00;
+const DEDICATED_BONDING_NO_MITM: u8 = 0x02;
 
 pub(super) struct ClassicDeviceSession {
     configuration: HidServiceConfig,
     activity: ActivityNotifier,
     servers_registered: bool,
+    pairing: Option<PairingWindow>,
     current: Option<ConnectionSession>,
     events: VecDeque<TransportEvent>,
     terminal: Option<TransportError>,
+}
+
+struct PairingWindow {
+    peer_address: Option<Address>,
+    connection_request_accepted: bool,
 }
 
 struct ConnectionSession {
@@ -55,6 +67,7 @@ impl ClassicDeviceSession {
             configuration: configuration.hid_service.clone(),
             activity,
             servers_registered: false,
+            pairing: None,
             current: None,
             events: VecDeque::with_capacity(EVENT_QUEUE_CAPACITY),
             terminal: None,
@@ -94,6 +107,36 @@ impl ClassicDeviceSession {
         Ok(())
     }
 
+    pub(super) fn start_pairing(
+        &mut self,
+        device: &mut Device,
+        link: &mut (dyn HostTransport + 'static),
+    ) -> TransportResult<()> {
+        if let Some(terminal) = &self.terminal {
+            return Err(terminal.clone());
+        }
+        if self.pairing.is_some() {
+            return Ok(());
+        }
+        if self.current.is_some() {
+            return Err(TransportError::new(TransportErrorKind::SendRejected));
+        }
+
+        device.set_connectable(link, true);
+        if let Err(error) = device.set_discoverable(link, true) {
+            device.set_connectable(link, false);
+            return Err(TransportError::with_source(
+                TransportErrorKind::OpenFailed,
+                Arc::new(error),
+            ));
+        }
+        self.pairing = Some(PairingWindow {
+            peer_address: None,
+            connection_request_accepted: false,
+        });
+        Ok(())
+    }
+
     pub(super) fn poll(
         &mut self,
         device: &mut Device,
@@ -103,7 +146,8 @@ impl ClassicDeviceSession {
             return Err(terminal.clone());
         }
 
-        self.process_device_events(device.take_device_events());
+        let events = device.take_device_events();
+        self.process_device_events(device, link, events)?;
         if self.current.is_some() {
             self.accept_channels(device);
             self.process_sdp(device, link)?;
@@ -147,15 +191,67 @@ impl ClassicDeviceSession {
         Ok(SendAcceptance::ACCEPTED)
     }
 
-    fn process_device_events(&mut self, events: impl IntoIterator<Item = DeviceEvent>) {
+    fn process_device_events(
+        &mut self,
+        device: &mut Device,
+        link: &mut (dyn HostTransport + 'static),
+        events: impl IntoIterator<Item = DeviceEvent>,
+    ) -> TransportResult<()> {
         for event in events {
             match event {
+                DeviceEvent::ConnectionRequest {
+                    peer_address,
+                    link_type: 0x01,
+                    ..
+                } => {
+                    let accept = self.pairing.as_mut().is_some_and(|pairing| {
+                        if pairing.connection_request_accepted {
+                            return false;
+                        }
+                        match pairing.peer_address.as_ref() {
+                            Some(latched) => latched == &peer_address,
+                            None => {
+                                pairing.peer_address = Some(peer_address.clone());
+                                pairing.connection_request_accepted = true;
+                                true
+                            }
+                        }
+                    });
+                    if accept {
+                        device.accept_classic(link, peer_address);
+                    } else {
+                        link.handle_command(
+                            device.controller_id(),
+                            Command::RejectConnectionRequest {
+                                bd_addr: peer_address,
+                                reason: CONNECTION_REJECTED_UNACCEPTABLE_ADDRESS,
+                            },
+                        );
+                    }
+                }
                 DeviceEvent::ClassicConnectionEstablished(connection) => {
+                    let expected_peer = self.pairing.as_ref().and_then(|pairing| {
+                        pairing
+                            .connection_request_accepted
+                            .then_some(pairing.peer_address.as_ref())
+                            .flatten()
+                    });
+                    if expected_peer != Some(&connection.peer_address) {
+                        let _ = device.disconnect_handle(
+                            link,
+                            connection.connection_handle,
+                            AUTHENTICATION_FAILURE,
+                        );
+                        continue;
+                    }
                     let is_current = self.current.as_ref().is_some_and(|current| {
                         current.handle == connection.connection_handle
                             && current.peer_address == connection.peer_address
                     });
                     if self.current.is_none() {
+                        device
+                            .set_discoverable(link, false)
+                            .map_err(map_pairing_source)?;
                         self.current = Some(ConnectionSession {
                             handle: connection.connection_handle,
                             peer_address: connection.peer_address,
@@ -178,13 +274,145 @@ impl ClassicDeviceSession {
                     .is_some_and(|current| current.handle == connection_handle) =>
                 {
                     self.current = None;
+                    self.end_pairing_window(device, link)?;
                     self.enqueue(TransportEvent::Disconnected {
                         reason: Some(reason),
                     });
                 }
+                DeviceEvent::ClassicPairing(event) => {
+                    self.process_pairing_event(device, link, event)?;
+                }
                 _ => {}
             }
         }
+        if !device.take_key_store_errors().is_empty() {
+            self.fail_pairing(device, link, AUTHENTICATION_FAILURE)?;
+        }
+        Ok(())
+    }
+
+    fn process_pairing_event(
+        &mut self,
+        device: &mut Device,
+        link: &mut (dyn HostTransport + 'static),
+        event: ClassicPairingEvent,
+    ) -> TransportResult<()> {
+        let controller_id = device.controller_id();
+        match event {
+            ClassicPairingEvent::AuthenticationComplete {
+                status,
+                connection_handle,
+            } if status != 0
+                && self
+                    .current
+                    .as_ref()
+                    .is_some_and(|current| current.handle == connection_handle) =>
+            {
+                self.fail_pairing(device, link, status)?;
+            }
+            ClassicPairingEvent::PinCodeRequest { peer_address } => {
+                link.handle_command(
+                    controller_id,
+                    Command::PinCodeRequestNegativeReply {
+                        bd_addr: peer_address,
+                    },
+                );
+            }
+            ClassicPairingEvent::LinkKeyRequest { .. }
+            | ClassicPairingEvent::LinkKeyNotification { .. } => {
+                // Device consumes these through its configured Bumble key store.
+            }
+            ClassicPairingEvent::IoCapabilityRequest { peer_address }
+                if self.is_latched_peer(&peer_address) =>
+            {
+                link.handle_command(
+                    controller_id,
+                    Command::IoCapabilityRequestReply {
+                        bd_addr: peer_address,
+                        io_capability: NO_INPUT_NO_OUTPUT,
+                        oob_data_present: OOB_DATA_ABSENT,
+                        authentication_requirements: DEDICATED_BONDING_NO_MITM,
+                    },
+                );
+            }
+            ClassicPairingEvent::UserConfirmationRequest { peer_address, .. } => {
+                let command = if self.is_latched_peer(&peer_address) {
+                    Command::UserConfirmationRequestReply {
+                        bd_addr: peer_address,
+                    }
+                } else {
+                    Command::UserConfirmationRequestNegativeReply {
+                        bd_addr: peer_address,
+                    }
+                };
+                link.handle_command(controller_id, command);
+            }
+            ClassicPairingEvent::UserPasskeyRequest { peer_address } => {
+                link.handle_command(
+                    controller_id,
+                    Command::UserPasskeyRequestNegativeReply {
+                        bd_addr: peer_address,
+                    },
+                );
+            }
+            ClassicPairingEvent::RemoteOobDataRequest { peer_address } => {
+                link.handle_command(
+                    controller_id,
+                    Command::RemoteOobDataRequestNegativeReply {
+                        bd_addr: peer_address,
+                    },
+                );
+            }
+            ClassicPairingEvent::SimplePairingComplete {
+                status,
+                peer_address,
+            } if status != 0 && self.is_latched_peer(&peer_address) => {
+                self.fail_pairing(device, link, status)?;
+            }
+            ClassicPairingEvent::AuthenticationComplete { .. }
+            | ClassicPairingEvent::IoCapabilityRequest { .. }
+            | ClassicPairingEvent::IoCapabilityResponse { .. }
+            | ClassicPairingEvent::SimplePairingComplete { .. }
+            | ClassicPairingEvent::UserPasskeyNotification { .. } => {}
+        }
+        Ok(())
+    }
+
+    fn is_latched_peer(&self, peer_address: &Address) -> bool {
+        self.pairing
+            .as_ref()
+            .and_then(|pairing| pairing.peer_address.as_ref())
+            == Some(peer_address)
+    }
+
+    fn fail_pairing(
+        &mut self,
+        device: &mut Device,
+        link: &mut (dyn HostTransport + 'static),
+        reason: u8,
+    ) -> TransportResult<()> {
+        if let Some(handle) = self.current.as_ref().map(|current| current.handle) {
+            let _ = device.disconnect_handle(link, handle, AUTHENTICATION_FAILURE);
+        }
+        self.current = None;
+        self.end_pairing_window(device, link)?;
+        self.enqueue(TransportEvent::Disconnected {
+            reason: Some(reason),
+        });
+        Ok(())
+    }
+
+    fn end_pairing_window(
+        &mut self,
+        device: &mut Device,
+        link: &mut (dyn HostTransport + 'static),
+    ) -> TransportResult<()> {
+        self.pairing = None;
+        device
+            .set_discoverable(link, false)
+            .map_err(map_pairing_source)?;
+        device.set_connectable(link, false);
+        Ok(())
     }
 
     fn accept_channels(&mut self, device: &mut Device) {
@@ -390,19 +618,30 @@ fn map_source_terminated(error: bumble_l2cap::Error) -> TransportError {
     TransportError::with_source(TransportErrorKind::SourceTerminated, Arc::new(error))
 }
 
+fn map_pairing_source(error: impl std::error::Error + Send + Sync + 'static) -> TransportError {
+    TransportError::with_source(TransportErrorKind::SourceTerminated, Arc::new(error))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc::TryRecvError;
 
     use bumble::{Address, AddressType};
     use bumble_controller::{Controller, LocalLink};
-    use bumble_host::{Device, DeviceEvent, pump};
+    use bumble_hci::{AclDataPacket, Command, HciPacket, IsoDataPacket};
+    use bumble_host::{
+        ClassicPairingEvent, Device, DeviceConfiguration, DeviceEvent, HostTransport, pump,
+    };
     use bumble_l2cap::ClassicChannelSpec;
     use bumble_sdp::{DataElement, SdpPdu};
 
     use crate::model::Pro;
 
-    use super::{ClassicDeviceSession, HID_CONTROL_PSM, HID_INTERRUPT_PSM, SDP_PSM};
+    use super::{
+        AUTHENTICATION_FAILURE, CONNECTION_REJECTED_UNACCEPTABLE_ADDRESS, ClassicDeviceSession,
+        DEDICATED_BONDING_NO_MITM, HID_CONTROL_PSM, HID_INTERRUPT_PSM, NO_INPUT_NO_OUTPUT,
+        OOB_DATA_ABSENT, SDP_PSM,
+    };
     use crate::runtime::transport::{
         HidChannel, SendAcceptance, TransportConfig, TransportErrorKind, TransportEvent,
         activity_channel,
@@ -410,6 +649,187 @@ mod tests {
 
     const INITIATOR_ADDRESS: &str = "11:11:11:11:11:11";
     const RESPONDER_ADDRESS: &str = "22:22:22:22:22:22";
+
+    #[test]
+    fn pairing_window_is_idempotent_and_accepts_only_its_first_peer() {
+        let mut link = RecordingLink::default();
+        let mut device = configured_device(7);
+        let (activity, _wakes) = activity_channel();
+        let mut session = ClassicDeviceSession::new(&TransportConfig::for_model::<Pro>(), activity);
+        let first = address(INITIATOR_ADDRESS);
+        let second = address("33:33:33:33:33:33");
+
+        session
+            .start_pairing(&mut device, &mut link)
+            .expect("open pairing window");
+        let first_start_commands = link.commands.len();
+        session
+            .start_pairing(&mut device, &mut link)
+            .expect("repeated start in the same window is idempotent");
+        assert_eq!(link.commands.len(), first_start_commands);
+        assert!(device.config.connectable);
+        assert!(device.config.discoverable);
+
+        link.commands.clear();
+        session
+            .process_device_events(&mut device, &mut link, [connection_request(first.clone())])
+            .expect("accept first peer");
+        assert!(matches!(
+            link.commands.as_slice(),
+            [Command::AcceptConnectionRequest { bd_addr, .. }] if bd_addr == &first
+        ));
+
+        link.commands.clear();
+        session
+            .process_device_events(&mut device, &mut link, [connection_request(second.clone())])
+            .expect("reject second peer");
+        assert!(matches!(
+            link.commands.as_slice(),
+            [Command::RejectConnectionRequest { bd_addr, reason }]
+                if bd_addr == &second && *reason == CONNECTION_REJECTED_UNACCEPTABLE_ADDRESS
+        ));
+
+        let (activity, _wakes) = activity_channel();
+        let mut outside = ClassicDeviceSession::new(&TransportConfig::for_model::<Pro>(), activity);
+        link.commands.clear();
+        outside
+            .process_device_events(&mut device, &mut link, [connection_request(second.clone())])
+            .expect("windowless request is rejected");
+        assert!(matches!(
+            link.commands.as_slice(),
+            [Command::RejectConnectionRequest { bd_addr, reason }]
+                if bd_addr == &second && *reason == CONNECTION_REJECTED_UNACCEPTABLE_ADDRESS
+        ));
+    }
+
+    #[test]
+    fn no_input_no_output_policy_uses_exact_ssp_commands_and_redacts_link_keys() {
+        let mut link = RecordingLink::default();
+        let mut device = configured_device(7);
+        let (activity, _wakes) = activity_channel();
+        let mut session = ClassicDeviceSession::new(&TransportConfig::for_model::<Pro>(), activity);
+        let peer = address(INITIATOR_ADDRESS);
+        let other = address("33:33:33:33:33:33");
+
+        session
+            .start_pairing(&mut device, &mut link)
+            .expect("open pairing window");
+        session
+            .process_device_events(&mut device, &mut link, [connection_request(peer.clone())])
+            .expect("latch first peer");
+        link.commands.clear();
+
+        session
+            .process_device_events(
+                &mut device,
+                &mut link,
+                [
+                    pairing_event(ClassicPairingEvent::IoCapabilityRequest {
+                        peer_address: peer.clone(),
+                    }),
+                    pairing_event(ClassicPairingEvent::UserConfirmationRequest {
+                        peer_address: peer.clone(),
+                        numeric_value: 123_456,
+                    }),
+                    pairing_event(ClassicPairingEvent::PinCodeRequest {
+                        peer_address: peer.clone(),
+                    }),
+                    pairing_event(ClassicPairingEvent::UserPasskeyRequest {
+                        peer_address: peer.clone(),
+                    }),
+                    pairing_event(ClassicPairingEvent::RemoteOobDataRequest {
+                        peer_address: peer.clone(),
+                    }),
+                    pairing_event(ClassicPairingEvent::UserConfirmationRequest {
+                        peer_address: other.clone(),
+                        numeric_value: 654_321,
+                    }),
+                    pairing_event(ClassicPairingEvent::LinkKeyRequest {
+                        peer_address: peer.clone(),
+                    }),
+                    pairing_event(ClassicPairingEvent::LinkKeyNotification {
+                        peer_address: peer.clone(),
+                        link_key: [0xA5; 16],
+                        key_type: 0x08,
+                    }),
+                ],
+            )
+            .expect("apply NoInputNoOutput policy");
+
+        assert!(matches!(
+            &link.commands[0],
+            Command::IoCapabilityRequestReply {
+                bd_addr,
+                io_capability: NO_INPUT_NO_OUTPUT,
+                oob_data_present: OOB_DATA_ABSENT,
+                authentication_requirements: DEDICATED_BONDING_NO_MITM,
+            } if bd_addr == &peer
+        ));
+        assert!(matches!(
+            &link.commands[1],
+            Command::UserConfirmationRequestReply { bd_addr } if bd_addr == &peer
+        ));
+        assert!(matches!(
+            &link.commands[2],
+            Command::PinCodeRequestNegativeReply { bd_addr } if bd_addr == &peer
+        ));
+        assert!(matches!(
+            &link.commands[3],
+            Command::UserPasskeyRequestNegativeReply { bd_addr } if bd_addr == &peer
+        ));
+        assert!(matches!(
+            &link.commands[4],
+            Command::RemoteOobDataRequestNegativeReply { bd_addr } if bd_addr == &peer
+        ));
+        assert!(matches!(
+            &link.commands[5],
+            Command::UserConfirmationRequestNegativeReply { bd_addr } if bd_addr == &other
+        ));
+        assert_eq!(
+            link.commands.len(),
+            6,
+            "link-key events stay in Device key store"
+        );
+        let observable = format!("{:?}", link.commands);
+        assert!(!observable.contains("165"));
+        assert!(!observable.contains("A5"));
+    }
+
+    #[test]
+    fn pairing_failure_closes_the_window_without_waiting_for_hid_channels() {
+        let mut link = RecordingLink::default();
+        let mut device = configured_device(7);
+        let (activity, _wakes) = activity_channel();
+        let mut session = ClassicDeviceSession::new(&TransportConfig::for_model::<Pro>(), activity);
+        let peer = address(INITIATOR_ADDRESS);
+        session
+            .start_pairing(&mut device, &mut link)
+            .expect("open pairing window");
+        session
+            .process_device_events(&mut device, &mut link, [connection_request(peer.clone())])
+            .expect("latch first peer");
+
+        session
+            .process_device_events(
+                &mut device,
+                &mut link,
+                [pairing_event(ClassicPairingEvent::SimplePairingComplete {
+                    status: AUTHENTICATION_FAILURE,
+                    peer_address: peer,
+                })],
+            )
+            .expect("surface pairing failure");
+
+        assert!(session.pairing.is_none());
+        assert!(!device.config.connectable);
+        assert!(!device.config.discoverable);
+        assert_eq!(
+            session.take_events().expect("pair failure event"),
+            [TransportEvent::Disconnected {
+                reason: Some(AUTHENTICATION_FAILURE),
+            }]
+        );
+    }
 
     #[test]
     fn registers_three_servers_once_and_accepts_reverse_hid_order_once() {
@@ -504,10 +924,15 @@ mod tests {
 
         fixture
             .session
-            .process_device_events([DeviceEvent::Disconnected {
-                connection_handle: fixture.responder_handle,
-                reason: 0x16,
-            }]);
+            .process_device_events(
+                &mut fixture.devices[1],
+                &mut fixture.link,
+                [DeviceEvent::Disconnected {
+                    connection_handle: fixture.responder_handle,
+                    reason: 0x16,
+                }],
+            )
+            .expect("duplicate old disconnect is harmless");
         assert!(
             fixture
                 .session
@@ -648,6 +1073,39 @@ mod tests {
         );
     }
 
+    #[derive(Default)]
+    struct RecordingLink {
+        commands: Vec<Command>,
+    }
+
+    impl HostTransport for RecordingLink {
+        fn handle_command(&mut self, _controller_id: usize, command: Command) {
+            self.commands.push(command);
+        }
+
+        fn send_acl_packet(&mut self, _controller_id: usize, _packet: AclDataPacket) -> bool {
+            false
+        }
+
+        fn send_synchronous_data(
+            &mut self,
+            _controller_id: usize,
+            _connection_handle: u16,
+            _packet_status: u8,
+            _data: &[u8],
+        ) -> bool {
+            false
+        }
+
+        fn send_iso_packet(&mut self, _controller_id: usize, _packet: IsoDataPacket) -> bool {
+            false
+        }
+
+        fn drain_host_events(&mut self, _controller_id: usize) -> Vec<HciPacket> {
+            Vec::new()
+        }
+    }
+
     struct Fixture {
         link: LocalLink,
         devices: [Device; 2],
@@ -666,22 +1124,39 @@ mod tests {
                 link.add_controller(Controller::new("initiator", initiator_address.clone()));
             let responder_id =
                 link.add_controller(Controller::new("swbt", responder_address.clone()));
-            let mut devices = [Device::new(initiator_id), Device::new(responder_id)];
+            let responder_config = DeviceConfiguration {
+                classic_enabled: true,
+                classic_accept_any: false,
+                connectable: false,
+                discoverable: false,
+                ..DeviceConfiguration::default()
+            };
+            let mut devices = [
+                Device::new(initiator_id),
+                Device::from_config(responder_id, responder_config)
+                    .expect("configured Classic responder"),
+            ];
             let (activity, wakes) = activity_channel();
             let mut session =
                 ClassicDeviceSession::new(&TransportConfig::for_model::<Pro>(), activity);
             session
                 .register_servers(&mut devices[1])
                 .expect("register Classic HID servers");
+            session
+                .start_pairing(&mut devices[1], &mut link)
+                .expect("open pairing window");
 
             devices[0].connect_classic(&mut link, responder_address);
             devices[0].poll(&mut link);
             link.pump_classic();
             devices[1].poll(&mut link);
-            devices[1].accept_classic(&mut link, initiator_address);
-            devices[1].poll(&mut link);
-            link.pump_classic();
-            devices[0].poll(&mut link);
+            assert!(
+                session
+                    .poll(&mut devices[1], &mut link)
+                    .expect("pairing window accepts the first peer")
+                    .is_empty()
+            );
+            pump(&mut link, &mut devices);
 
             let initiator_handle = devices[0]
                 .classic_connection_handle()
@@ -728,6 +1203,29 @@ mod tests {
 
     fn address(value: &str) -> Address {
         Address::parse(value, AddressType::PUBLIC_DEVICE).expect("valid test address")
+    }
+
+    fn configured_device(controller_id: usize) -> Device {
+        let config = DeviceConfiguration {
+            classic_enabled: true,
+            classic_accept_any: false,
+            connectable: false,
+            discoverable: false,
+            ..DeviceConfiguration::default()
+        };
+        Device::from_config(controller_id, config).expect("configured Classic device")
+    }
+
+    fn connection_request(peer_address: Address) -> DeviceEvent {
+        DeviceEvent::ConnectionRequest {
+            peer_address,
+            class_of_device: 0,
+            link_type: 0x01,
+        }
+    }
+
+    fn pairing_event(event: ClassicPairingEvent) -> DeviceEvent {
+        DeviceEvent::ClassicPairing(event)
     }
 
     fn input_pdu(payload: &[u8]) -> Vec<u8> {

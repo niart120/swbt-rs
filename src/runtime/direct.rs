@@ -679,6 +679,10 @@ mod tests {
             self.inner.open(activity)
         }
 
+        fn start_pairing(&mut self) -> TransportResult<()> {
+            self.inner.start_pairing()
+        }
+
         fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
             self.inner.poll(timeout)
         }

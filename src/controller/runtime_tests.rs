@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     error::Error as StdError,
     io,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -77,16 +78,16 @@ fn unavailable_public_lifecycle_keeps_the_runtime_owner_uninstalled() {
     assert_eq!(
         controller
             .pair(PAIR_TIMEOUT)
-            .expect_err("pair must be unavailable")
+            .expect_err("pair requires an open runtime")
             .kind(),
-        ErrorKind::UnsupportedCapability
+        ErrorKind::TransportClosed
     );
     assert!(controller._runtime.is_none());
     assert_eq!(controller.status().lifecycle, LifecycleState::Configured);
 }
 
 #[test]
-fn controller_open_is_idempotent_preserves_open_on_unsupported_pair_and_reopens_after_join() {
+fn controller_open_is_idempotent_and_reopens_after_join() {
     let mut controller = ProController::builder("usb:0")
         .build()
         .expect("build configured controller");
@@ -122,16 +123,6 @@ fn controller_open_is_idempotent_preserves_open_on_unsupported_pair_and_reopens_
         })
         .expect("repeated open is idempotent");
     assert!(!repeated_open_called.load(Ordering::SeqCst));
-    assert_eq!(first_control.counters(), (1, 0, 0));
-
-    assert_eq!(
-        controller
-            .pair(PAIR_TIMEOUT)
-            .expect_err("M3 pairing remains unsupported")
-            .kind(),
-        ErrorKind::UnsupportedCapability
-    );
-    assert_eq!(controller.status().lifecycle, LifecycleState::Open);
     assert_eq!(first_control.counters(), (1, 0, 0));
 
     controller.close().expect("first close joins the worker");
@@ -170,6 +161,73 @@ fn controller_open_is_idempotent_preserves_open_on_unsupported_pair_and_reopens_
     assert!(second_dropped.load(Ordering::SeqCst));
     assert_eq!(second_control.counters(), (1, 1, 1));
     assert_eq!(controller.status().lifecycle, LifecycleState::Closed);
+}
+
+#[test]
+fn public_pair_requires_open_runtime_and_reports_timeout_and_disconnect() {
+    let mut closed = DirectProController::builder("fake-adapter")
+        .build()
+        .expect("build configured controller");
+    assert_eq!(
+        closed
+            .pair(PAIR_TIMEOUT)
+            .expect_err("configured controller has no open runtime")
+            .kind(),
+        ErrorKind::TransportClosed
+    );
+
+    let (mut timed_out, timeout_control) = open_public_pair_controller([PublicPairScript::Timeout]);
+    assert_eq!(
+        timed_out
+            .pair(PAIR_TIMEOUT)
+            .expect_err("scripted pairing reaches its deadline")
+            .kind(),
+        ErrorKind::ConnectionTimeout
+    );
+    assert_eq!(timeout_control.pairing_starts(), 1);
+    assert_eq!(timed_out.status().lifecycle, LifecycleState::Open);
+    timed_out
+        .close_without_neutral()
+        .expect("close timed-out runtime");
+
+    let (mut disconnected, disconnect_control) =
+        open_public_pair_controller([PublicPairScript::Disconnect]);
+    assert_eq!(
+        disconnected
+            .pair(PAIR_TIMEOUT)
+            .expect_err("scripted peer disconnects before readiness")
+            .kind(),
+        ErrorKind::ConnectionFailed
+    );
+    assert_eq!(disconnect_control.pairing_starts(), 1);
+    assert_eq!(disconnected.status().lifecycle, LifecycleState::Open);
+    disconnected
+        .close_without_neutral()
+        .expect("close disconnected runtime");
+}
+
+#[test]
+fn public_pair_can_start_a_new_session_after_disconnect() {
+    let (mut controller, control) =
+        open_public_pair_controller([PublicPairScript::Ready, PublicPairScript::Ready]);
+
+    controller
+        .pair(PAIR_TIMEOUT)
+        .expect("first scripted session reaches readiness");
+    assert_eq!(controller.status().lifecycle, LifecycleState::Ready);
+    control
+        .inject_disconnected(Some(0x13))
+        .expect("disconnect first ready session");
+    wait_for_lifecycle(&controller, LifecycleState::Open);
+
+    controller
+        .pair(PAIR_TIMEOUT)
+        .expect("second scripted session reaches readiness");
+    assert_eq!(control.pairing_starts(), 2);
+    assert_eq!(controller.status().lifecycle, LifecycleState::Ready);
+    controller
+        .close_without_neutral()
+        .expect("close repeated-pair runtime");
 }
 
 #[test]
@@ -1061,6 +1119,52 @@ where
     (controller, observed_control)
 }
 
+fn open_public_pair_controller(
+    scripts: impl IntoIterator<Item = PublicPairScript>,
+) -> (DirectProController, TestTransportControl) {
+    let mut controller = DirectProController::builder("fake-adapter")
+        .build()
+        .expect("build configured direct controller");
+    let (inner, control) = TestTransport::with_limits(16, 3);
+    let observed_control = control.clone();
+    let clock = ManualClock::at(Duration::ZERO);
+    let worker_clock = clock.clone();
+    let scripts = scripts.into_iter().collect();
+    let factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+        Ok::<_, Error>(RuntimeComponents::new(
+            Box::new(PublicPairTransport {
+                inner,
+                control,
+                clock,
+                scripts,
+                advance_timeout_on_poll: false,
+            }),
+            worker_clock,
+            ChannelWorkerWaiter::new(activity_receiver),
+            UnusedPairDriver,
+        ))
+    };
+    controller
+        .open_with(|config, status| open_controller_runtime(config, status, factory))
+        .expect("open scripted public-pair runtime");
+    (controller, observed_control)
+}
+
+fn wait_for_lifecycle<M, R>(controller: &Controller<M, R>, expected: LifecycleState)
+where
+    M: ControllerModel,
+    R: ReportingMode,
+{
+    let deadline = Instant::now() + DEADLOCK_WATCHDOG;
+    while controller.status().lifecycle != expected {
+        assert!(
+            Instant::now() < deadline,
+            "worker did not reach lifecycle {expected:?}"
+        );
+        thread::yield_now();
+    }
+}
+
 fn assert_closed<M, R>(controller: &Controller<M, R>, control: &TestTransportControl)
 where
     M: ControllerModel,
@@ -1079,6 +1183,21 @@ struct FakePairDriver {
     observed_requests: Receiver<WorkerWaitRequest>,
     periodic: bool,
     request_device_info: bool,
+}
+
+#[derive(Clone, Copy)]
+enum PublicPairScript {
+    Ready,
+    Timeout,
+    Disconnect,
+}
+
+struct PublicPairTransport {
+    inner: TestTransport,
+    control: TestTransportControl,
+    clock: ManualClock,
+    scripts: VecDeque<PublicPairScript>,
+    advance_timeout_on_poll: bool,
 }
 
 struct DisconnectingPairDriver {
@@ -1242,9 +1361,73 @@ impl PairDriver for TerminalPairDriver {
     }
 }
 
+impl TransportPort for PublicPairTransport {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
+        self.inner.open(activity)
+    }
+
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        self.inner.start_pairing()?;
+        match self
+            .scripts
+            .pop_front()
+            .expect("each public pair call has a scripted outcome")
+        {
+            PublicPairScript::Ready => {
+                self.control.inject_connected()?;
+                self.control
+                    .inject_hid_channel_opened(HidChannel::Control)?;
+                self.control
+                    .inject_hid_channel_opened(HidChannel::Interrupt)?;
+                self.control
+                    .inject_hid_output(HidChannel::Control, &subcommand_report(0x03, &[0x30]))?;
+                self.control
+                    .inject_hid_output(HidChannel::Interrupt, &subcommand_report(0x30, &[0x01]))?;
+            }
+            PublicPairScript::Timeout => {
+                self.advance_timeout_on_poll = true;
+            }
+            PublicPairScript::Disconnect => {
+                self.control.inject_connected()?;
+                self.control.inject_disconnected(Some(0x13))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+        let events = self.inner.poll(timeout)?;
+        if self.advance_timeout_on_poll {
+            self.advance_timeout_on_poll = false;
+            self.clock.set(PAIR_TIMEOUT);
+        }
+        Ok(events)
+    }
+
+    fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
+        self.inner.send_interrupt(payload)
+    }
+
+    fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+        self.inner.drain_interrupt(timeout)
+    }
+
+    fn disconnect(&mut self) -> TransportResult<()> {
+        self.inner.disconnect()
+    }
+
+    fn close(&mut self) -> TransportResult<()> {
+        self.inner.close()
+    }
+}
+
 impl TransportPort for TerminalPairTransport {
     fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         self.inner.open(activity)
+    }
+
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        self.inner.start_pairing()
     }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
@@ -1296,6 +1479,10 @@ impl TransportPort for PartiallyOpeningTransport {
         ))
     }
 
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        self.inner.start_pairing()
+    }
+
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
         self.inner.poll(timeout)
     }
@@ -1333,6 +1520,10 @@ impl TransportPort for BumbleOpenErrorTransport {
         ))
     }
 
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        Err(TransportError::new(TransportErrorKind::Closed))
+    }
+
     fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
         Err(TransportError::new(TransportErrorKind::Closed))
     }
@@ -1358,6 +1549,10 @@ impl TransportPort for PanickingOpenTransport {
     fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         self.inner.open(activity).expect("open test transport");
         panic!("secret partial open panic");
+    }
+
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        self.inner.start_pairing()
     }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
@@ -1387,6 +1582,10 @@ impl TransportPort for PanickingOpenTransport {
 impl TransportPort for DropTrackingTransport {
     fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         self.inner.open(activity)
+    }
+
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        self.inner.start_pairing()
     }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
@@ -1419,6 +1618,10 @@ impl Drop for DropTrackingTransport {
 impl TransportPort for DrainFailingTransport {
     fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         self.inner.open(activity)
+    }
+
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        self.inner.start_pairing()
     }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {

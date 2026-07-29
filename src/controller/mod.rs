@@ -157,18 +157,16 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 
     /// Pairs the configured controller within `timeout`.
     ///
-    /// Pairing is not implemented in the current milestone. When a Bumble HCI
-    /// runtime is open, this operation leaves that runtime open and keeps its
-    /// diagnostics unchanged.
+    /// The call starts the open transport's pairing window and blocks until
+    /// the same connection session completes the NX readiness handshake.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::UnsupportedCapability`] without starting pairing
-    /// or changing transport ownership.
-    pub fn pair(&mut self, _timeout: Duration) -> crate::Result<()> {
-        Err(crate::runtime::error_map::unsupported_capability(
-            "Bluetooth pairing",
-        ))
+    /// Returns [`ErrorKind::TransportClosed`] when no runtime is open.
+    /// Queue, timeout, disconnect, transport, protocol, and worker failures are
+    /// returned as structured [`crate::Error`] values.
+    pub fn pair(&mut self, timeout: Duration) -> crate::Result<()> {
+        self.runtime_mut()?.pair(timeout)
     }
 
     /// Presses one or more model-valid buttons.

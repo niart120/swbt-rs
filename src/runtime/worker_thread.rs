@@ -1538,6 +1538,10 @@ mod tests {
             self.inner.open(activity)
         }
 
+        fn start_pairing(&mut self) -> TransportResult<()> {
+            self.inner.start_pairing()
+        }
+
         fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
             assert!(
                 !self.panic_on_poll.load(Ordering::Acquire),
@@ -1570,6 +1574,10 @@ mod tests {
     impl TransportPort for CleanupFailureAndPanicOnDropTransport {
         fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
+        }
+
+        fn start_pairing(&mut self) -> TransportResult<()> {
+            self.inner.start_pairing()
         }
 
         fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
@@ -1609,6 +1617,10 @@ mod tests {
     impl TransportPort for IgnoringActivityTransport {
         fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             Ok(TransportCapabilities::test_default())
+        }
+
+        fn start_pairing(&mut self) -> TransportResult<()> {
+            Ok(())
         }
 
         fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
@@ -1658,6 +1670,10 @@ mod tests {
             self.inner.open(activity)
         }
 
+        fn start_pairing(&mut self) -> TransportResult<()> {
+            self.inner.start_pairing()
+        }
+
         fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
             self.inner.poll(timeout)
         }
@@ -1691,6 +1707,10 @@ mod tests {
     impl TransportPort for ExplicitCloseTracingTransport {
         fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
             self.inner.open(activity)
+        }
+
+        fn start_pairing(&mut self) -> TransportResult<()> {
+            self.inner.start_pairing()
         }
 
         fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
