@@ -105,27 +105,39 @@ impl<M: ControllerModel, R: ReportingMode> ReadyRuntime<M, R> {
 
 /// Crate-private lifecycle seam used by the create-profile orchestrator.
 ///
-/// A successful `pair_to_ready` call must return only after the shared status
-/// projection represents a protocol-ready controller.
+/// Backend capability checks happen before persistence. Creating an attempt is
+/// side-effect-free; the orchestrator retains that attempt through open and
+/// pairing so either failure follows the same explicit cleanup path.
 pub(super) trait CreateProfileRuntimeBackend<M: ControllerModel, R: ReportingMode> {
-    type Opened;
+    type Attempt: CreateProfileRuntimeAttempt<M, R>;
 
     /// Checks backend availability without creating a profile or opening I/O.
     fn ensure_supported(&mut self, config: &BuilderConfig<M, R>) -> crate::Result<()>;
 
-    /// Opens the configured runtime and takes a clone of its status writer.
-    fn open(
-        &mut self,
-        config: &ControllerConfig<M, R>,
-        status: StatusPublisher<M>,
-    ) -> crate::Result<Self::Opened>;
+    /// Creates an inactive attempt that owns the shared status writer.
+    fn begin_attempt(&mut self, status: StatusPublisher<M>) -> Self::Attempt;
+}
 
-    /// Pairs an opened runtime and returns ownership only after readiness.
-    fn pair_to_ready(
-        &mut self,
-        opened: Self::Opened,
-        pair_timeout: Duration,
-    ) -> crate::Result<ReadyRuntime<M, R>>;
+/// One create-profile runtime attempt owned by the orchestrator.
+pub(super) trait CreateProfileRuntimeAttempt<M: ControllerModel, R: ReportingMode>:
+    Sized
+{
+    /// Opens runtime resources for the typed controller configuration.
+    fn open(&mut self, config: &ControllerConfig<M, R>) -> crate::Result<()>;
+
+    /// Completes pairing and returns only after protocol readiness.
+    fn pair_to_ready(&mut self, pair_timeout: Duration) -> crate::Result<()>;
+
+    /// Performs best-effort cleanup without sending a neutral report.
+    ///
+    /// Implementations retain the bounded drain used by explicit close and
+    /// disarm their `Drop` fallback before returning. Resource-owning
+    /// implementations also provide that fallback for panic and early-return
+    /// paths.
+    fn cleanup_without_neutral(self);
+
+    /// Transfers a successfully paired attempt into controller ownership.
+    fn into_ready(self) -> ReadyRuntime<M, R>;
 }
 
 pub(super) fn create_profile<M, R>(
@@ -140,8 +152,16 @@ where
     backend.ensure_supported(&plan.config)?;
     let reopened = plan.persist_and_reopen(store)?;
     let (status_publisher, status_reader) = status_projection();
-    let opened = backend.open(&reopened.config, status_publisher.clone())?;
-    let runtime = backend.pair_to_ready(opened, reopened.pair_timeout)?;
+    let mut attempt = backend.begin_attempt(status_publisher.clone());
+    if let Err(primary) = attempt.open(&reopened.config) {
+        attempt.cleanup_without_neutral();
+        return Err(primary);
+    }
+    if let Err(primary) = attempt.pair_to_ready(reopened.pair_timeout) {
+        attempt.cleanup_without_neutral();
+        return Err(primary);
+    }
+    let runtime = attempt.into_ready();
 
     Ok(Controller::from_ready_runtime(
         reopened.config,

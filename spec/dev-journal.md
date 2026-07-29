@@ -250,3 +250,35 @@ T32 は `Opened` の open/pair failure 時 cleanup と empty envelope 残存を�
 sealed reporting 境界へ model 別 command 型を接続し、pair command の one-shot completion で
 実 worker thread の Ready を待ってから同じ controller 所有へ移す。`Any` downcast で
 `WorkerOwner` を取り出す方式は採用しない。
+
+## 2026-07-29: T32 create-profile runtime attempt の cleanup 所有権
+
+### 現状
+
+同日の「T31 create-profile と worker Ready 完了境界」では、backend の `open()` が
+`Opened` を返し、`pair_to_ready()` へ渡す設計としていた。T32 では、
+`CreateProfileRuntimeBackend::begin_attempt()` が resource 未取得の attempt を返し、
+orchestrator が同じ attempt を open、pair、失敗時 cleanup、成功時 Ready 所有権移譲まで
+保持する設計へ更新した。
+
+### 観察
+
+旧設計では `open()` が error を返した場合、途中で取得した resource の owner を
+orchestrator が受け取れない。現設計では open 途中に resource を取得した場合も attempt が
+残るため、open 失敗と pair 失敗を同じ `cleanup_without_neutral()` 経路へ渡せる。
+create-new 競合は runtime open 前に終了する。
+
+T32 の fake が検査するのは、明示 cleanup が without-neutral 経路を選ぶことと一回性である。
+T20 の close-without-neutral と同じく neutral だけを省略して bounded drain を残す実 worker
+接続は T33 で行う。resource 取得後の早期 Drop では attempt の fallback が resource を
+解放する。fake probe は明示 cleanup、fallback、resource drop を別々に数え、各経路の一回性を
+検査する。
+
+### 方針
+
+T33 で実 worker と pair 完了通知を attempt へ接続する。cleanup 自身も失敗した場合は、
+primary と cleanup の両 source を利用者が辿れる構造化 error 境界を決める。標準の
+`Error::source()` は単線なので、cleanup error を非公開 field に置くだけでは完了としない。
+
+T34 の public backend 不在、T35 の worker Drop timeout/detach、M6 の atomic create/replace、
+lock、key preservation は、それぞれの既存 item へ残す。
