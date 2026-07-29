@@ -47,11 +47,13 @@ impl ImuEncodingState {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) const fn orientation(self) -> [f64; 4] {
         self.orientation
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) const fn previous_report_ns(self) -> Option<u64> {
         self.previous_report_ns
     }

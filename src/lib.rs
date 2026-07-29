@@ -2,9 +2,25 @@
 #![warn(missing_docs)]
 //! Rust library for NX-compatible virtual Bluetooth HID input devices.
 //!
-//! The current package surface provides typed controller identities and
-//! model-valid input values. Bluetooth transport and runtime operations are not
-//! exposed yet.
+//! The current package surface provides typed controller identities,
+//! model-valid input values, configured controller construction, and read-only
+//! status and input snapshots, typed input operations, and explicit close
+//! operations. Building a controller without a profile is ephemeral; selecting
+//! an existing profile reads and validates that document. Construction does not
+//! open an adapter or start a worker. A configured controller therefore returns
+//! [`ErrorKind::TransportClosed`] from input operations until a later lifecycle
+//! entrypoint installs a ready runtime. Public open, pair, and profile-creation
+//! entrypoints are available, but the current package has no concrete
+//! Bluetooth transport backend. Open and pair return
+//! [`ErrorKind::UnsupportedCapability`]. An otherwise valid profile-creation
+//! request returns the same error after its read-only target preflight and does
+//! not create a file. On a ready runtime, explicit close waits for cleanup
+//! completion, joins the worker, and returns cleanup or join failures. Dropping
+//! a controller instead uses bounded best-effort shutdown: it omits neutral
+//! reporting and pending-send draining and cannot report failures. Its internal
+//! wait duration is not a public timing guarantee. A new connection session
+//! resets the input snapshot to neutral and does not carry pre-connection or
+//! previous-session input state or stale events forward.
 //!
 //! # Model-valid input
 //!
@@ -24,23 +40,30 @@
 //! # }
 //! ```
 
+mod adapter;
+mod connection;
 pub mod controller;
+mod diagnostics;
 pub mod error;
 pub mod input;
 pub mod model;
 pub mod profile;
 mod protocol;
 pub mod reporting;
+mod runtime;
 
+pub use adapter::AdapterSelector;
+pub use connection::CreateProfileOptions;
 pub use controller::{
     Controller, ControllerBuilder, DirectJoyConL, DirectJoyConR, DirectProController, JoyConL,
     JoyConR, ProController,
 };
+pub use diagnostics::{GamepadStatus, LifecycleState};
 pub use error::{Error, ErrorKind, Result};
 pub use input::{
     Button, ButtonKind, ImuFrame, ImuSamples, InputState, JoyConLButton, JoyConLInputState,
     JoyConRButton, JoyConRInputState, ProButton, ProInputState, Stick,
 };
 pub use model::{ControllerModel, HasDualSticks, HasLeftStick, HasRightStick};
-pub use profile::{ControllerColors, ControllerKind, Rgb24};
+pub use profile::{ControllerColors, ControllerKind, LocalAddress, ProfileIdentity, Rgb24};
 pub use reporting::{ReportingKind, ReportingMode};

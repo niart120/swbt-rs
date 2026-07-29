@@ -1,0 +1,46 @@
+{
+  "schema": "swbt.m2.activity-wait.manifest.v2",
+  "started_at_utc": "2026-07-29T11:12:01.5649810Z",
+  "finished_at_utc": "2026-07-29T11:15:00.8032991Z",
+  "source": {
+    "head_sha": "8dd703fcc6bf1abc95ff6ba75510543b40c775af",
+    "branch": "feat/unit-003-m2-runtime",
+    "worktree_dirty_at_start": false,
+    "head_sha_end": "8dd703fcc6bf1abc95ff6ba75510543b40c775af",
+    "branch_end": "feat/unit-003-m2-runtime",
+    "changed_during_run": false,
+    "evidence_class": "retained"
+  },
+  "runner": {
+    "profile": "release-test",
+    "feature_set": "no-default-features",
+    "mode": "full",
+    "output": "spec/wip/unit_003/evidence/activity-wait-windows-release-20260729",
+    "build_command": "cargo test --release --lib --no-default-features --locked --no-run --message-format=json",
+    "test_arguments": "controller::runtime_measurement::activity_wait_decision --exact --ignored --nocapture --test-threads=1",
+    "overall_watchdog_ms": 900000,
+    "powershell": "Core 7.6.3",
+    "samples": {
+      "idle_ms": 10000,
+      "jitter": 10000,
+      "command": 10000,
+      "transport": 10000,
+      "shutdown_each": 1000,
+      "fairness_ticks": 10000
+    },
+    "raw_records": {
+      "expected": 42002,
+      "actual": 42002
+    }
+  },
+  "files": [
+    {
+      "path": "activity-wait.ndjson",
+      "sha256": "f7ac30dd03560f2bffd4d7235474b02c696459e13d5957bf845c08da2cef05c8"
+    },
+    {
+      "path": "activity-wait-summary.json",
+      "sha256": "4f4c58c980acec98fe7f721b4ae52dd5d3a6c582a8bafeb06f7c8489c94337fd"
+    }
+  ]
+}

@@ -41,6 +41,13 @@ pub(crate) struct VirtualSpiFlash<M: ControllerModel> {
 
 impl<M: ControllerModel> VirtualSpiFlash<M> {
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T31 and T33 protocol construction initializes virtual SPI state"
+        )
+    )]
     pub(crate) fn new(colors: Option<ControllerColors>) -> Self {
         Self {
             colors: colors.unwrap_or(M::SPEC.protocol.default_colors),

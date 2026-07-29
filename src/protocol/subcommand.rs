@@ -47,6 +47,13 @@ pub(crate) struct DeviceInfoBluetoothAddress([u8; 6]);
 
 impl DeviceInfoBluetoothAddress {
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T31 and T33 controller configuration supplies the device address"
+        )
+    )]
     pub(crate) const fn from_wire_bytes(bytes: [u8; 6]) -> Self {
         Self(bytes)
     }

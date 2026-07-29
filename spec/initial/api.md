@@ -299,7 +299,9 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 
 `close()` は接続中なら trailing neutral report を 1 件送信し、pending interrupt send を bounded timeout で drain した後、HID channel、Classic ACL、HCI transport、worker を停止する。
 
-`Drop` は期限なし wait、pairing、neutral report を行わない。
+`close()` と `close_without_neutral()` は cleanup の完了を待って worker を join し、cleanup または join の失敗を `Result` で返す。
+
+`Drop` は neutral report と pending send の drain を省き、priority shutdown 後の完了を bounded wait する。期限内に完了した worker だけを join し、timeout または completion channel 切断時は worker handle を detach する。`Drop` は終了失敗を返せず、bounded wait の内部時間値は公開 API の保証に含めない。
 
 ## 6. 接続 API
 
@@ -343,6 +345,8 @@ pub struct ConnectionResult {
 4. reconnect が通信失敗した場合、bond を暗黙削除して fresh pairing へ移らない
 
 `pair()` は一時 controller、または既存の empty profile から pairing を再試行する入口である。新規 file 作成は行わない。
+
+新しい connection session の開始時に input snapshot を neutral へ戻す。接続前に変更した入力状態、前 session の入力状態、前 session の stale event は新しい session へ持ち越さない。
 
 接続 API は次を満たした後だけ成功する。
 

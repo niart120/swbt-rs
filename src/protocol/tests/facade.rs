@@ -1,12 +1,13 @@
 use crate::{
-    input::{InputState, Stick},
+    input::{ImuFrame, InputState, Stick},
     model::Pro,
     profile::{ControllerColors, Rgb24},
     protocol::{
         error::ProtocolError,
         facade::{OutputPreparation, PreparedOutputAction, SwitchHidProtocol},
+        imu::{ImuEncodingState, ImuMode},
         session::ProtocolSession,
-        subcommand::{DeviceInfoBluetoothAddress, PreparedSubcommandReply},
+        subcommand::PreparedSubcommandReply,
     },
 };
 
@@ -14,6 +15,112 @@ const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40]
 const CUSTOM_RUMBLE: [u8; 8] = [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17];
 const DEVICE_INFO_ADDRESS: [u8; 6] = [0x00, 0x1B, 0xDC, 0xF9, 0x9F, 0x7D];
 const ACCEPTED_IMU_MODES: &[u8] = &[0x00, 0x01, 0x02, 0x03, 0x04, 0x05];
+const ORIENTATION_REPLAY_TOLERANCE: f64 = f64::EPSILON * 8.0;
+
+fn assert_orientation_replay_close(left: [f64; 4], right: [f64; 4]) {
+    for (index, (left, right)) in left.into_iter().zip(right).enumerate() {
+        let difference = (left - right).abs();
+        assert!(
+            difference <= ORIENTATION_REPLAY_TOLERANCE,
+            "orientation component {index} differs by {difference:e}, exceeding \
+             {ORIENTATION_REPLAY_TOLERANCE:e}"
+        );
+    }
+}
+
+#[test]
+fn input_preparation_returns_disabled_imu_candidates_without_mutating_current() {
+    let protocol = protocol(None);
+    let current_imu = ImuEncodingState::new([0.1, 0.2, 0.3, 0.9], Some(123));
+    let current = ProtocolSession::default().with_imu_encoding_state(current_imu);
+
+    let prepared = protocol.prepare_input_report(&InputState::<Pro>::neutral(), 0xff, current, 456);
+
+    assert_eq!(
+        &prepared.bytes()[..13],
+        &[0x30, 0xff, 0x80, 0, 0, 0, 0, 8, 0x80, 0, 8, 0x80, 0]
+    );
+    assert_eq!(&prepared.bytes()[13..], &[0; 36]);
+    assert_eq!(prepared.next_timer(), 0);
+    assert_eq!(
+        prepared.next_imu_encoding_state(),
+        ImuEncodingState::default()
+    );
+    assert_eq!(current.imu_encoding_state(), current_imu);
+}
+
+#[test]
+fn input_preparation_uses_state_session_and_explicit_time_for_quaternion_candidates() {
+    let protocol = protocol(None);
+    let frames = [
+        ImuFrame::raw([1, 2, 3], [0, 0, 1000]),
+        ImuFrame::raw([4, 5, 6], [0, 0, 1000]),
+        ImuFrame::raw([7, 8, 9], [0, 0, 1000]),
+    ];
+    let state = InputState::<Pro>::neutral()
+        .with_sticks(
+            Stick::raw(0x123, 0xabc).unwrap(),
+            Stick::raw(0xfff, 0).unwrap(),
+        )
+        .with_imu(frames);
+    let current_imu = ImuEncodingState::new([0.0, 0.0, 0.0, 1.0], Some(1_000_000_000));
+    let current = ProtocolSession::default()
+        .with_imu_mode(ImuMode::Quaternion1)
+        .with_imu_encoding_state(current_imu);
+
+    let at_two_seconds = protocol.prepare_input_report(&state, 0x2a, current, 2_000_000_000);
+    let repeated_at_two_seconds =
+        protocol.prepare_input_report(&state, 0x2a, current, 2_000_000_000);
+    let at_three_seconds = protocol.prepare_input_report(&state, 0x2a, current, 3_000_000_000);
+
+    assert_eq!(repeated_at_two_seconds.bytes(), at_two_seconds.bytes());
+    assert_eq!(
+        repeated_at_two_seconds.next_timer(),
+        at_two_seconds.next_timer()
+    );
+    assert_eq!(
+        repeated_at_two_seconds
+            .next_imu_encoding_state()
+            .previous_report_ns(),
+        at_two_seconds
+            .next_imu_encoding_state()
+            .previous_report_ns()
+    );
+    assert_orientation_replay_close(
+        repeated_at_two_seconds
+            .next_imu_encoding_state()
+            .orientation(),
+        at_two_seconds.next_imu_encoding_state().orientation(),
+    );
+    assert_eq!(
+        &at_two_seconds.bytes()[..13],
+        &[
+            0x30, 0x2a, 0x80, 0, 0, 0, 0x23, 0xc1, 0xab, 0xff, 0x0f, 0, 0,
+        ]
+    );
+    assert_eq!(at_two_seconds.next_timer(), 0x2b);
+    assert_eq!(
+        at_two_seconds
+            .next_imu_encoding_state()
+            .previous_report_ns(),
+        Some(2_000_000_000)
+    );
+    assert_eq!(
+        at_three_seconds
+            .next_imu_encoding_state()
+            .previous_report_ns(),
+        Some(3_000_000_000)
+    );
+    assert_ne!(
+        &at_two_seconds.bytes()[13..],
+        &at_three_seconds.bytes()[13..]
+    );
+    assert_ne!(
+        at_two_seconds.next_imu_encoding_state().orientation(),
+        at_three_seconds.next_imu_encoding_state().orientation()
+    );
+    assert_eq!(current.imu_encoding_state(), current_imu);
+}
 
 #[test]
 fn rumble_only_report_preserves_packet_and_raw_effect_without_a_reply() {
@@ -319,10 +426,7 @@ fn facade_uses_the_explicit_input_state_even_when_the_session_is_not_ready() {
 }
 
 fn protocol(colors: Option<ControllerColors>) -> SwitchHidProtocol<Pro> {
-    SwitchHidProtocol::new(
-        colors,
-        DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-    )
+    SwitchHidProtocol::new(colors, DEVICE_INFO_ADDRESS)
 }
 
 fn reply_from(prepared: OutputPreparation<'_>) -> PreparedSubcommandReply {

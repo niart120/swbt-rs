@@ -1,0 +1,1535 @@
+{
+  "cases": [
+    {
+      "classification": "parity",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "accepted_input",
+            "committed_input": {
+              "buttons": [
+                "A"
+              ],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            },
+            "id": "committed",
+            "next_timer": 1,
+            "report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "080000",
+                "completed_at_ns": 0,
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 0,
+                "timer": 0
+              }
+            ]
+          }
+        ]
+      },
+      "id": "direct.accepted_commit",
+      "model": "pro",
+      "reporting": "direct",
+      "steps": [
+        {
+          "acceptance": "accepted",
+          "action": "send_direct",
+          "buttons": [
+            "A"
+          ],
+          "id": "accepted_input"
+        }
+      ]
+    },
+    {
+      "classification": "parity",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "rejected_input",
+            "committed_input": {
+              "buttons": [
+                "A"
+              ],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            },
+            "id": "rejected",
+            "next_timer": 1,
+            "report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "080000",
+                "completed_at_ns": 0,
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 0,
+                "timer": 0
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "020000",
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "rejected",
+                "sequence": 1,
+                "timer": 1
+              }
+            ]
+          },
+          {
+            "after_step": "retry_input",
+            "committed_input": {
+              "buttons": [
+                "X"
+              ],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            },
+            "id": "retry_committed",
+            "next_timer": 2,
+            "report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "080000",
+                "completed_at_ns": 0,
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 0,
+                "timer": 0
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "020000",
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "rejected",
+                "sequence": 1,
+                "timer": 1
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "020000",
+                "completed_at_ns": 0,
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 2,
+                "timer": 1
+              }
+            ]
+          }
+        ]
+      },
+      "id": "direct.rejected_no_commit",
+      "model": "pro",
+      "reporting": "direct",
+      "steps": [
+        {
+          "acceptance": "accepted",
+          "action": "send_direct",
+          "buttons": [
+            "A"
+          ],
+          "id": "accepted_seed"
+        },
+        {
+          "acceptance": "rejected",
+          "action": "send_direct",
+          "buttons": [
+            "X"
+          ],
+          "id": "rejected_input"
+        },
+        {
+          "acceptance": "accepted",
+          "action": "send_direct",
+          "buttons": [
+            "X"
+          ],
+          "id": "retry_input"
+        }
+      ]
+    },
+    {
+      "classification": "baseline_observation",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "second_relative_wait",
+            "id": "python_relative_retry",
+            "requested_waits_ns": [
+              1000000000,
+              1000000000
+            ],
+            "second_start_minus_first_completion_ns": 1000000000,
+            "second_start_minus_first_start_ns": 1250000000,
+            "send_attempts": [
+              {
+                "completed_at_ns": 250000000,
+                "reason": "handshake_bootstrap",
+                "started_at_ns": 0
+              },
+              {
+                "completed_at_ns": 1500000000,
+                "reason": "handshake_bootstrap",
+                "started_at_ns": 1250000000
+              }
+            ]
+          }
+        ]
+      },
+      "id": "handshake.retry_after_send_latency",
+      "model": "pro",
+      "reporting": "model-independent",
+      "steps": [
+        {
+          "action": "start_handshake",
+          "bootstrap_retry_ns": 1000000000,
+          "id": "start_not_ready",
+          "protocol_ready": false
+        },
+        {
+          "action": "send_bootstrap",
+          "id": "first_bootstrap",
+          "latency_ns": 250000000
+        },
+        {
+          "action": "wait_after_completion",
+          "duration_ns": 1000000000,
+          "id": "relative_wait"
+        },
+        {
+          "action": "send_bootstrap",
+          "id": "second_bootstrap",
+          "latency_ns": 250000000
+        },
+        {
+          "action": "wait_after_completion",
+          "duration_ns": 1000000000,
+          "id": "second_relative_wait"
+        }
+      ]
+    },
+    {
+      "classification": "baseline_observation",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "accepted_seed",
+            "id": "accepted_epoch",
+            "protocol_session": {
+              "imu_mode": 2,
+              "imu_previous_report_ns": 1000000000,
+              "observed_subcommands": [],
+              "player_lights": null,
+              "protocol_ready": false,
+              "report_mode": null,
+              "report_mode_supported": false,
+              "vibration_enabled": false
+            }
+          },
+          {
+            "after_step": "rejected_input",
+            "committed_input": {
+              "buttons": [
+                "A"
+              ],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  1000
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  1000
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  1000
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            },
+            "id": "python_advances_before_acceptance",
+            "next_timer": 1,
+            "protocol_session": {
+              "imu_mode": 2,
+              "imu_previous_report_ns": 2000000000,
+              "observed_subcommands": [],
+              "player_lights": null,
+              "protocol_ready": false,
+              "report_mode": null,
+              "report_mode_supported": false,
+              "vibration_enabled": false
+            },
+            "report_attempts": [
+              {
+                "attempted_at_ns": 1000000000,
+                "button_hex": "080000",
+                "completed_at_ns": 1000000000,
+                "imu_hex": "0000000000000e000000000000000000000000000000000000000000000000000000f40d",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 0,
+                "timer": 0
+              },
+              {
+                "attempted_at_ns": 2000000000,
+                "button_hex": "020000",
+                "imu_hex": "000000000000aa8e5700000000000000000000000000000000000000000000000000e80f",
+                "report_id": 48,
+                "result": "rejected",
+                "sequence": 1,
+                "timer": 1
+              }
+            ]
+          },
+          {
+            "after_step": "retry_same_time",
+            "committed_input": {
+              "buttons": [
+                "X"
+              ],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  2000
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  2000
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  2000
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            },
+            "id": "same_time_retry",
+            "next_timer": 2,
+            "protocol_session": {
+              "imu_mode": 2,
+              "imu_previous_report_ns": 2000000000,
+              "observed_subcommands": [],
+              "player_lights": null,
+              "protocol_ready": false,
+              "report_mode": null,
+              "report_mode_supported": false,
+              "vibration_enabled": false
+            },
+            "report_attempts": [
+              {
+                "attempted_at_ns": 1000000000,
+                "button_hex": "080000",
+                "completed_at_ns": 1000000000,
+                "imu_hex": "0000000000000e000000000000000000000000000000000000000000000000000000f40d",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 0,
+                "timer": 0
+              },
+              {
+                "attempted_at_ns": 2000000000,
+                "button_hex": "020000",
+                "imu_hex": "000000000000aa8e5700000000000000000000000000000000000000000000000000e80f",
+                "report_id": 48,
+                "result": "rejected",
+                "sequence": 1,
+                "timer": 1
+              },
+              {
+                "attempted_at_ns": 2000000000,
+                "button_hex": "020000",
+                "completed_at_ns": 2000000000,
+                "imu_hex": "000000000000aa8e5700000000000000000000000000000000000000000000000000e80f",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 2,
+                "timer": 1
+              }
+            ],
+            "retry_wire_matches_rejected": true
+          }
+        ]
+      },
+      "id": "imu.rejected_quaternion_input",
+      "model": "pro",
+      "reporting": "direct",
+      "steps": [
+        {
+          "action": "set_imu_mode",
+          "id": "enable_quaternion_mode",
+          "imu_mode": 2
+        },
+        {
+          "acceptance": "accepted",
+          "action": "send_direct",
+          "at_ns": 1000000000,
+          "buttons": [
+            "A"
+          ],
+          "id": "accepted_seed",
+          "imu_gyro_z": 1000
+        },
+        {
+          "acceptance": "rejected",
+          "action": "send_direct",
+          "at_ns": 2000000000,
+          "buttons": [
+            "X"
+          ],
+          "id": "rejected_input",
+          "imu_gyro_z": 2000
+        },
+        {
+          "acceptance": "accepted",
+          "action": "send_direct",
+          "at_ns": 2000000000,
+          "buttons": [
+            "X"
+          ],
+          "id": "retry_same_time",
+          "imu_gyro_z": 2000
+        }
+      ]
+    },
+    {
+      "classification": "parity",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "disconnect",
+            "before_disconnect": {
+              "buttons": [
+                "A"
+              ],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            },
+            "committed_input": {
+              "buttons": [],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            },
+            "connection_state": "closed",
+            "id": "neutralized"
+          }
+        ]
+      },
+      "id": "periodic.disconnect_neutralize",
+      "model": "pro",
+      "reporting": "periodic",
+      "steps": [
+        {
+          "action": "complete_protocol_handshake",
+          "id": "connect_ready"
+        },
+        {
+          "action": "press",
+          "buttons": [
+            "A"
+          ],
+          "id": "press"
+        },
+        {
+          "action": "transport_disconnect",
+          "id": "disconnect",
+          "reason": 19
+        }
+      ]
+    },
+    {
+      "classification": "baseline_observation",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "first_current",
+            "first_current_report_attempts": [
+              {
+                "attempted_at_ns": 300000000,
+                "button_hex": "080000",
+                "completed_at_ns": 300000000,
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 3,
+                "timer": 3
+              }
+            ],
+            "handshake_report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "000000",
+                "completed_at_ns": 0,
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 0,
+                "timer": 0
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "000000",
+                "completed_at_ns": 0,
+                "report_id": 33,
+                "result": "accepted",
+                "sequence": 1,
+                "subcommand_id": 3,
+                "timer": 1
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "000000",
+                "completed_at_ns": 0,
+                "report_id": 33,
+                "result": "accepted",
+                "sequence": 2,
+                "subcommand_id": 48,
+                "timer": 2
+              }
+            ],
+            "id": "python_carries_state",
+            "preconnection_input": {
+              "buttons": [
+                "A"
+              ],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            }
+          }
+        ]
+      },
+      "id": "periodic.pre_connection_update",
+      "model": "pro",
+      "reporting": "periodic",
+      "steps": [
+        {
+          "action": "open_runtime",
+          "connection_state": "opened",
+          "id": "open_runtime"
+        },
+        {
+          "action": "press",
+          "buttons": [
+            "A"
+          ],
+          "id": "preconnection_press"
+        },
+        {
+          "action": "complete_protocol_handshake",
+          "id": "connect_ready"
+        },
+        {
+          "action": "send_current_input",
+          "id": "first_current"
+        }
+      ]
+    },
+    {
+      "classification": "parity",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "new_mode_input",
+            "id": "accepted_order",
+            "next_timer": 3,
+            "protocol_session": {
+              "imu_mode": 2,
+              "imu_previous_report_ns": 0,
+              "observed_subcommands": [],
+              "player_lights": null,
+              "protocol_ready": false,
+              "report_mode": null,
+              "report_mode_supported": false,
+              "vibration_enabled": false
+            },
+            "report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "000000",
+                "completed_at_ns": 0,
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 0,
+                "timer": 0
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "000000",
+                "completed_at_ns": 0,
+                "report_id": 33,
+                "result": "accepted",
+                "sequence": 1,
+                "subcommand_id": 64,
+                "timer": 1
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "000000",
+                "completed_at_ns": 0,
+                "imu_hex": "0000000000100e000000000000000000001000000000000000000000001000000000000c",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 2,
+                "timer": 2
+              }
+            ]
+          }
+        ]
+      },
+      "id": "sender.imu_mode_inflight_order",
+      "model": "pro",
+      "reporting": "periodic",
+      "steps": [
+        {
+          "action": "commit_input",
+          "buttons": [],
+          "id": "seed_input",
+          "imu_frames": [
+            {
+              "accel": [
+                0,
+                0,
+                4096
+              ],
+              "gyro": [
+                0,
+                0,
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "action": "block_input_snapshot",
+          "id": "old_mode_snapshot"
+        },
+        {
+          "action": "queue_subcommand_reply",
+          "id": "imu_request",
+          "subcommand_id": 64
+        },
+        {
+          "action": "release_input_snapshot",
+          "id": "release_snapshot"
+        },
+        {
+          "action": "send_current_input",
+          "id": "new_mode_input"
+        }
+      ]
+    },
+    {
+      "classification": "parity",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "device_info",
+            "committed_input": {
+              "buttons": [
+                "A"
+              ],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            },
+            "id": "neutral_prefix",
+            "protocol_session": {
+              "imu_mode": 0,
+              "imu_previous_report_ns": null,
+              "observed_subcommands": [
+                2
+              ],
+              "player_lights": null,
+              "protocol_ready": false,
+              "report_mode": null,
+              "report_mode_supported": false,
+              "vibration_enabled": false
+            },
+            "report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "000000",
+                "completed_at_ns": 0,
+                "report_id": 33,
+                "result": "accepted",
+                "sequence": 0,
+                "subcommand_id": 2,
+                "timer": 0
+              }
+            ]
+          }
+        ]
+      },
+      "id": "sender.pre_ready_neutral_prefix",
+      "model": "pro",
+      "reporting": "model-independent",
+      "steps": [
+        {
+          "action": "commit_input",
+          "buttons": [
+            "A"
+          ],
+          "id": "seed_input"
+        },
+        {
+          "acceptance": "accepted",
+          "action": "dispatch_subcommand",
+          "id": "device_info",
+          "pre_transition_ready": false,
+          "subcommand_id": 2
+        }
+      ]
+    },
+    {
+      "classification": "parity",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "device_info",
+            "committed_input": {
+              "buttons": [
+                "A"
+              ],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            },
+            "id": "current_prefix",
+            "protocol_session": {
+              "imu_mode": 0,
+              "imu_previous_report_ns": null,
+              "observed_subcommands": [
+                2
+              ],
+              "player_lights": 1,
+              "protocol_ready": true,
+              "report_mode": 48,
+              "report_mode_supported": true,
+              "vibration_enabled": false
+            },
+            "report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "080000",
+                "completed_at_ns": 0,
+                "report_id": 33,
+                "result": "accepted",
+                "sequence": 0,
+                "subcommand_id": 2,
+                "timer": 0
+              }
+            ]
+          }
+        ]
+      },
+      "id": "sender.ready_current_prefix",
+      "model": "pro",
+      "reporting": "model-independent",
+      "steps": [
+        {
+          "action": "commit_input",
+          "buttons": [
+            "A"
+          ],
+          "id": "seed_input"
+        },
+        {
+          "action": "set_protocol_session",
+          "id": "seed_ready_session",
+          "player_lights": 1,
+          "protocol_ready": true,
+          "report_mode": 48
+        },
+        {
+          "acceptance": "accepted",
+          "action": "dispatch_subcommand",
+          "id": "device_info",
+          "pre_transition_ready": true,
+          "subcommand_id": 2
+        }
+      ]
+    },
+    {
+      "classification": "parity",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "input_2",
+            "id": "shared_sequence",
+            "next_timer": 3,
+            "report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "000000",
+                "completed_at_ns": 0,
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 0,
+                "timer": 0
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "000000",
+                "completed_at_ns": 0,
+                "report_id": 33,
+                "result": "accepted",
+                "sequence": 1,
+                "subcommand_id": 2,
+                "timer": 1
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "000000",
+                "completed_at_ns": 0,
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 2,
+                "timer": 2
+              }
+            ]
+          }
+        ]
+      },
+      "id": "sender.shared_timer",
+      "model": "pro",
+      "reporting": "model-independent",
+      "steps": [
+        {
+          "acceptance": "accepted",
+          "action": "send_input",
+          "buttons": [],
+          "id": "input_0"
+        },
+        {
+          "acceptance": "accepted",
+          "action": "send_reply",
+          "id": "reply_1",
+          "subcommand_id": 2
+        },
+        {
+          "acceptance": "accepted",
+          "action": "send_input",
+          "buttons": [],
+          "id": "input_2"
+        }
+      ]
+    },
+    {
+      "classification": "parity",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "rejected_reply",
+            "automatic_holdoff_until_ns": 0,
+            "id": "reply_rejected",
+            "next_timer": 0,
+            "protocol_session": {
+              "imu_mode": 0,
+              "imu_previous_report_ns": null,
+              "observed_subcommands": [
+                64
+              ],
+              "player_lights": 1,
+              "protocol_ready": true,
+              "report_mode": 48,
+              "report_mode_supported": true,
+              "vibration_enabled": false
+            },
+            "report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "080000",
+                "report_id": 33,
+                "result": "rejected",
+                "sequence": 0,
+                "subcommand_id": 64,
+                "timer": 0
+              }
+            ]
+          },
+          {
+            "after_step": "heldoff_input",
+            "automatic_holdoff_until_ns": 300000000,
+            "automatic_input_sent": false,
+            "id": "accepted_reply_holds_off_periodic",
+            "next_timer": 1,
+            "protocol_session": {
+              "imu_mode": 2,
+              "imu_previous_report_ns": null,
+              "observed_subcommands": [
+                64
+              ],
+              "player_lights": 1,
+              "protocol_ready": true,
+              "report_mode": 48,
+              "report_mode_supported": true,
+              "vibration_enabled": false
+            },
+            "report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "080000",
+                "report_id": 33,
+                "result": "rejected",
+                "sequence": 0,
+                "subcommand_id": 64,
+                "timer": 0
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "080000",
+                "completed_at_ns": 0,
+                "report_id": 33,
+                "result": "accepted",
+                "sequence": 1,
+                "subcommand_id": 64,
+                "timer": 0
+              }
+            ]
+          },
+          {
+            "after_step": "new_mode_input",
+            "automatic_holdoff_until_ns": 300000000,
+            "automatic_input_sent": true,
+            "id": "retry_then_input",
+            "next_timer": 2,
+            "protocol_session": {
+              "imu_mode": 2,
+              "imu_previous_report_ns": 300000000,
+              "observed_subcommands": [
+                64
+              ],
+              "player_lights": 1,
+              "protocol_ready": true,
+              "report_mode": 48,
+              "report_mode_supported": true,
+              "vibration_enabled": false
+            },
+            "report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "080000",
+                "report_id": 33,
+                "result": "rejected",
+                "sequence": 0,
+                "subcommand_id": 64,
+                "timer": 0
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "080000",
+                "completed_at_ns": 0,
+                "report_id": 33,
+                "result": "accepted",
+                "sequence": 1,
+                "subcommand_id": 64,
+                "timer": 0
+              },
+              {
+                "attempted_at_ns": 300000000,
+                "button_hex": "080000",
+                "completed_at_ns": 300000000,
+                "imu_hex": "0000000000000e000000000000000000000000000000000000000000000000000000960c",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 2,
+                "timer": 1
+              }
+            ]
+          }
+        ]
+      },
+      "id": "subcommand.imu_mode_rejected_reply",
+      "model": "pro",
+      "reporting": "model-independent",
+      "steps": [
+        {
+          "action": "commit_input",
+          "buttons": [
+            "A"
+          ],
+          "id": "seed_input"
+        },
+        {
+          "action": "set_protocol_session",
+          "id": "seed_ready_session",
+          "player_lights": 1,
+          "protocol_ready": true,
+          "report_mode": 48
+        },
+        {
+          "acceptance": "rejected",
+          "action": "dispatch_subcommand",
+          "id": "rejected_reply",
+          "subcommand_id": 64
+        },
+        {
+          "acceptance": "accepted",
+          "action": "dispatch_subcommand",
+          "id": "accepted_retry",
+          "subcommand_id": 64
+        },
+        {
+          "acceptance": "suppressed",
+          "action": "send_automatic_input",
+          "id": "heldoff_input"
+        },
+        {
+          "action": "advance_clock",
+          "duration_ns": 300000000,
+          "id": "holdoff_boundary"
+        },
+        {
+          "acceptance": "accepted",
+          "action": "send_automatic_input",
+          "id": "new_mode_input"
+        }
+      ]
+    },
+    {
+      "classification": "parity",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "release_report",
+            "committed_input": {
+              "buttons": [
+                "A",
+                "ZL"
+              ],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            },
+            "id": "pressed_state_retained",
+            "report_attempts": [
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "080080",
+                "completed_at_ns": 0,
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 4,
+                "timer": 4
+              },
+              {
+                "attempted_at_ns": 0,
+                "button_hex": "000080",
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "rejected",
+                "sequence": 5,
+                "timer": 5
+              }
+            ],
+            "transport_rejection_propagated": true
+          }
+        ]
+      },
+      "id": "tap.direct_release_rejected",
+      "model": "pro",
+      "reporting": "direct",
+      "steps": [
+        {
+          "action": "complete_protocol_handshake",
+          "id": "connect_ready"
+        },
+        {
+          "acceptance": "accepted",
+          "action": "send_direct",
+          "buttons": [
+            "ZL"
+          ],
+          "id": "seed_held_input"
+        },
+        {
+          "acceptance": "accepted",
+          "action": "tap_press",
+          "buttons": [
+            "A"
+          ],
+          "id": "press_report"
+        },
+        {
+          "acceptance": "rejected",
+          "action": "tap_release",
+          "buttons": [
+            "A"
+          ],
+          "id": "release_report"
+        }
+      ]
+    },
+    {
+      "classification": "parity",
+      "expected": {
+        "checkpoints": [
+          {
+            "after_step": "release_report",
+            "committed_input": {
+              "buttons": [
+                "ZL"
+              ],
+              "imu_frames": [
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "left_stick": [
+                2048,
+                2048
+              ],
+              "right_stick": [
+                2048,
+                2048
+              ]
+            },
+            "id": "released_state_retained",
+            "report_attempts": [
+              {
+                "attempted_at_ns": 300000000,
+                "button_hex": "080080",
+                "completed_at_ns": 300000000,
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "accepted",
+                "sequence": 3,
+                "timer": 3
+              },
+              {
+                "attempted_at_ns": 300000000,
+                "button_hex": "000080",
+                "imu_hex": "000000000000000000000000000000000000000000000000000000000000000000000000",
+                "report_id": 48,
+                "result": "rejected",
+                "sequence": 4,
+                "timer": 4
+              }
+            ],
+            "transport_rejection_propagated": true
+          }
+        ]
+      },
+      "id": "tap.periodic_release_rejected",
+      "model": "pro",
+      "reporting": "periodic",
+      "steps": [
+        {
+          "action": "complete_protocol_handshake",
+          "id": "connect_ready"
+        },
+        {
+          "action": "commit_periodic_input",
+          "buttons": [
+            "ZL"
+          ],
+          "id": "seed_held_input"
+        },
+        {
+          "acceptance": "accepted",
+          "action": "tap_press",
+          "buttons": [
+            "A"
+          ],
+          "id": "press_report"
+        },
+        {
+          "acceptance": "rejected",
+          "action": "tap_release",
+          "buttons": [
+            "A"
+          ],
+          "id": "release_report"
+        }
+      ]
+    }
+  ],
+  "format": "swbt.runtime-semantics",
+  "generator": "tools/generate_python_runtime_fixtures.py",
+  "python_version": "3.13",
+  "schema_version": 1,
+  "source_commit": "84d2723b127f70fc78e12f4496f5c40af0ccfb0a",
+  "source_paths": [
+    "src/swbt/diagnostics.py",
+    "src/swbt/errors.py",
+    "src/swbt/gamepad/_config.py",
+    "src/swbt/gamepad/connection.py",
+    "src/swbt/gamepad/output.py",
+    "src/swbt/gamepad/protocol_handshake.py",
+    "src/swbt/gamepad/runtime.py",
+    "src/swbt/imu.py",
+    "src/swbt/input.py",
+    "src/swbt/protocol/buttons.py",
+    "src/swbt/protocol/imu_report.py",
+    "src/swbt/protocol/input_report.py",
+    "src/swbt/protocol/output_report.py",
+    "src/swbt/protocol/profiles/base.py",
+    "src/swbt/protocol/profiles/pro_controller.py",
+    "src/swbt/protocol/session.py",
+    "src/swbt/protocol/spi.py",
+    "src/swbt/protocol/subcommand.py",
+    "src/swbt/report_loop.py",
+    "src/swbt/state_store.py",
+    "src/swbt/transport/base.py",
+    "src/swbt/transport/fake.py"
+  ],
+  "source_repository": "https://github.com/niart120/swbt-python",
+  "source_tree": "ee0654eac1d443e7814eb9816bd9d75328ff8485",
+  "source_version": "0.6.0"
+}

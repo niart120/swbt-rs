@@ -4,7 +4,9 @@ use crate::{input::InputState, model::ControllerModel, profile::ControllerColors
 
 use super::{
     error::ProtocolError,
-    output_report::{OutputReport, RawRumble, SubcommandRequest, parse_output_report},
+    imu::{ImuEncodingState, encode_imu_block},
+    input_report::{PreparedInputReport, encode_0x30},
+    output_report::SubcommandRequest,
     session::ProtocolSession,
     spi::VirtualSpiFlash,
     subcommand::{
@@ -13,6 +15,32 @@ use super::{
     },
 };
 
+#[cfg(test)]
+use super::output_report::{OutputReport, RawRumble, parse_output_report};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct InputPreparation {
+    report: PreparedInputReport,
+    next_imu_encoding_state: ImuEncodingState,
+}
+
+impl InputPreparation {
+    #[must_use]
+    pub(crate) const fn bytes(&self) -> &[u8; 49] {
+        self.report.bytes()
+    }
+
+    #[must_use]
+    pub(crate) const fn next_timer(self) -> u8 {
+        self.report.next_timer()
+    }
+
+    #[must_use]
+    pub(crate) const fn next_imu_encoding_state(self) -> ImuEncodingState {
+        self.next_imu_encoding_state
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum PreparedOutputAction {
     Reply(PreparedSubcommandReply),
@@ -20,6 +48,7 @@ pub(crate) enum PreparedOutputAction {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg(test)]
 pub(crate) enum OutputPreparation<'a> {
     RumbleOnly {
         packet_id: u8,
@@ -40,16 +69,42 @@ pub(crate) struct SwitchHidProtocol<M: ControllerModel> {
 
 impl<M: ControllerModel> SwitchHidProtocol<M> {
     #[must_use]
-    pub(crate) fn new(
-        colors: Option<ControllerColors>,
-        device_info_address: DeviceInfoBluetoothAddress,
-    ) -> Self {
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T31 and T33 controller orchestration construct the protocol"
+        )
+    )]
+    pub(crate) fn new(colors: Option<ControllerColors>, device_info_address: [u8; 6]) -> Self {
         Self {
             spi: VirtualSpiFlash::new(colors),
-            device_info_address,
+            device_info_address: DeviceInfoBluetoothAddress::from_wire_bytes(device_info_address),
         }
     }
 
+    #[must_use]
+    pub(crate) fn prepare_input_report(
+        &self,
+        state: &InputState<M>,
+        timer: u8,
+        current_session: ProtocolSession,
+        now_ns: u64,
+    ) -> InputPreparation {
+        let imu = encode_imu_block(
+            current_session.imu_encoding_state(),
+            current_session.imu_mode(),
+            state.imu_frames(),
+            M::SPEC.protocol.gyroscope_calibration,
+            now_ns,
+        );
+        InputPreparation {
+            report: encode_0x30(state, timer, imu.block()),
+            next_imu_encoding_state: imu.next_state(),
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn prepare_output_report<'a>(
         &self,
         raw: &'a [u8],
@@ -78,7 +133,7 @@ impl<M: ControllerModel> SwitchHidProtocol<M> {
         }
     }
 
-    fn prepare_subcommand(
+    pub(crate) fn prepare_subcommand(
         &self,
         request: SubcommandRequest<'_>,
         state: &InputState<M>,
