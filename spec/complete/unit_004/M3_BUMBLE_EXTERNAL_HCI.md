@@ -445,22 +445,22 @@ M3 で claim/reset するのは CSR8510 A10 だけとする。MediaTek は Windo
 
 - `Cargo.toml`
 - `Cargo.lock`
-- `deny.toml`
+- `README.md`
 - `src/lib.rs`
-- `src/adapter.rs` または `src/adapter/`
+- `src/adapter.rs`
 - `src/error.rs`
-- `src/model/`
-- `src/runtime/transport/`
-- `src/runtime/worker.rs`
-- `src/controller/runtime.rs`
-- `src/controller/mod.rs`
+- `src/controller/`
+- `src/profile/store.rs`
+- `src/protocol/`
+- `src/reporting/mod.rs`
+- `src/runtime/`
 - `tests/adapter_discovery.rs`
 - `tests/adapter_open.rs`
-- `.github/workflows/ci.yml`
-- `spec/wip/unit_004/`
+- `tests/backend_unavailable_contract.rs`
+- `spec/complete/unit_004/`
 
-対象ファイルは TDD cycle で必要性を確認してから追加する。初期設計の directory tree を
-先回りして空 module にしない。
+TDD cycle で必要性を確認したファイルだけを変更した。`deny.toml` と CI workflow は追加せず、
+license policy の機械化は M9 に先送りした。
 
 ## 9. 検証
 
@@ -511,20 +511,35 @@ fake test の成功を USB claim/release、HCI 応答、unplug、100-run の根�
 upstream gate の activity callback、reader cancellation/join、typed reader error は M4 に
 先送りしない。M3 completion checklist の前提として解消する。
 
+### 10.1 self-review
+
+M3 の完了を妨げる未解決事項はない。残る risk と未実行検証は次の範囲に限定される。
+
+- reader lifecycle 修正は公式 upstream に未統合の public fork revision に依存する。ユーザの
+  許可境界により upstream PR は作成していない。撤去条件は 5.8 に固定した。
+- target CSR8510 A10 は serial descriptor を持たないため、serial selector の実機 open は
+  対象外だった。index、VID/PID、occurrence、bus/port の4経路は同一実機で成功した。
+- permission/driver failure を作る driver/device 状態変更は実行していない。この分類は T08 の
+  typed source 注入 test を根拠とし、現在の WinUSB 成功経路とは分けて扱う。
+- unplug は1回、clean build time は各構成1回の観測であり、反復統計ではない。長時間診断と
+  安定した diagnostics schema は M8 の対象とする。
+- license inventory は Windows target の declared metadata に限る。`cargo-deny`、advisory、
+  全 target license、SBOM、notice/source compliance は M9 の release evidence で確認する。
+
 ## 11. 完了チェックリスト
 
-- [ ] T01-T10 がすべて完了している
-- [ ] public API に Bumble/rusb 型を公開していない
-- [ ] no-open discovery が handle open/claim を行わない
-- [ ] CSR8510 A10 の local address、HCI/LMP version、Classic capability を記録した
-- [ ] unplug が `TransportEnded` となり reader/outer worker を回収した
-- [ ] 100 回の open/init/close が全件成功し、同 adapter を reopen できた
-- [ ] `Controller::open` / close / reopen が idempotent
-- [ ] M3 の `pair()` が成功を捏造しない
-- [ ] Rust 1.87 と通常 quality gate が成功した
-- [ ] build time/size と license report を記録した
-- [ ] upstream/fork revision、差分、撤去条件を記録した
-- [ ] M2 の M3 向け temporary `dead_code` 属性を撤去した
-- [ ] placeholder、未根拠の完了表現、secret を含む evidence が残っていない
-- [ ] self-review で未実行検証と residual risk を明記した
-- [ ] `spec/complete/unit_004/` へ移動した
+- [x] T01-T10 がすべて完了している
+- [x] public API に Bumble/rusb 型を公開していない
+- [x] no-open discovery が handle open/claim を行わない
+- [x] CSR8510 A10 の local address、HCI/LMP version、Classic capability を記録した
+- [x] unplug が `TransportEnded` となり reader/outer worker を回収した
+- [x] 100 回の open/init/close が全件成功し、同 adapter を reopen できた
+- [x] `Controller::open` / close / reopen が idempotent
+- [x] M3 の `pair()` が成功を捏造しない
+- [x] Rust 1.87 と通常 quality gate が成功した
+- [x] build time/size と license report を記録した
+- [x] upstream/fork revision、差分、撤去条件を記録した
+- [x] M2 の M3 向け temporary `dead_code` 属性を撤去した
+- [x] placeholder、未根拠の完了表現、secret を含む evidence が残っていない
+- [x] self-review で未実行検証と residual risk を明記した
+- [x] `spec/complete/unit_004/` へ移動した
