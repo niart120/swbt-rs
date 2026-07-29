@@ -11,20 +11,22 @@ use bumble_sdp::{DataElement, SdpPdu};
 
 use crate::diagnostics::LifecycleState;
 use crate::input::{InputState, ProButton};
-use crate::model::{ControllerModel, Pro};
+use crate::model::{ControllerModel, JoyConL, JoyConR, Pro};
 use crate::protocol::SwitchHidProtocol;
-use crate::reporting::Periodic;
+use crate::reporting::{Direct, Periodic, ReportingMode};
 use crate::runtime::cleanup::CloseMode;
-use crate::runtime::status::status_projection;
+use crate::runtime::status::{StatusReader, status_projection};
 use crate::runtime::worker::{
     CommandSource, CommonCommand, MonotonicClock, PeriodicCommand, PriorityShutdown,
-    RuntimeCommand, ShutdownRequest, WorkerBudget, WorkerCommandProgress, WorkerCore, WorkerStep,
+    RuntimeCommand, ShutdownRequest, WorkerBudget, WorkerCommandProgress, WorkerCore,
+    WorkerReporting, WorkerStep,
 };
 
 use super::classic::{ClassicDeviceSession, HID_CONTROL_PSM, HID_INTERRUPT_PSM, SDP_PSM};
 use super::{
-    ActivityNotifier, SendAcceptance, TransportCapabilities, TransportConfig, TransportError,
-    TransportErrorKind, TransportEvent, TransportPort, TransportResult, activity_channel,
+    ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities, TransportConfig,
+    TransportError, TransportErrorKind, TransportEvent, TransportPort, TransportResult,
+    activity_channel,
 };
 
 const PEER_ADDRESS: &str = "11:11:11:11:11:11";
@@ -159,12 +161,265 @@ fn pro_periodic_reaches_ready_and_emits_typed_then_neutral_input() {
     assert!(trace.closed);
 }
 
+#[test]
+fn all_model_reporting_combinations_reach_ready_over_the_virtual_packet_path() {
+    run_periodic_case::<Pro>();
+    run_direct_case::<Pro>();
+    run_periodic_case::<JoyConL>();
+    run_direct_case::<JoyConL>();
+    run_periodic_case::<JoyConR>();
+    run_direct_case::<JoyConR>();
+}
+
+#[test]
+fn reverse_channels_malformed_packets_and_stored_key_reconnect_remain_isolated() {
+    run_resilience_case(VirtualScenario::resilient());
+}
+
+fn run_periodic_case<M: ControllerModel>() {
+    let (transport, trace) = VirtualClassicTransport::new::<M>();
+    let (status, reader) = status_projection();
+    let mut worker = WorkerCore::new_periodic_with_status(
+        SwitchHidProtocol::<M>::new(None, DEVICE_INFO_ADDRESS),
+        Box::new(transport),
+        REPORT_PERIOD,
+        WorkerBudget::new(2, 4),
+        Box::new(|_| {}),
+        status,
+    )
+    .expect("valid Periodic worker");
+    let mut commands = QueuedCommands::from([RuntimeCommand::<M, Periodic>::Pair {
+        timeout: CONNECTION_TIMEOUT,
+    }]);
+    let mut clock = ManualClock::default();
+    let mut shutdown = ShutdownLatch::default();
+    drive_until_ready(
+        &mut worker,
+        &reader,
+        &mut clock,
+        &mut shutdown,
+        &mut commands,
+    );
+    assert_common_virtual_trace(&trace, 1);
+    close_ready_worker(&mut worker, &reader, &clock, &mut shutdown, &mut commands);
+}
+
+fn run_direct_case<M: ControllerModel>() {
+    let (transport, trace) = VirtualClassicTransport::new::<M>();
+    let (status, reader) = status_projection();
+    let mut worker = WorkerCore::new_direct_with_status(
+        SwitchHidProtocol::<M>::new(None, DEVICE_INFO_ADDRESS),
+        Box::new(transport),
+        WorkerBudget::new(2, 4),
+        Box::new(|_| {}),
+        status,
+    );
+    let mut commands = QueuedCommands::from([RuntimeCommand::<M, Direct>::Pair {
+        timeout: CONNECTION_TIMEOUT,
+    }]);
+    let mut clock = ManualClock::default();
+    let mut shutdown = ShutdownLatch::default();
+    drive_until_ready(
+        &mut worker,
+        &reader,
+        &mut clock,
+        &mut shutdown,
+        &mut commands,
+    );
+    assert_common_virtual_trace(&trace, 1);
+    close_ready_worker(&mut worker, &reader, &clock, &mut shutdown, &mut commands);
+}
+
+fn run_resilience_case(scenario: VirtualScenario) {
+    let (transport, trace) = VirtualClassicTransport::new_with_scenario::<Pro>(scenario);
+    let (status, reader) = status_projection();
+    let mut worker = WorkerCore::new_direct_with_status(
+        SwitchHidProtocol::<Pro>::new(None, DEVICE_INFO_ADDRESS),
+        Box::new(transport),
+        WorkerBudget::new(2, 4),
+        Box::new(|_| {}),
+        status,
+    );
+    let mut commands = QueuedCommands::from([RuntimeCommand::<Pro, Direct>::Pair {
+        timeout: CONNECTION_TIMEOUT,
+    }]);
+    let mut clock = ManualClock::default();
+    let mut shutdown = ShutdownLatch::default();
+    drive_until_ready(
+        &mut worker,
+        &reader,
+        &mut clock,
+        &mut shutdown,
+        &mut commands,
+    );
+    {
+        let trace = lock(&trace);
+        assert_eq!(
+            trace.hid_open_order.as_slice(),
+            [HidChannel::Interrupt, HidChannel::Control]
+        );
+        assert!(trace.malformed_sdp_rejected);
+        assert!(trace.malformed_hidp_rejected);
+    }
+
+    lock(&trace).request_peer_disconnect = true;
+    for _ in 0..20 {
+        let WorkerStep::Continue(mut progress) =
+            worker.step_runtime(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("peer disconnect remains a recoverable worker event");
+        };
+        assert_command_successes(&mut progress);
+        if reader.status::<Direct>().lifecycle == LifecycleState::Open {
+            break;
+        }
+        clock.advance(STEP);
+    }
+    assert_eq!(reader.status::<Direct>().lifecycle, LifecycleState::Open);
+    assert!(!reader.status::<Direct>().connected);
+
+    commands.push(RuntimeCommand::Pair {
+        timeout: CONNECTION_TIMEOUT,
+    });
+    drive_until_ready(
+        &mut worker,
+        &reader,
+        &mut clock,
+        &mut shutdown,
+        &mut commands,
+    );
+    assert_common_virtual_trace(&trace, 2);
+    {
+        let trace = lock(&trace);
+        assert_eq!(trace.peer_disconnects, 1);
+        assert!(trace.sdp_completions >= 2);
+        assert_eq!(
+            trace.hid_open_order.as_slice(),
+            [
+                HidChannel::Interrupt,
+                HidChannel::Control,
+                HidChannel::Interrupt,
+                HidChannel::Control,
+            ]
+        );
+    }
+    close_ready_worker(&mut worker, &reader, &clock, &mut shutdown, &mut commands);
+}
+
+fn drive_until_ready<M, R>(
+    worker: &mut WorkerCore<M, R>,
+    reader: &StatusReader<M>,
+    clock: &mut ManualClock,
+    shutdown: &mut ShutdownLatch,
+    commands: &mut QueuedCommands<RuntimeCommand<M, R>>,
+) where
+    M: ControllerModel,
+    R: ReportingMode + WorkerReporting<M>,
+{
+    let mut pair_completed = false;
+    for _ in 0..100 {
+        let WorkerStep::Continue(mut progress) = worker.step_runtime(clock, shutdown, commands)
+        else {
+            panic!("virtual pairing must keep the worker running");
+        };
+        for completion in progress.take_command_results() {
+            match completion {
+                WorkerCommandProgress::Pending => {}
+                WorkerCommandProgress::Complete(Ok(())) => pair_completed = true,
+                WorkerCommandProgress::Complete(Err(error)) => {
+                    panic!("virtual pairing command failed: {error:?}")
+                }
+            }
+        }
+        if reader.status::<R>().lifecycle == LifecycleState::Ready {
+            break;
+        }
+        clock.advance(STEP);
+    }
+    assert_eq!(reader.status::<R>().lifecycle, LifecycleState::Ready);
+    assert!(reader.status::<R>().connected);
+    assert_eq!(reader.status::<R>().report_mode, Some(0x30));
+    assert!(pair_completed);
+}
+
+fn close_ready_worker<M, R>(
+    worker: &mut WorkerCore<M, R>,
+    reader: &StatusReader<M>,
+    clock: &ManualClock,
+    shutdown: &mut ShutdownLatch,
+    commands: &mut QueuedCommands<RuntimeCommand<M, R>>,
+) where
+    M: ControllerModel,
+    R: ReportingMode + WorkerReporting<M>,
+{
+    shutdown.request = Some(ShutdownRequest::explicit(CloseMode::WithNeutral));
+    let WorkerStep::Closed {
+        completion,
+        interrupted,
+        ..
+    } = worker.step_runtime(clock, shutdown, commands)
+    else {
+        panic!("explicit shutdown must close the virtual worker");
+    };
+    assert!(completion.performed());
+    assert!(interrupted.is_none());
+    assert_eq!(reader.status::<R>().lifecycle, LifecycleState::Closed);
+}
+
+fn assert_common_virtual_trace(trace: &Arc<Mutex<VirtualTrace>>, expected_sessions: usize) {
+    let trace = lock(trace);
+    assert!(trace.stored_key_pairing_complete);
+    assert!(trace.pairing_completions >= expected_sessions);
+    assert!(trace.sdp_record_complete);
+    assert!(trace.sdp_rounds > expected_sessions);
+    assert!(
+        trace
+            .input_reports
+            .iter()
+            .filter(|report| report.first() == Some(&0x30))
+            .count()
+            >= expected_sessions
+    );
+    assert!(
+        trace
+            .input_reports
+            .iter()
+            .filter(|report| report.first() == Some(&0x21))
+            .count()
+            >= expected_sessions * 2
+    );
+}
+
+#[derive(Clone, Copy, Default)]
+struct VirtualScenario {
+    reverse_hid_channels: bool,
+    malformed_sdp: bool,
+    malformed_hidp: bool,
+}
+
+impl VirtualScenario {
+    const fn resilient() -> Self {
+        Self {
+            reverse_hid_channels: true,
+            malformed_sdp: true,
+            malformed_hidp: true,
+        }
+    }
+}
+
 #[derive(Default)]
 struct VirtualTrace {
     stored_key_pairing_complete: bool,
+    pairing_completions: usize,
     sdp_rounds: usize,
+    sdp_completions: usize,
     sdp_record_complete: bool,
+    hid_open_order: Vec<HidChannel>,
+    malformed_sdp_rejected: bool,
+    malformed_hidp_rejected: bool,
     input_reports: Vec<Vec<u8>>,
+    request_peer_disconnect: bool,
+    peer_disconnects: usize,
     disconnected: bool,
     closed: bool,
 }
@@ -175,13 +430,16 @@ struct VirtualClassicTransport {
     session: ClassicDeviceSession,
     peer_address: Address,
     swbt_address: Address,
+    scenario: VirtualScenario,
     pairing_started: bool,
+    pairing_recorded: bool,
     connection_requested: bool,
     encryption_started: bool,
     ctkd_started: bool,
     sdp_cid: Option<u16>,
     sdp_continuation: Vec<u8>,
     sdp_request_in_flight: bool,
+    malformed_sdp_sent: bool,
     sdp_attributes: Vec<u8>,
     sdp_complete: bool,
     control_cid: Option<u16>,
@@ -193,6 +451,12 @@ struct VirtualClassicTransport {
 
 impl VirtualClassicTransport {
     fn new<M: ControllerModel>() -> (Self, Arc<Mutex<VirtualTrace>>) {
+        Self::new_with_scenario::<M>(VirtualScenario::default())
+    }
+
+    fn new_with_scenario<M: ControllerModel>(
+        scenario: VirtualScenario,
+    ) -> (Self, Arc<Mutex<VirtualTrace>>) {
         let peer_address = public_address(PEER_ADDRESS);
         let swbt_address = public_address(SWBT_ADDRESS);
         let mut link = LocalLink::new();
@@ -239,13 +503,16 @@ impl VirtualClassicTransport {
                 session,
                 peer_address,
                 swbt_address,
+                scenario,
                 pairing_started: false,
+                pairing_recorded: false,
                 connection_requested: false,
                 encryption_started: false,
                 ctkd_started: false,
                 sdp_cid: None,
                 sdp_continuation: vec![0],
                 sdp_request_in_flight: false,
+                malformed_sdp_sent: false,
                 sdp_attributes: Vec::new(),
                 sdp_complete: false,
                 control_cid: None,
@@ -261,13 +528,59 @@ impl VirtualClassicTransport {
     fn drive(&mut self) -> TransportResult<Vec<TransportEvent>> {
         let mut events = Vec::new();
         for _ in 0..64 {
+            self.maybe_disconnect_peer();
             pump(&mut self.link, &mut self.devices);
-            events.extend(self.session.poll(&mut self.devices[1], &mut self.link)?);
+            let polled = self.session.poll(&mut self.devices[1], &mut self.link)?;
+            for event in &polled {
+                match event {
+                    TransportEvent::HidChannelOpened { channel } => {
+                        lock(&self.trace).hid_open_order.push(*channel);
+                    }
+                    TransportEvent::Disconnected { .. } => self.reset_connection_state(),
+                    TransportEvent::Connected | TransportEvent::HidOutput { .. } => {}
+                }
+            }
+            events.extend(polled);
             pump(&mut self.link, &mut self.devices);
             self.advance_peer();
             self.collect_peer_input();
+            self.collect_peer_control();
         }
         Ok(events)
+    }
+
+    fn maybe_disconnect_peer(&mut self) {
+        let requested = {
+            let mut trace = lock(&self.trace);
+            let requested = trace.request_peer_disconnect;
+            trace.request_peer_disconnect = false;
+            requested
+        };
+        if !requested {
+            return;
+        }
+        let Some(handle) = self.devices[0].classic_connection_handle() else {
+            return;
+        };
+        assert!(self.devices[0].disconnect_handle(&mut self.link, handle, 0x13));
+        lock(&self.trace).peer_disconnects += 1;
+    }
+
+    fn reset_connection_state(&mut self) {
+        self.pairing_started = false;
+        self.pairing_recorded = false;
+        self.connection_requested = false;
+        self.encryption_started = false;
+        self.ctkd_started = false;
+        self.sdp_cid = None;
+        self.sdp_continuation = vec![0];
+        self.sdp_request_in_flight = false;
+        self.malformed_sdp_sent = false;
+        self.sdp_attributes.clear();
+        self.sdp_complete = false;
+        self.control_cid = None;
+        self.interrupt_cid = None;
+        self.peer_outputs_sent = false;
     }
 
     fn advance_peer(&mut self) {
@@ -300,7 +613,12 @@ impl VirtualClassicTransport {
         if !self.stored_key_pairing_complete() {
             return;
         }
-        lock(&self.trace).stored_key_pairing_complete = true;
+        if !self.pairing_recorded {
+            let mut trace = lock(&self.trace);
+            trace.stored_key_pairing_complete = true;
+            trace.pairing_completions += 1;
+            self.pairing_recorded = true;
+        }
 
         if self.sdp_cid.is_none() {
             self.sdp_cid = Some(
@@ -319,34 +637,53 @@ impl VirtualClassicTransport {
         if !self.sdp_complete {
             return;
         }
-        if self.control_cid.is_none() {
-            self.control_cid = Some(
-                self.devices[0]
-                    .connect_classic_channel(
-                        &mut self.link,
-                        peer_handle,
-                        HID_CONTROL_PSM,
-                        ClassicChannelSpec { mtu: 96 },
-                    )
-                    .expect("connect virtual HID control channel"),
-            );
+        let order = if self.scenario.reverse_hid_channels {
+            [HID_INTERRUPT_PSM, HID_CONTROL_PSM]
+        } else {
+            [HID_CONTROL_PSM, HID_INTERRUPT_PSM]
+        };
+        for psm in order {
+            let missing = match psm {
+                HID_CONTROL_PSM => self.control_cid.is_none(),
+                HID_INTERRUPT_PSM => self.interrupt_cid.is_none(),
+                _ => false,
+            };
+            if !missing {
+                continue;
+            }
+            let cid = self.devices[0]
+                .connect_classic_channel(
+                    &mut self.link,
+                    peer_handle,
+                    psm,
+                    ClassicChannelSpec { mtu: 96 },
+                )
+                .expect("connect virtual HID channel");
+            match psm {
+                HID_CONTROL_PSM => self.control_cid = Some(cid),
+                HID_INTERRUPT_PSM => self.interrupt_cid = Some(cid),
+                _ => unreachable!("virtual HID order contains known PSMs"),
+            }
             return;
-        }
-        if self.interrupt_cid.is_none() {
-            self.interrupt_cid = Some(
-                self.devices[0]
-                    .connect_classic_channel(
-                        &mut self.link,
-                        peer_handle,
-                        HID_INTERRUPT_PSM,
-                        ClassicChannelSpec { mtu: 96 },
-                    )
-                    .expect("connect virtual HID interrupt channel"),
-            );
         }
     }
 
     fn stored_key_pairing_complete(&mut self) -> bool {
+        let (Some(peer_handle), Some(swbt_handle)) = (
+            self.devices[0].classic_connection_handle(),
+            self.devices[1].classic_connection_handle(),
+        ) else {
+            return false;
+        };
+        let current_pairing_complete = [
+            self.devices[0].pairing_keys(peer_handle),
+            self.devices[1].pairing_keys(swbt_handle),
+        ]
+        .into_iter()
+        .all(|keys| keys.is_some_and(|keys| keys.link_key.is_some() && keys.ltk.is_some()));
+        if !current_pairing_complete {
+            return false;
+        }
         let peer_bond = self.devices[0]
             .bond(&self.swbt_address)
             .expect("read peer bond");
@@ -368,26 +705,49 @@ impl VirtualClassicTransport {
         }
         let responses = self.devices[0].take_classic_channel_sdus(peer_handle, sdp_cid);
         for response in responses {
-            let SdpPdu::ServiceSearchAttributeResponse {
-                attribute_lists,
-                continuation_state,
-                ..
-            } = SdpPdu::from_bytes(&response).expect("parse virtual SDP response")
-            else {
-                panic!("virtual peer expects a service-search-attribute response");
-            };
             self.sdp_request_in_flight = false;
-            self.sdp_attributes.extend_from_slice(&attribute_lists);
-            self.sdp_continuation = continuation_state;
-            let mut trace = lock(&self.trace);
-            trace.sdp_rounds += 1;
-            drop(trace);
-            if self.sdp_continuation == [0] {
-                self.sdp_complete = true;
-                lock(&self.trace).sdp_record_complete = matches!(DataElement::from_bytes(&self.sdp_attributes), Ok(DataElement::Sequence(records)) if !records.is_empty());
+            match SdpPdu::from_bytes(&response).expect("parse virtual SDP response") {
+                SdpPdu::ErrorResponse { .. }
+                    if self.scenario.malformed_sdp && self.malformed_sdp_sent =>
+                {
+                    lock(&self.trace).malformed_sdp_rejected = true;
+                }
+                SdpPdu::ServiceSearchAttributeResponse {
+                    attribute_lists,
+                    continuation_state,
+                    ..
+                } => {
+                    self.sdp_attributes.extend_from_slice(&attribute_lists);
+                    self.sdp_continuation = continuation_state;
+                    lock(&self.trace).sdp_rounds += 1;
+                    if self.sdp_continuation == [0] {
+                        self.sdp_complete = true;
+                        let complete_record = matches!(
+                            DataElement::from_bytes(&self.sdp_attributes),
+                            Ok(DataElement::Sequence(records)) if !records.is_empty()
+                        );
+                        let mut trace = lock(&self.trace);
+                        trace.sdp_record_complete = complete_record;
+                        trace.sdp_completions += 1;
+                    }
+                }
+                _ => panic!("virtual peer received an unexpected SDP response"),
             }
         }
         if !self.sdp_complete && !self.sdp_request_in_flight {
+            if self.scenario.malformed_sdp && !self.malformed_sdp_sent {
+                self.devices[0]
+                    .send_classic_channel_sdu(
+                        &mut self.link,
+                        peer_handle,
+                        sdp_cid,
+                        &[0x06, 0x00, 0x01, 0x00, 0x02, 0x00],
+                    )
+                    .expect("send malformed virtual SDP request");
+                self.malformed_sdp_sent = true;
+                self.sdp_request_in_flight = true;
+                return;
+            }
             let transaction_id =
                 u16::try_from(lock(&self.trace).sdp_rounds + 1).expect("SDP rounds fit u16");
             let request = SdpPdu::ServiceSearchAttributeRequest {
@@ -434,9 +794,30 @@ impl VirtualClassicTransport {
         }
     }
 
+    fn collect_peer_control(&mut self) {
+        let (Some(peer_handle), Some(control_cid)) = (
+            self.devices[0].classic_connection_handle(),
+            self.control_cid,
+        ) else {
+            return;
+        };
+        let responses = self.devices[0].take_classic_channel_sdus(peer_handle, control_cid);
+        if responses
+            .iter()
+            .any(|response| response.as_slice() == [0x04])
+        {
+            lock(&self.trace).malformed_hidp_rejected = true;
+        }
+    }
+
     fn send_peer_outputs(&mut self, peer_handle: u16) {
         let control_cid = self.control_cid.expect("control channel is connected");
         let interrupt_cid = self.interrupt_cid.expect("interrupt channel is connected");
+        if self.scenario.malformed_hidp {
+            self.devices[0]
+                .send_classic_channel_sdu(&mut self.link, peer_handle, control_cid, &[0x41])
+                .expect("send malformed virtual HIDP control message");
+        }
         let report_mode = hid_output(subcommand_report(0x03, &[0x30]));
         self.devices[0]
             .send_classic_channel_sdu(&mut self.link, peer_handle, control_cid, &report_mode)
@@ -459,6 +840,9 @@ impl TransportPort for VirtualClassicTransport {
     fn start_pairing(&mut self) -> TransportResult<()> {
         if self.closed {
             return Err(TransportError::new(TransportErrorKind::Closed));
+        }
+        if !self.pairing_started {
+            self.reset_connection_state();
         }
         self.session
             .start_pairing(&mut self.devices[1], &mut self.link)?;
@@ -483,6 +867,7 @@ impl TransportPort for VirtualClassicTransport {
         pump(&mut self.link, &mut self.devices);
         self.collect_peer_input();
         pump(&mut self.link, &mut self.devices);
+        self.collect_peer_control();
         Ok(acceptance)
     }
 

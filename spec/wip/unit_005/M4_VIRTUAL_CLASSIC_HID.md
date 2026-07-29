@@ -305,7 +305,7 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 - [x] **T07 — Pro Periodic virtual end-to-end**
   - actual `LocalLink` packet path で stored-key pairing→SDP continuation→HID→NX Ready を通す。
   - typed A input の `0x30` と neutral cleanup を peer で確認する。
-- [ ] **T08 — virtual matrix and resilience**
+- [x] **T08 — virtual matrix and resilience**
   - Pro/Joy-Con L/Joy-Con R×Periodic/Direct の6組を共通 suite で通す。
   - reverse channel order、malformed SDP/HIDP、disconnect/reconnect、旧 session event を検査する。
 - [ ] **T09 — completion gate**
@@ -323,7 +323,8 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 | refactor-done | T05 | red: `TransportPort::start_pairing` がなく worker の開始順 test は trait method 不在の compile error。green: worker が connection session 作成前に transport pairing を開始し、開始失敗を typed `PairingError::Begin` として返す。Classic session は pairing window の冪等開始、最初の peer latch、window 外と2 peer目の reject、IO capability `0x03` / OOB `0x00` / auth requirements `0x02`、confirmation positive、PIN/passkey/OOB negative、認証失敗時の即時終了を検査した。link-key request/notification は Bumble `Device` key-store path に残し、swbt の command/error/debug へ key bytes を渡さない。public `pair()` は open runtime の bounded Pair command へ接続し、closed、timeout、Ready 前 disconnect、disconnect 後の2回目成功を検査した。refactor: pairing policy は private `ClassicDeviceSession`、public command ownership は `ControllerRuntimePort`、test transport の開始観測は fake counter に分離。all-feature test 257 passed / 2 ignored、default test 231 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、all/default build、rustdoc、fmt、diff check が成功 |
 | refactor-done | T06 | red: production `BumbleTransportPort` の pairing/send/drain/disconnect は Classic session を呼ばず、poll は `Device` だけを駆動して常に空 event を返していた。green: `BumbleRuntime` が `ClassicDeviceSession` を所有し、初期化時に SDP/HID PSM を登録する。controlled external-host packet path で pairing window、incoming Classic ACL、HID interrupt channel の L2CAP signaling、`HidChannelOpened`、`send_interrupt` acceptance、未完了 ACL の `DrainTimedOut`、Number Of Completed Packets 後の drain、disconnect、二重 disconnect、reader close/join を検査した。peer が先に閉じた HID channel は cleanup error にせず ACL 切断を続ける。reader failure は pairing/send/drain/disconnect 間で同じ typed source を保持する。refactor: Device と Classic の駆動を `drive_runtime` に集約し、Classic event の取り出しを駆動処理から分離した。all-feature test 259 passed / 2 ignored、default test 231 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、all/default build、rustdoc、fmt、diff check が成功 |
 | refactor-done | T07 | red: `runtime::transport::virtual_tests` が存在せず、Pro Periodic の packet-level test target は module-not-found で compile failure。green: test-only `VirtualClassicTransport` が Bumble `Device + LocalLink` を所有し、両 peer の in-memory stored link key から Classic encryption と BR/EDR SMP/CTKD bond を完了した。peer MTU 48 の SDP service-search-attribute を複数 continuation で再構成後、control/interrupt L2CAP を開き、HIDP `0xA1` bootstrap、peer の `0xA2` subcommand `0x03` / `0x30`、swbt の `0x21` reply を実 SDU path で交換して NX Ready へ到達した。Ready 後の typed A を Periodic `0x30` で受信し、explicit close の最終 `0x30` が neutral へ戻ること、drain/disconnect/close を確認した。refactor: USB や public transport injection を追加せず、仮想 peer と決定的 clock/command/shutdown harness を `src/runtime/transport/virtual_tests.rs` に閉じた。all-feature test 260 passed / 2 ignored、default test 231 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、all/default build、rustdoc、fmt、diff check が成功 |
-| pending | T08-T09 | 各 item の red、green、refactor、command/result を実装 commit ごとに追記する |
+| refactor-done | T08 | red: 6組 matrix runner、resilience scenario、再接続 runner が存在せず compile failure。green: Pro/Joy-Con L/Joy-Con R×Periodic/Direct の全6組が、それぞれの `TransportConfig` から stored-key CTKD、SDP continuation、HIDP handshake を実 packet path で通して Ready へ到達した。resilience scenario は interrupt→control の逆順、length mismatch SDP request の ErrorResponse、malformed HIDP control の `0x04`、peer 切断、同じ in-memory stored key で2回目の encryption/CTKD、SDP、HID、Ready を検査した。旧 session 隔離は `events_tagged_by_an_old_session_are_discarded` と packet-level の旧 handle/CID 破棄 test を再実行した。refactor: model/reporting 共通の Ready/close assertion、virtual scenario、session reset を test harness に分離し、再接続でも current handle の pairing keys と bond の両方を確認する。all-feature test 262 passed / 2 ignored、default test 231 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、all/default build、rustdoc、fmt、diff check が成功 |
+| pending | T09 | completion gate と self-review を実行して追記する |
 
 ## 8. 対象ファイル
 
@@ -385,9 +386,9 @@ M5 の実機調整へ先送りしない。
 - [x] SDP continuation と malformed request を検査した
 - [x] HIDP control/interrupt、reverse order、MTU を検査した
 - [x] pairing window と NoInputNoOutput policy を検査した
-- [ ] stored key の virtual pairing/reconnect を検査し、key bytes を出力していない
+- [x] stored key の virtual pairing/reconnect を検査し、key bytes を出力していない
 - [x] Pro Periodic が virtual packet path で NX Ready へ到達した
-- [ ] 6 model×reporting の共通 suite が成功した
+- [x] 6 model×reporting の共通 suite が成功した
 - [x] disconnect cleanup と旧 session event 破棄を検査した
 - [x] production Bumble send/drain/disconnect/close を検査した
 - [ ] Rust 1.87 と通常 quality gate が成功した
