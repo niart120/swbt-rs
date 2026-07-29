@@ -14,7 +14,9 @@
 //! Bluetooth transport backend. Open and pair return
 //! [`ErrorKind::UnsupportedCapability`]. An otherwise valid profile-creation
 //! request returns the same error after its read-only target preflight and does
-//! not create a file. On a ready runtime, explicit close waits for cleanup
+//! not create a file. With the `bumble` feature, [`list_adapters`] performs
+//! descriptor-only Bluetooth HCI USB discovery without opening or claiming a
+//! device. On a ready runtime, explicit close waits for cleanup
 //! completion, joins the worker, and returns cleanup or join failures. Dropping
 //! a controller instead uses bounded best-effort shutdown: it omits neutral
 //! reporting and pending-send draining and cannot report failures. Its internal
@@ -52,7 +54,7 @@ mod protocol;
 pub mod reporting;
 mod runtime;
 
-pub use adapter::AdapterSelector;
+pub use adapter::{AdapterInfo, AdapterSelector, list_adapters};
 pub use connection::CreateProfileOptions;
 pub use controller::{
     Controller, ControllerBuilder, DirectJoyConL, DirectJoyConR, DirectProController, JoyConL,

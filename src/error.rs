@@ -6,6 +6,8 @@ use std::{error::Error as StdError, fmt};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    /// USB adapter discovery could not read the descriptor inventory.
+    AdapterDiscovery,
     /// Creating a profile requires a destination path.
     ProfilePathRequired,
     /// The requested profile does not exist.

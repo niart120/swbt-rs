@@ -14,8 +14,10 @@ path = "src/lib.rs"
 
 [features]
 default = []
-bumble = ["dep:bumble"]
+bumble = ["dep:bumble", "dep:rusb", "dep:tracing"]
 
 [dependencies]
 bumble = { git = "https://github.com/chaitanyarahalkar/bumble-rs", rev = "bbac2a6803b8cab0920ab725a23aa408fc4fed85", optional = true }
+rusb = { version = "0.9.4", features = ["vendored"], optional = true }
 serde_json = "1"
+tracing = { version = "0.1", optional = true }

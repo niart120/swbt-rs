@@ -106,7 +106,8 @@ resource cleanup である。Switch、pairing、SDP、HID channel、NX handshake
 
 - primary selector: HCI candidate indexに基づく `usb:N`
 - `vendor_id()` / `product_id()`: device descriptor の 16-bit 値
-- `bus_number()` / `port_numbers()`: libusb topology
+- `bus_number()` / `port_numbers()`: libusb topology。platform が port path を返さない場合は
+  `port_numbers()` を `None` にし、実際の空 path と区別する
 - `has_serial_number()`: serial descriptor index の有無であり、serial string の取得成功ではない
 - `Debug` に serial string、OS instance ID、profile/key material を含めない
 
@@ -277,9 +278,10 @@ probe API の有無を M3 completion blocker にしない。
 各 item は `tdd-one-cycle` で red、green、必要な refactor まで進め、1 item の論理変更を
 1 commit にする。
 
-- [ ] **T01 — no-open adapter discovery**
+- [x] **T01 — no-open adapter discovery**
   - fake USB descriptor graph から HCI class candidate だけを `AdapterInfo` へ変換する。
-  - fake backend の open/claim counter は 0 のまま。
+  - descriptor probe の capability に open/claim 操作を含めず、production path に
+    `Device::open`、detach、claim がないことを確認する。
   - public `list_adapters()` の feature-disabled error も固定する。
 - [ ] **T02 — USB selector grammar**
   - index、VID/PID、serial、occurrence、port path、case variationを受け付ける。
@@ -313,6 +315,12 @@ probe API の有無を M3 completion blocker にしない。
   - Rust 1.87 all-features check/test/build、default/no-default build、rustdoc を通す。
   - default 対 all-features の clean build time と binary/rlib size を記録する。
   - dependency license report と Cargo.lock hash を保存する。
+
+### 6.1 TDD cycle evidence
+
+| state | item | evidence |
+|---|---|---|
+| refactor-done | T01: no-open adapter discovery | red: `cargo test descriptor_discovery_returns_only_bluetooth_hci_without_opening_or_claiming` は `AdapterInfo`、descriptor probe、classification 未定義の compile error。green: descriptor success/source-failure の unit test 2件と feature-disabled public integration test が成功し、device-level または interface-level `E0/01/01` だけを stable `usb:N` candidate にした。inventory failure は `AdapterDiscovery` と typed source を保持し、公開 message へ source text を出さない。refactor: discovery に渡す capability を descriptor record の取得だけに限定し、USB open/claim method を境界から除外。production `rusb` path にも open/detach/claim はなく、device/config/interface descriptor、bus、取得できた port path、serial index だけを読む。取得不能な port path は実際の空 path と区別して `None` にする。device-level HCI class では config descriptor を要求しない。個別 device の descriptor 読み取り失敗は candidate から除外し、件数だけを `tracing` event に残す。`cargo test --all-targets --all-features --locked` と default は lib 217 passed / 1 ignored と integration/example 全件、clippy `-D warnings`、rustdoc `-D warnings` が成功 |
 
 ## 7. 設計メモ
 
