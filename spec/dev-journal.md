@@ -220,3 +220,33 @@ T31 で worker の再生成が必要になった場合は、既存 projection �
 seed するか、counter の正本を controller lifetime の所有物へ移す。reopen 前後で値が単調非減少
 であることを public orchestration test に含める。T26 の範囲では worker を作り直さず、接続
 session 間の保持だけを完了条件とする。
+
+## 2026-07-29: T31 create-profile と worker Ready 完了境界
+
+### 現状
+
+T31 は empty envelope の create-new、同じ store からの typed reopen、transport open、pairing、
+protocol Ready、controller 返却の因果順を検査する。既存 `WorkerCore` は handshake と Ready
+判定を持つが、`run_worker_loop()` は Ready、timeout、disconnect の結果を同期呼出元へ返す
+pairing response をまだ持たない。
+
+### 観察
+
+T31 で実 worker thread を強制すると、create-profile の順序検査に加えて pair command、
+one-shot completion、reporting 別 command 型の所有境界まで同じ item へ入る。これは T33 の
+fake runtime smoke と入力操作を先取りする。worker を thread 起動前に直接 Ready まで進めると、
+open 後の worker 所有と pairing の実行順を検査できない。
+
+### 方針
+
+T31 は crate-private `CreateProfileRuntimeBackend` の
+`ensure_supported()`、`open()`、`pair_to_ready()` を同じ production orchestrator へ注入し、
+`InspectTarget → CheckBackendCapability → CreateNew → ReadBack → Open → PairStarted →
+ProtocolReady` を代表的な Pro/Periodic fake で固定する。成功時は `ReadyRuntime<M, R>` を
+controller の先頭 field で所有し、runtime を config/status より先に破棄する。これは実
+worker thread や Switch pairing の成功根拠ではない。
+
+T32 は `Opened` の open/pair failure 時 cleanup と empty envelope 残存を固定する。T33 は
+sealed reporting 境界へ model 別 command 型を接続し、pair command の one-shot completion で
+実 worker thread の Ready を待ってから同じ controller 所有へ移す。`Any` downcast で
+`WorkerOwner` を取り出す方式は採用しない。

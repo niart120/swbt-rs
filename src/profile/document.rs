@@ -18,6 +18,33 @@ pub(crate) struct ProfileDocument {
 }
 
 impl ProfileDocument {
+    pub(crate) fn empty_adapter_default<M: ControllerModel>() -> Self {
+        Self {
+            controller_kind: M::KIND,
+            value: serde_json::json!({
+                "format": PROFILE_FORMAT,
+                "schema_version": PROFILE_SCHEMA_VERSION,
+                "controller_kind": M::KIND.profile_name(),
+                "identity": {
+                    "kind": "adapter-default"
+                },
+                "key_store": {
+                    "namespaces": {}
+                }
+            }),
+        }
+    }
+
+    pub(crate) fn to_json_bytes(&self) -> crate::Result<Vec<u8>> {
+        serde_json::to_vec(&self.value).map_err(|source| {
+            Error::with_source(
+                ErrorKind::Internal,
+                "profile document could not be serialized",
+                source,
+            )
+        })
+    }
+
     pub(crate) fn parse_json(bytes: &[u8]) -> crate::Result<Self> {
         let value = serde_json::from_slice::<Value>(bytes).map_err(|source| {
             Error::with_source(

@@ -6,9 +6,7 @@ use crate::{
     profile::{PairingProfile, ProfileDocument},
 };
 
-pub(super) trait ProfileReadPort {
-    fn read(&mut self, path: &Path) -> io::Result<Vec<u8>>;
-}
+pub(super) use crate::profile::ProfileReadPort;
 
 pub(super) struct FileProfileReader;
 

@@ -29,7 +29,7 @@ use build::{FileProfileReader, ProfileReadPort, read_typed_profile};
 #[cfg(test)]
 use config::ProfileConfig;
 use config::{BuilderConfig, ControllerConfig};
-use create::CreateProfilePlan;
+use create::{CreateProfilePlan, CreateProfileRuntimeBackend, ReadyRuntime};
 
 /// A controller whose model and reporting mode are fixed by its type.
 ///
@@ -39,6 +39,7 @@ use create::CreateProfilePlan;
 /// surface. Controllers are transferable between threads but intentionally
 /// cannot be shared between threads.
 pub struct Controller<M: ControllerModel, R: ReportingMode> {
+    _runtime: Option<ReadyRuntime<M, R>>,
     #[allow(
         dead_code,
         reason = "T31 consumes the validated configuration when opening the runtime"
@@ -73,7 +74,26 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     fn from_config(config: ControllerConfig<M, R>) -> Self {
         let (status_publisher, status_reader) = status_projection();
 
+        Self::from_parts(config, status_publisher, status_reader, None)
+    }
+
+    fn from_ready_runtime(
+        config: ControllerConfig<M, R>,
+        status_publisher: StatusPublisher<M>,
+        status_reader: StatusReader<M>,
+        runtime: ReadyRuntime<M, R>,
+    ) -> Self {
+        Self::from_parts(config, status_publisher, status_reader, Some(runtime))
+    }
+
+    fn from_parts(
+        config: ControllerConfig<M, R>,
+        status_publisher: StatusPublisher<M>,
+        status_reader: StatusReader<M>,
+        runtime: Option<ReadyRuntime<M, R>>,
+    ) -> Self {
         Self {
+            _runtime: runtime,
             config,
             status_publisher,
             status_reader,
@@ -135,19 +155,29 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
         self
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T31 consumes validated create-profile requests in the orchestrator"
-        )
-    )]
     fn validate_create_profile_target(
         self,
         options: CreateProfileOptions,
         target: &mut impl crate::profile::ProfileCreateTargetPort,
     ) -> crate::Result<CreateProfilePlan<M, R>> {
         create::validate_target(self.validate()?, options, target)
+    }
+
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T34 routes the public create-profile method through this private seam"
+        )
+    )]
+    fn create_profile_with(
+        self,
+        options: CreateProfileOptions,
+        store: &mut impl crate::profile::ProfileCreatePort,
+        backend: &mut impl CreateProfileRuntimeBackend<M, R>,
+    ) -> crate::Result<Controller<M, R>> {
+        let plan = self.validate_create_profile_target(options, store)?;
+        create::create_profile(plan, store, backend)
     }
 
     /// Builds a configured controller without opening its adapter or starting a worker.
