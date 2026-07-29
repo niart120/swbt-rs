@@ -14,9 +14,9 @@ use bumble_transport::{
 use crate::adapter::AdapterSelector;
 
 use super::{
-    ActivityNotifier, ClassicAclBufferInfo, ControllerVersionInfo, TransportCapabilities,
-    TransportConfig, TransportError, TransportErrorKind, TransportEvent, TransportResult,
-    UsbTransportMetadata,
+    ActivityNotifier, ClassicAclBufferInfo, ControllerVersionInfo, SendAcceptance,
+    TransportCapabilities, TransportConfig, TransportError, TransportErrorKind, TransportEvent,
+    TransportPort, TransportResult, UsbTransportMetadata,
 };
 
 const CONTROLLER_ID: usize = 0;
@@ -37,12 +37,8 @@ impl SplitTransportOpener for SystemSplitTransportOpener {
 
 /// A synchronously initialized Bumble host/device pair with an owned reader.
 ///
-/// T06 owns reader notification, terminal state, shutdown, and join here. T07
-/// installs this session in the public controller lifecycle.
-#[allow(
-    dead_code,
-    reason = "T06 adds reader cancellation/join before T07 installs this session in a port"
-)]
+/// The controller transport owns this value from HCI initialization through
+/// reader shutdown and join.
 pub(super) struct BumbleSession {
     runtime: Option<BumbleRuntime>,
     capabilities: TransportCapabilities,
@@ -54,13 +50,98 @@ struct BumbleRuntime {
     device: Device,
 }
 
-#[allow(
-    dead_code,
-    reason = "T07 installs the T06 session lifecycle in a concrete TransportPort"
-)]
+/// Controller-worker transport that opens and owns one Bumble HCI session.
+pub(crate) struct BumbleTransportPort {
+    selector: AdapterSelector,
+    config: TransportConfig,
+    session: Option<BumbleSession>,
+}
+
+impl BumbleTransportPort {
+    pub(crate) const fn new(selector: AdapterSelector, config: TransportConfig) -> Self {
+        Self {
+            selector,
+            config,
+            session: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn from_session_for_test(session: BumbleSession) -> Self {
+        Self {
+            selector: AdapterSelector::from("usb:0"),
+            config: TransportConfig::for_model::<crate::model::Pro>(),
+            session: Some(session),
+        }
+    }
+}
+
+impl TransportPort for BumbleTransportPort {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
+        if let Some(session) = self.session.as_ref() {
+            return Ok(session.capabilities());
+        }
+        let session = initialize_bumble_session(&self.selector, &self.config, activity)?;
+        let capabilities = session.capabilities();
+        self.session = Some(session);
+        Ok(capabilities)
+    }
+
+    fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+        self.session
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
+            .poll(timeout)
+    }
+
+    fn send_interrupt(&mut self, _payload: &[u8]) -> TransportResult<SendAcceptance> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
+        if let Some(terminal) = session.terminal_error() {
+            return Err(terminal);
+        }
+        Err(TransportError::new(TransportErrorKind::SendRejected))
+    }
+
+    fn drain_interrupt(&mut self, _timeout: Duration) -> TransportResult<()> {
+        if let Some(terminal) = self
+            .session
+            .as_ref()
+            .and_then(BumbleSession::terminal_error)
+        {
+            return Err(terminal);
+        }
+        Ok(())
+    }
+
+    fn disconnect(&mut self) -> TransportResult<()> {
+        if let Some(terminal) = self
+            .session
+            .as_ref()
+            .and_then(BumbleSession::terminal_error)
+        {
+            return Err(terminal);
+        }
+        Ok(())
+    }
+
+    fn close(&mut self) -> TransportResult<()> {
+        let Some(mut session) = self.session.take() else {
+            return Ok(());
+        };
+        session.close()
+    }
+}
+
 impl BumbleSession {
     pub(super) const fn capabilities(&self) -> TransportCapabilities {
         self.capabilities
+    }
+
+    fn terminal_error(&self) -> Option<TransportError> {
+        self.terminal.clone()
     }
 
     #[cfg(test)]
@@ -128,10 +209,6 @@ impl BumbleSession {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "T07 uses the system opener after T06 makes the reader lifecycle cancellable"
-)]
 pub(super) fn initialize_bumble_session(
     selector: &AdapterSelector,
     config: &TransportConfig,

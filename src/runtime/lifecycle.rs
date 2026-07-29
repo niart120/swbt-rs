@@ -71,7 +71,7 @@ impl LifecycleStateMachine {
 
     #[allow(
         dead_code,
-        reason = "T31 and T32 controller orchestration handles transport open failure"
+        reason = "a later reconnect path resets an interrupted logical open"
     )]
     pub(crate) fn fail_open(&mut self) {
         self.opening = false;

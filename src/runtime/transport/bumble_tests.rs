@@ -14,8 +14,10 @@ use bumble_transport::{
 use crate::adapter::AdapterSelector;
 use crate::model::Pro;
 
-use super::bumble::{BumbleSession, SplitTransportOpener, initialize_bumble_session_with};
-use super::{TransportConfig, TransportErrorKind, activity_channel};
+use super::bumble::{
+    BumbleSession, BumbleTransportPort, SplitTransportOpener, initialize_bumble_session_with,
+};
+use super::{TransportConfig, TransportErrorKind, TransportPort, activity_channel};
 
 const DISPLAY_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
 const HCI_ADDRESS: [u8; 6] = [0x7d, 0x9f, 0xf9, 0xdc, 0x1b, 0x00];
@@ -244,7 +246,8 @@ fn bumble_reader_end_and_failure_are_single_wake_and_sticky() {
     assert_eq!(repeated.kind(), TransportErrorKind::SourceTerminated);
     ended.close().expect("clean end remains closable");
 
-    let (mut failed, fail_source, fail_wakes, _drops) = controlled_session();
+    let (failed, fail_source, fail_wakes, _drops) = controlled_session();
+    let mut failed = BumbleTransportPort::from_session_for_test(failed);
     fail_wakes
         .recv_timeout(Duration::from_secs(1))
         .expect("initialization activity");
@@ -284,6 +287,23 @@ fn bumble_reader_end_and_failure_are_single_wake_and_sticky() {
         first.source().expect("first source"),
         repeated.source().expect("sticky source"),
     ));
+    for terminal in [
+        failed
+            .send_interrupt(&[])
+            .expect_err("send retains the reader terminal"),
+        failed
+            .drain_interrupt(Duration::ZERO)
+            .expect_err("drain retains the reader terminal"),
+        failed
+            .disconnect()
+            .expect_err("disconnect retains the reader terminal"),
+    ] {
+        assert_eq!(terminal.kind(), TransportErrorKind::SourceTerminated);
+        assert!(std::ptr::eq(
+            first.source().expect("first source"),
+            terminal.source().expect("port preserves the sticky source"),
+        ));
+    }
     failed.close().expect("failed reader remains closable");
 }
 

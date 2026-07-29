@@ -45,7 +45,7 @@ use super::{
     create::CreateProfileRuntimeAttempt,
     runtime::{
         ConcreteRuntimeAttempt, ConcreteRuntimeBackend, PairDriver, RuntimeComponents,
-        map_worker_spawn_error,
+        map_worker_spawn_error, open_controller_runtime,
     },
 };
 
@@ -55,6 +55,7 @@ const PERIODIC_READY_AT: Duration = Duration::from_millis(300);
 const DEADLOCK_WATCHDOG: Duration = Duration::from_secs(2);
 const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
 
+#[cfg(not(feature = "bumble"))]
 #[test]
 fn unavailable_public_lifecycle_keeps_the_runtime_owner_uninstalled() {
     let mut controller = ProController::builder("unavailable:unit")
@@ -79,6 +80,93 @@ fn unavailable_public_lifecycle_keeps_the_runtime_owner_uninstalled() {
     );
     assert!(controller._runtime.is_none());
     assert_eq!(controller.status().lifecycle, LifecycleState::Configured);
+}
+
+#[test]
+fn controller_open_is_idempotent_preserves_open_on_unsupported_pair_and_reopens_after_join() {
+    let mut controller = ProController::builder("usb:0")
+        .build()
+        .expect("build configured controller");
+    let (first_transport, first_control) = TestTransport::with_limits(8, 3);
+    let first_dropped = Arc::new(AtomicBool::new(false));
+    let first_drop_observer = Arc::clone(&first_dropped);
+    let first_clock = ManualClock::at(Duration::ZERO);
+    let first_factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+        Ok::<_, Error>(RuntimeComponents::new(
+            Box::new(DropTrackingTransport {
+                inner: first_transport,
+                dropped: first_drop_observer,
+            }),
+            first_clock,
+            ChannelWorkerWaiter::new(activity_receiver),
+            UnusedPairDriver,
+        ))
+    };
+
+    controller
+        .open_with(|config, status| open_controller_runtime(config, status, first_factory))
+        .expect("first open starts the worker");
+    assert_eq!(controller.status().lifecycle, LifecycleState::Open);
+    assert!(!controller.status().connected);
+    assert_eq!(first_control.counters(), (1, 0, 0));
+
+    let repeated_open_called = Arc::new(AtomicBool::new(false));
+    let repeated_open_observer = Arc::clone(&repeated_open_called);
+    controller
+        .open_with(move |_, _| {
+            repeated_open_observer.store(true, Ordering::SeqCst);
+            panic!("repeated open must not construct another runtime")
+        })
+        .expect("repeated open is idempotent");
+    assert!(!repeated_open_called.load(Ordering::SeqCst));
+    assert_eq!(first_control.counters(), (1, 0, 0));
+
+    assert_eq!(
+        controller
+            .pair(PAIR_TIMEOUT)
+            .expect_err("M3 pairing remains unsupported")
+            .kind(),
+        ErrorKind::UnsupportedCapability
+    );
+    assert_eq!(controller.status().lifecycle, LifecycleState::Open);
+    assert_eq!(first_control.counters(), (1, 0, 0));
+
+    controller.close().expect("first close joins the worker");
+    assert!(first_dropped.load(Ordering::SeqCst));
+    assert_eq!(first_control.counters(), (1, 1, 1));
+    assert_eq!(controller.status().lifecycle, LifecycleState::Closed);
+    controller.close().expect("repeated close is idempotent");
+    assert_eq!(first_control.counters(), (1, 1, 1));
+
+    let (second_transport, second_control) = TestTransport::with_limits(8, 3);
+    let second_dropped = Arc::new(AtomicBool::new(false));
+    let second_drop_observer = Arc::clone(&second_dropped);
+    let second_clock = ManualClock::at(Duration::ZERO);
+    let second_factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+        Ok::<_, Error>(RuntimeComponents::new(
+            Box::new(DropTrackingTransport {
+                inner: second_transport,
+                dropped: second_drop_observer,
+            }),
+            second_clock,
+            ChannelWorkerWaiter::new(activity_receiver),
+            UnusedPairDriver,
+        ))
+    };
+
+    controller
+        .open_with(|config, status| open_controller_runtime(config, status, second_factory))
+        .expect("closed controller can reopen");
+    assert_eq!(controller.status().lifecycle, LifecycleState::Open);
+    assert!(!controller.status().connected);
+    assert_eq!(second_control.counters(), (1, 0, 0));
+
+    controller
+        .close_without_neutral()
+        .expect("reopened worker joins without neutral");
+    assert!(second_dropped.load(Ordering::SeqCst));
+    assert_eq!(second_control.counters(), (1, 1, 1));
+    assert_eq!(controller.status().lifecycle, LifecycleState::Closed);
 }
 
 #[test]
@@ -745,7 +833,7 @@ fn configured_input_is_transport_closed_and_close_is_idempotent() {
     assert_eq!(periodic.report_period(), Duration::from_millis(8));
     let input_error = periodic
         .apply(InputState::neutral().with_buttons([ProButton::A]))
-        .expect_err("Configured controller has no Ready runtime");
+        .expect_err("Configured controller has no open runtime");
     assert_eq!(input_error.kind(), ErrorKind::TransportClosed);
     periodic.close().expect("Configured close is successful");
     periodic.close().expect("repeated close is successful");
@@ -756,7 +844,7 @@ fn configured_input_is_transport_closed_and_close_is_idempotent() {
         .expect("build configured direct Pro controller");
     let input_error = direct
         .send(InputState::neutral().with_buttons([ProButton::A]))
-        .expect_err("Configured direct controller has no Ready runtime");
+        .expect_err("Configured direct controller has no open runtime");
     assert_eq!(input_error.kind(), ErrorKind::TransportClosed);
     direct
         .close_without_neutral()
@@ -1028,6 +1116,11 @@ struct PanickingOpenTransport {
     cleanup_trace: Arc<Mutex<Vec<PartialCleanupTrace>>>,
 }
 
+struct DropTrackingTransport {
+    inner: TestTransport,
+    dropped: Arc<AtomicBool>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerminalPairTrace {
     PollFailure,
@@ -1157,6 +1250,38 @@ impl TransportPort for PanickingOpenTransport {
     fn close(&mut self) -> TransportResult<()> {
         lock(&self.cleanup_trace).push(PartialCleanupTrace::Close);
         self.inner.close()
+    }
+}
+
+impl TransportPort for DropTrackingTransport {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
+        self.inner.open(activity)
+    }
+
+    fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+        self.inner.poll(timeout)
+    }
+
+    fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
+        self.inner.send_interrupt(payload)
+    }
+
+    fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+        self.inner.drain_interrupt(timeout)
+    }
+
+    fn disconnect(&mut self) -> TransportResult<()> {
+        self.inner.disconnect()
+    }
+
+    fn close(&mut self) -> TransportResult<()> {
+        self.inner.close()
+    }
+}
+
+impl Drop for DropTrackingTransport {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::SeqCst);
     }
 }
 

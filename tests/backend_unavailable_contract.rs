@@ -7,13 +7,13 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use swbt::{
-    CreateProfileOptions, DirectJoyConL, DirectJoyConR, DirectProController, ErrorKind, JoyConL,
-    JoyConR, LifecycleState, ProController, ProfileIdentity,
-};
+use swbt::{CreateProfileOptions, ErrorKind, ProController, ProfileIdentity};
+#[cfg(not(feature = "bumble"))]
+use swbt::{DirectJoyConL, DirectJoyConR, DirectProController, JoyConL, JoyConR, LifecycleState};
 
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(not(feature = "bumble"))]
 #[test]
 fn public_open_and_pair_report_missing_backend_without_installing_a_runtime() {
     macro_rules! assert_unavailable_lifecycle {
@@ -161,6 +161,7 @@ fn adapter_default_options() -> CreateProfileOptions {
     }
 }
 
+#[cfg(not(feature = "bumble"))]
 fn assert_error_kind(result: swbt::Result<()>, expected: ErrorKind) {
     let error = result.expect_err("operation must fail while the backend is unavailable");
     assert_eq!(error.kind(), expected);

@@ -21,6 +21,11 @@ pub(crate) mod sealed {
         fn default_options() -> Self::BuilderOptions;
         fn validate(options: Self::BuilderOptions) -> crate::Result<Self::Config>;
         fn common<M: ControllerModel>(command: CommonCommand<M>) -> Self::Command<M>;
+        fn open_controller<M: ControllerModel>(
+            controller: &mut crate::controller::Controller<M, Self>,
+        ) -> crate::Result<()>
+        where
+            Self: Sized + super::ReportingMode;
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,13 +57,6 @@ pub(crate) mod sealed {
     }
 
     impl PeriodicConfig {
-        #[cfg_attr(
-            not(test),
-            allow(
-                dead_code,
-                reason = "T31 passes the validated period to the periodic worker"
-            )
-        )]
         pub(crate) const fn report_period(self) -> Duration {
             self.report_period.0
         }
@@ -128,6 +126,12 @@ impl sealed::Sealed for Periodic {
     ) -> Self::Command<M> {
         crate::runtime::worker::PeriodicCommand::Common(command)
     }
+
+    fn open_controller<M: crate::model::ControllerModel>(
+        controller: &mut crate::controller::Controller<M, Self>,
+    ) -> crate::Result<()> {
+        controller.open_supported_runtime()
+    }
 }
 
 impl ReportingMode for Periodic {
@@ -153,6 +157,12 @@ impl sealed::Sealed for Direct {
         command: crate::runtime::worker::CommonCommand<M>,
     ) -> Self::Command<M> {
         crate::runtime::worker::DirectCommand::Common(command)
+    }
+
+    fn open_controller<M: crate::model::ControllerModel>(
+        controller: &mut crate::controller::Controller<M, Self>,
+    ) -> crate::Result<()> {
+        controller.open_supported_runtime()
     }
 }
 

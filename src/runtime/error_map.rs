@@ -13,10 +13,10 @@ use crate::{
 };
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T31 controller orchestration maps bounded command enqueue failures"
+        reason = "feature-disabled builds do not enqueue worker commands"
     )
 )]
 pub(crate) fn map_enqueue_error(error: CommandEnqueueError) -> Error {
@@ -30,10 +30,10 @@ pub(crate) fn map_enqueue_error(error: CommandEnqueueError) -> Error {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T31 controller orchestration maps worker response termination"
+        reason = "feature-disabled builds do not await worker responses"
     )
 )]
 pub(crate) fn map_response_error(error: CommandResponseError) -> Error {
@@ -46,10 +46,10 @@ pub(crate) fn map_response_error(error: CommandResponseError) -> Error {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T31 controller methods map typed worker command failures"
+        reason = "feature-disabled builds do not deliver worker commands"
     )
 )]
 pub(crate) fn map_command_error(error: WorkerCommandError) -> Error {
@@ -127,10 +127,10 @@ fn map_readiness_error(error: ReadinessError) -> Error {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T31 controller orchestration maps a joined worker panic"
+        reason = "feature-disabled builds do not join controller workers"
     )
 )]
 pub(crate) fn map_join_error(error: WorkerJoinError) -> Error {
@@ -142,10 +142,10 @@ pub(crate) fn map_join_error(error: WorkerJoinError) -> Error {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T31 controller orchestration maps terminal worker outcomes"
+        reason = "feature-disabled builds do not observe worker outcomes"
     )
 )]
 pub(crate) fn map_worker_failure(cause: WorkerFailureCause) -> Error {
@@ -167,10 +167,10 @@ pub(crate) fn map_worker_failure(cause: WorkerFailureCause) -> Error {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T33 controller runtime consumes joined worker outcomes"
+        reason = "feature-disabled builds do not consume worker outcomes"
     )
 )]
 pub(crate) fn map_worker_outcome(outcome: WorkerThreadOutcome) -> crate::Result<()> {

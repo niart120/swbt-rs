@@ -31,7 +31,7 @@ use crate::reporting::{self, ReportingMode};
 use crate::runtime::{
     cleanup::CloseMode,
     status::{StatusPublisher, StatusReader, status_projection},
-    worker::{CommonCommand, DirectCommand, PeriodicCommand},
+    worker::{CommonCommand, DirectCommand, PeriodicCommand, WorkerReporting},
 };
 use crate::{AdapterSelector, CreateProfileOptions};
 
@@ -39,7 +39,7 @@ use build::{FileProfileReader, ProfileReadPort, read_typed_profile};
 #[cfg(test)]
 use config::ProfileConfig;
 use config::{BuilderConfig, ControllerConfig};
-use create::{CreateProfilePlan, CreateProfileRuntimeBackend, ReadyRuntime};
+use create::{ControllerRuntime, CreateProfilePlan, CreateProfileRuntimeBackend};
 
 /// A controller whose model and reporting mode are fixed by its type.
 ///
@@ -55,16 +55,8 @@ use create::{CreateProfilePlan, CreateProfileRuntimeBackend, ReadyRuntime};
 /// send drain. Drop cannot return shutdown failures, and its internal wait
 /// duration is not a public timing guarantee.
 pub struct Controller<M: ControllerModel, R: ReportingMode> {
-    _runtime: Option<ReadyRuntime<M, R>>,
-    #[allow(
-        dead_code,
-        reason = "T31 consumes the validated configuration when opening the runtime"
-    )]
+    _runtime: Option<ControllerRuntime<M, R>>,
     config: ControllerConfig<M, R>,
-    #[allow(
-        dead_code,
-        reason = "T31 shares the configured projection writer with the worker"
-    )]
     status_publisher: StatusPublisher<M>,
     status_reader: StatusReader<M>,
     _types: PhantomData<fn() -> (M, R)>,
@@ -97,7 +89,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
         config: ControllerConfig<M, R>,
         status_publisher: StatusPublisher<M>,
         status_reader: StatusReader<M>,
-        runtime: ReadyRuntime<M, R>,
+        runtime: ControllerRuntime<M, R>,
     ) -> Self {
         Self::from_parts(config, status_publisher, status_reader, Some(runtime))
     }
@@ -106,7 +98,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
         config: ControllerConfig<M, R>,
         status_publisher: StatusPublisher<M>,
         status_reader: StatusReader<M>,
-        runtime: Option<ReadyRuntime<M, R>>,
+        runtime: Option<ControllerRuntime<M, R>>,
     ) -> Self {
         Self {
             _runtime: runtime,
@@ -148,33 +140,34 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 
     /// Opens the configured controller transport.
     ///
-    /// The current package has no concrete Bluetooth transport backend, so
-    /// this operation leaves the configured controller and its diagnostics
-    /// unchanged without starting a worker or opening an adapter.
+    /// With the `bumble` feature, this operation opens and initializes the
+    /// selected Bluetooth HCI adapter and starts the owned worker. Repeated
+    /// calls while that runtime is open succeed without opening another
+    /// adapter or starting another worker.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::UnsupportedCapability`] while the concrete
-    /// Bluetooth transport is unavailable.
+    /// Without the `bumble` feature, returns
+    /// [`ErrorKind::UnsupportedCapability`] before transport side effects.
+    /// With the feature enabled, returns a typed transport or worker error when
+    /// initialization or worker startup fails.
     pub fn open(&mut self) -> crate::Result<()> {
-        Err(crate::runtime::error_map::unsupported_capability(
-            "Bluetooth transport",
-        ))
+        <R as reporting::sealed::Sealed>::open_controller(self)
     }
 
     /// Pairs the configured controller within `timeout`.
     ///
-    /// The current package has no concrete Bluetooth transport backend, so
-    /// this operation leaves the configured controller and its diagnostics
-    /// unchanged without starting a worker or opening an adapter.
+    /// Pairing is not implemented in the current milestone. When a Bumble HCI
+    /// runtime is open, this operation leaves that runtime open and keeps its
+    /// diagnostics unchanged.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::UnsupportedCapability`] while the concrete
-    /// Bluetooth transport is unavailable.
+    /// Returns [`ErrorKind::UnsupportedCapability`] without starting pairing
+    /// or changing transport ownership.
     pub fn pair(&mut self, _timeout: Duration) -> crate::Result<()> {
         Err(crate::runtime::error_map::unsupported_capability(
-            "Bluetooth transport",
+            "Bluetooth pairing",
         ))
     }
 
@@ -284,16 +277,45 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 
     fn request_common(&mut self, command: CommonCommand<M>) -> crate::Result<()> {
         let command = <R as reporting::sealed::Sealed>::common(command);
-        self.ready_runtime()?.request(command)
+        self.runtime_mut()?.request(command)
     }
 
-    fn ready_runtime(&mut self) -> crate::Result<&mut ReadyRuntime<M, R>> {
-        self._runtime.as_mut().ok_or_else(|| {
-            Error::new(
-                ErrorKind::TransportClosed,
-                "controller runtime is not ready",
-            )
-        })
+    fn runtime_mut(&mut self) -> crate::Result<&mut ControllerRuntime<M, R>> {
+        self._runtime
+            .as_mut()
+            .ok_or_else(|| Error::new(ErrorKind::TransportClosed, "controller runtime is not open"))
+    }
+
+    pub(crate) fn open_supported_runtime(&mut self) -> crate::Result<()>
+    where
+        R: WorkerReporting<M>,
+    {
+        #[cfg(feature = "bumble")]
+        {
+            self.open_with(runtime::open_bumble_runtime::<M, R>)
+        }
+        #[cfg(not(feature = "bumble"))]
+        {
+            Err(crate::runtime::error_map::unsupported_capability(
+                "Bluetooth transport",
+            ))
+        }
+    }
+
+    #[cfg(any(test, feature = "bumble"))]
+    fn open_with(
+        &mut self,
+        open: impl FnOnce(
+            &ControllerConfig<M, R>,
+            StatusPublisher<M>,
+        ) -> crate::Result<ControllerRuntime<M, R>>,
+    ) -> crate::Result<()> {
+        if self._runtime.is_some() {
+            return Ok(());
+        }
+        let runtime = open(&self.config, self.status_publisher.clone())?;
+        self._runtime = Some(runtime);
+        Ok(())
     }
 
     fn close_with_mode(&mut self, mode: CloseMode) -> crate::Result<()> {
@@ -321,7 +343,7 @@ impl<M: ControllerModel> Controller<M, reporting::Periodic> {
     /// runtime. Queue, shutdown, and worker failures are returned as structured
     /// [`crate::Error`] values.
     pub fn apply(&mut self, state: InputState<M>) -> crate::Result<()> {
-        self.ready_runtime()?.request(PeriodicCommand::Apply(state))
+        self.runtime_mut()?.request(PeriodicCommand::Apply(state))
     }
 
     /// Returns the validated periodic input-report interval.
@@ -342,7 +364,7 @@ impl<M: ControllerModel> Controller<M, reporting::Direct> {
     /// runtime or the transport is not Ready. Queue, shutdown, transport, and
     /// worker failures are returned as structured [`crate::Error`] values.
     pub fn send(&mut self, state: InputState<M>) -> crate::Result<()> {
-        self.ready_runtime()?.request(DirectCommand::Send(state))
+        self.runtime_mut()?.request(DirectCommand::Send(state))
     }
 }
 

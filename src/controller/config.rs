@@ -81,10 +81,10 @@ impl<M: ControllerModel, R: ReportingMode> BuilderConfig<M, R> {
 #[derive(Debug)]
 pub(super) struct ControllerConfig<M: ControllerModel, R: ReportingMode> {
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T31 selects the adapter when opening the controller runtime"
+            reason = "feature-disabled builds retain the selector without opening it"
         )
     )]
     pub(super) adapter: AdapterSelector,
@@ -92,23 +92,23 @@ pub(super) struct ControllerConfig<M: ControllerModel, R: ReportingMode> {
         not(test),
         allow(
             dead_code,
-            reason = "T31 supplies the pairing profile to the controller runtime"
+            reason = "M5 supplies the pairing profile to the controller runtime"
         )
     )]
     pub(super) profile: ProfileConfig<M>,
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T31 supplies fixed controller colors to the runtime"
+            reason = "feature-disabled builds retain colors without constructing a worker"
         )
     )]
     pub(super) colors: ControllerColors,
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T31 supplies reporting-specific settings to the worker"
+            reason = "feature-disabled builds retain reporting settings without constructing a worker"
         )
     )]
     pub(super) mode: <R as reporting::sealed::Sealed>::Config,
@@ -116,10 +116,10 @@ pub(super) struct ControllerConfig<M: ControllerModel, R: ReportingMode> {
 
 impl<M: ControllerModel, R: ReportingMode> ControllerConfig<M, R> {
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T07 opens the concrete transport from the validated controller configuration"
+            reason = "feature-disabled builds do not project a transport configuration"
         )
     )]
     pub(super) fn transport_config(&self) -> TransportConfig {
@@ -135,7 +135,7 @@ pub(super) enum ProfileConfig<M: ControllerModel> {
             not(test),
             allow(
                 dead_code,
-                reason = "T31 retains the profile path for runtime persistence"
+                reason = "M5 retains the profile path for runtime persistence"
             )
         )]
         path: PathBuf,
@@ -143,7 +143,7 @@ pub(super) enum ProfileConfig<M: ControllerModel> {
             not(test),
             allow(
                 dead_code,
-                reason = "T31 supplies the validated pairing profile to the runtime"
+                reason = "M5 supplies the validated pairing profile to the runtime"
             )
         )]
         profile: PairingProfile<M>,

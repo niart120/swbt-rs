@@ -3,7 +3,9 @@
 `swbt-rs` は、NX 互換の仮想 Bluetooth HID 入力デバイスを扱う
 [`swbt-python`](https://github.com/niart120/swbt-python) を Rust へ移植するプロジェクトです。
 Bluetooth stack の実装基盤には
-[`bumble-rs`](https://github.com/chaitanyarahalkar/bumble-rs) を使います。
+[`bumble-rs`](https://github.com/chaitanyarahalkar/bumble-rs) と、reader lifecycle 修正を含む
+[一時 fork](https://github.com/niart120/bumble-rs/tree/fix/external-host-reader-lifecycle)
+を使います。
 
 ## 現在の状態
 
@@ -17,25 +19,29 @@ descriptor-only adapter discovery を実装しています。
 - `ControllerBuilder::build()` は adapter や worker を開始せず、profile path 未指定なら
   一時 controller、既存 path なら controller model を検査した Configured controller を返します。
 - `press()`、`release()`、`tap()`、`neutral()`、Periodic `apply()`、Direct `send()` を
-  型付き worker command へ接続しています。Ready runtime に対する `close()` と
+  型付き worker command へ接続しています。open runtime に対する `close()` と
   `close_without_neutral()` は cleanup の完了を待って worker を join し、cleanup または
   join の失敗を返します。`Drop` は neutral report と pending send の drain を省いた
   bounded best-effort shutdown であり、終了失敗を呼び出し側へ返せません。3 model × 2
   reporting の crate 内 fake-runtime test で Pair→Ready→入力→worker join を検査しています。
 - 新しい connection session は input snapshot を neutral へ戻して開始し、接続前または
   前 session の入力状態と stale event を持ち越しません。
-- `build()` 直後の Configured controller には Ready runtime がないため、入力操作は
+- `build()` 直後の Configured controller には open runtime がないため、入力操作は
   `ErrorKind::TransportClosed` を返します。
-- default feature は空です。`bumble` feature を有効にした場合だけ、基準 commit
-  `bbac2a6803b8cab0920ab725a23aa408fc4fed85` の依存と `rusb` を組み込みます。
+- default feature は空です。`bumble` feature を有効にした場合だけ、reader shutdown と
+  join を追加した一時 fork の commit
+  `48f1bc36169b2692d2a61e87eda4223b126dca2b` と `rusb` を組み込みます。
 - `list_adapters()` は `bumble` feature で USB device/config/interface descriptor を読み、
   Bluetooth HCI class の candidate を返します。device open、driver detach、interface claim、
   HCI command は行いません。feature 無効時は `ErrorKind::UnsupportedCapability` を返します。
-- 公開 `open()` / `pair()` / `create_profile()` は、concrete Bluetooth transport がない
-  現在の build では `ErrorKind::UnsupportedCapability` を返します。`create_profile()` は
-  builder、path、identity、target の存在を検査した後、file を作る前に停止します。
-  既存 target は上書きしません。
-- Bluetooth transport と Bumble の接続は未実装です。
+- `bumble` feature の公開 `open()` は USB HCI adapter を claim し、HCI 初期化と worker
+  起動を完了して lifecycle `Open` を返します。同じ controller に対する repeated open は
+  adapter や worker を追加せず成功し、close 後は同じ controller を reopen できます。
+- feature 無効時の `open()` と、現在の `pair()` / `create_profile()` は
+  `ErrorKind::UnsupportedCapability` を返します。`pair()` は開いている HCI runtime を
+  維持します。`create_profile()` は builder、path、identity、target の存在を検査した後、
+  file を作る前に停止し、既存 target を上書きしません。
+- incoming Classic connection、pairing、SDP、HID control/interrupt channel は未実装です。
 - Bluetooth adapter の claim/reset と対象機器を使う実機検証は未実施です。
 
 ## 開発

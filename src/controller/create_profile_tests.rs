@@ -27,7 +27,7 @@ use crate::{
 use super::{
     ProController,
     config::{BuilderConfig, ControllerConfig, ProfileConfig},
-    create::{CreateProfileRuntimeAttempt, CreateProfileRuntimeBackend, ReadyRuntime},
+    create::{ControllerRuntime, CreateProfileRuntimeAttempt, CreateProfileRuntimeBackend},
 };
 
 struct FakeCreateTarget {
@@ -363,8 +363,8 @@ impl CreateProfileRuntimeAttempt<Pro, Periodic> for FakeRuntimeAttempt {
         Ok(())
     }
 
-    fn into_ready(mut self) -> ReadyRuntime<Pro, Periodic> {
-        ReadyRuntime::new(
+    fn into_ready(mut self) -> ControllerRuntime<Pro, Periodic> {
+        ControllerRuntime::new(
             self.lease
                 .take()
                 .expect("successful runtime attempt must own its lease"),

@@ -70,10 +70,10 @@ pub(crate) struct SwitchHidProtocol<M: ControllerModel> {
 impl<M: ControllerModel> SwitchHidProtocol<M> {
     #[must_use]
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T31 and T33 controller orchestration construct the protocol"
+            reason = "feature-disabled builds do not construct the runtime protocol"
         )
     )]
     pub(crate) fn new(colors: Option<ControllerColors>, device_info_address: [u8; 6]) -> Self {

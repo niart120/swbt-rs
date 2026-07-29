@@ -42,10 +42,10 @@ pub(crate) struct VirtualSpiFlash<M: ControllerModel> {
 impl<M: ControllerModel> VirtualSpiFlash<M> {
     #[must_use]
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T31 and T33 protocol construction initializes virtual SPI state"
+            reason = "feature-disabled builds do not construct the runtime protocol"
         )
     )]
     pub(crate) fn new(colors: Option<ControllerColors>) -> Self {
