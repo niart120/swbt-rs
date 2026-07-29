@@ -1,0 +1,90 @@
+{
+  "descriptor": {
+    "hex": "050115000904a1018530050105091901290a150025017501950a5500650081020509190b290e150025017501950481027501950281030b01000100a1000b300001000b310001000b320001000b35000100150027ffff0000751095048102c00b39000100150025073500463b0165147504950181020509190f2912150025017501950481027508953481030600ff852109017508953f8103858109027508953f8103850109037508953f9183851009047508953f9183858009057508953f9183858209067508953f9183c0",
+    "length": 203,
+    "sha256": "25f0b3b7e59bdfec05e8cced16e43a8878509865a0cb223f05025c556f3bedba"
+  },
+  "format": "swbt.hid-service-fixtures",
+  "generator": "tools/generate_python_hid_service_fixtures.py",
+  "models": {
+    "joycon_l": {
+      "local_name": "Joy-Con (L)",
+      "sdp_policy": {
+        "bluetooth_profile_version": 256,
+        "boot_device": true,
+        "country_code": 0,
+        "device_release_number": 256,
+        "device_subclass": 8,
+        "normally_connectable": false,
+        "parser_version": 273,
+        "profile_version": 256,
+        "provider_name": "Nintendo",
+        "reconnect_initiate": true,
+        "remote_wake": null,
+        "service_description": "Gamepad",
+        "service_name": "Wireless Gamepad",
+        "ssr_host_max_latency": 1600,
+        "ssr_host_min_timeout": 800,
+        "supervision_timeout": 3200,
+        "virtual_cable": true
+      }
+    },
+    "joycon_r": {
+      "local_name": "Joy-Con (R)",
+      "sdp_policy": {
+        "bluetooth_profile_version": 256,
+        "boot_device": true,
+        "country_code": 0,
+        "device_release_number": 256,
+        "device_subclass": 8,
+        "normally_connectable": false,
+        "parser_version": 273,
+        "profile_version": 256,
+        "provider_name": "Nintendo",
+        "reconnect_initiate": true,
+        "remote_wake": null,
+        "service_description": "Gamepad",
+        "service_name": "Wireless Gamepad",
+        "ssr_host_max_latency": 1600,
+        "ssr_host_min_timeout": 800,
+        "supervision_timeout": 3200,
+        "virtual_cable": true
+      }
+    },
+    "pro": {
+      "local_name": "Pro Controller",
+      "sdp_policy": {
+        "bluetooth_profile_version": 257,
+        "boot_device": false,
+        "country_code": 33,
+        "device_release_number": null,
+        "device_subclass": 8,
+        "normally_connectable": true,
+        "parser_version": 273,
+        "profile_version": 257,
+        "provider_name": null,
+        "reconnect_initiate": true,
+        "remote_wake": true,
+        "service_description": null,
+        "service_name": "Pro Controller",
+        "ssr_host_max_latency": 65535,
+        "ssr_host_min_timeout": 65535,
+        "supervision_timeout": 3200,
+        "virtual_cable": true
+      }
+    }
+  },
+  "python_version": "3.13",
+  "schema_version": 1,
+  "source_commit": "84d2723b127f70fc78e12f4496f5c40af0ccfb0a",
+  "source_paths": [
+    "src/swbt/protocol/descriptors.py",
+    "src/swbt/protocol/profiles/base.py",
+    "src/swbt/protocol/profiles/joycon.py",
+    "src/swbt/protocol/profiles/pro_controller.py",
+    "src/swbt/transport/_bumble_sdp.py"
+  ],
+  "source_repository": "https://github.com/niart120/swbt-python",
+  "source_tree": "ee0654eac1d443e7814eb9816bd9d75328ff8485",
+  "source_version": "0.6.0"
+}

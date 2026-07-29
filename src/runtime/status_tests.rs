@@ -537,6 +537,10 @@ impl TransportPort for BlockingPollTransport {
         self.inner.open(activity)
     }
 
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        self.inner.start_pairing()
+    }
+
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
         if self.armed.swap(false, Ordering::SeqCst) {
             self.entered.send(()).expect("poll block observer");

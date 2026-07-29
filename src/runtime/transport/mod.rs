@@ -3,7 +3,15 @@ mod bumble;
 #[cfg(all(test, feature = "bumble"))]
 mod bumble_tests;
 mod capabilities;
+#[cfg(feature = "bumble")]
+mod classic;
 mod config;
+#[cfg(feature = "bumble")]
+mod hidp;
+#[cfg(feature = "bumble")]
+mod sdp;
+#[cfg(all(test, feature = "bumble"))]
+mod virtual_tests;
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -123,6 +131,14 @@ pub(crate) enum TransportErrorKind {
     Closed,
     SendRejected,
     #[cfg_attr(
+        not(feature = "bumble"),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not perform concrete ACL drain waits"
+        )
+    )]
+    DrainTimedOut,
+    #[cfg_attr(
         not(test),
         allow(dead_code, reason = "M4 bounds the connection and HID event queue")
     )]
@@ -200,6 +216,7 @@ impl fmt::Display for TransportError {
             }
             TransportErrorKind::Closed => "transport is closed",
             TransportErrorKind::SendRejected => "transport rejected the send",
+            TransportErrorKind::DrainTimedOut => "transport send drain timed out",
             TransportErrorKind::EventQueueOverflow => "transport event queue overflowed",
             TransportErrorKind::SourceTerminated => "transport source terminated",
             #[cfg(feature = "bumble")]
@@ -228,6 +245,8 @@ pub(crate) trait TransportPort: Send {
         )
     )]
     fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities>;
+
+    fn start_pairing(&mut self) -> TransportResult<()>;
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>>;
 

@@ -23,6 +23,7 @@ pub(in crate::runtime) enum ScriptedSendOutcome {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FakeTransportCounters {
     pub(crate) open: usize,
+    pub(crate) start_pairing: usize,
     pub(crate) disconnect: usize,
     pub(crate) close: usize,
 }
@@ -168,6 +169,15 @@ impl TransportPort for FakeTransport {
         self.source_terminal_observed = false;
         lock(&self.shared.counters).open += 1;
         Ok(self.capabilities)
+    }
+
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        if !self.is_open {
+            return Err(TransportError::new(TransportErrorKind::Closed));
+        }
+        self.shared.ensure_active()?;
+        lock(&self.shared.counters).start_pairing += 1;
+        Ok(())
     }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {

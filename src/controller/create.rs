@@ -104,6 +104,9 @@ where
     M: ControllerModel,
     R: ReportingMode,
 {
+    /// Starts pairing and waits for the worker's readiness result.
+    fn pair(&mut self, timeout: Duration) -> crate::Result<()>;
+
     /// Sends one reporting-specific command and waits for its worker response.
     fn request(
         &mut self,
@@ -140,6 +143,10 @@ impl<M: ControllerModel, R: ReportingMode> ControllerRuntime<M, R> {
         self.port.request(command)
     }
 
+    pub(super) fn pair(&mut self, timeout: Duration) -> crate::Result<()> {
+        self.port.pair(timeout)
+    }
+
     pub(super) fn close(self, mode: CloseMode) -> crate::Result<()> {
         self.port.close(mode)
     }
@@ -164,6 +171,13 @@ where
     R: ReportingMode,
     T: Send,
 {
+    fn pair(&mut self, _timeout: Duration) -> crate::Result<()> {
+        Err(Error::new(
+            ErrorKind::WorkerFailed,
+            "test runtime token cannot process pairing commands",
+        ))
+    }
+
     fn request(
         &mut self,
         _command: <R as reporting::sealed::Sealed>::Command<M>,
