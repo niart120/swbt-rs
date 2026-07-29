@@ -2,9 +2,14 @@
 
 use crate::profile::{ControllerColors, Rgb24};
 
+mod hid;
 mod sealed {
     pub trait Sealed {}
 }
+
+use hid::{
+    HidSdpPolicySpec, JOYCON_HID_SDP_POLICY, PRO_HID_SDP_POLICY, SWITCH_HID_REPORT_DESCRIPTOR,
+};
 
 /// Model-independent logical button identity.
 ///
@@ -112,6 +117,8 @@ pub(crate) struct ModelProtocolSpec {
     pub(crate) default_colors: ControllerColors,
     pub(crate) accelerometer_calibration: SensorCalibration,
     pub(crate) gyroscope_calibration: SensorCalibration,
+    pub(crate) hid_report_descriptor: &'static [u8],
+    pub(crate) hid_sdp_policy: HidSdpPolicySpec,
 }
 
 impl ModelProtocolSpec {
@@ -122,6 +129,7 @@ impl ModelProtocolSpec {
         device_info_tail: [u8; 2],
         pairing_trigger_buttons: &'static [ButtonKind],
         default_colors: ControllerColors,
+        hid_sdp_policy: HidSdpPolicySpec,
     ) -> Self {
         Self {
             local_name,
@@ -141,6 +149,8 @@ impl ModelProtocolSpec {
                 zero_raw: [0; 3],
                 reference_raw: [0x343B; 3],
             },
+            hid_report_descriptor: &SWITCH_HID_REPORT_DESCRIPTOR,
+            hid_sdp_policy,
         }
     }
 
@@ -158,6 +168,8 @@ impl ModelProtocolSpec {
             && self.accelerometer_calibration.reference_raw == [0x4000; 3]
             && self.gyroscope_calibration.zero_raw == [0; 3]
             && self.gyroscope_calibration.reference_raw == [0x343B; 3]
+            && self.hid_report_descriptor.len() == 203
+            && self.hid_sdp_policy.is_well_formed()
     }
 }
 
@@ -312,6 +324,7 @@ macro_rules! controller_models {
                     device_type: $device_type:literal,
                     device_info_tail: $device_info_tail:expr,
                     pairing_trigger_buttons: [$($pairing_button:ident),+ $(,)?],
+                    hid_sdp_policy: $hid_sdp_policy:expr,
                     default_colors: [
                         $body_color:expr,
                         $button_color:expr,
@@ -376,6 +389,7 @@ macro_rules! controller_models {
                     $left_grip_color,
                     $right_grip_color,
                 ),
+                $hid_sdp_policy,
             );
 
             static $spec: ModelSpec = ModelSpec::new(
@@ -436,6 +450,7 @@ controller_models! {
             device_type: 0x03,
             device_info_tail: [0x03, 0x02],
             pairing_trigger_buttons: [L, R],
+            hid_sdp_policy: PRO_HID_SDP_POLICY,
             default_colors: [
                 Rgb24::new(0x32, 0x32, 0x32),
                 Rgb24::new(0xFF, 0xFF, 0xFF),
@@ -477,6 +492,7 @@ controller_models! {
             device_type: 0x01,
             device_info_tail: [0x01, 0x01],
             pairing_trigger_buttons: [SL, SR],
+            hid_sdp_policy: JOYCON_HID_SDP_POLICY,
             default_colors: [
                 Rgb24::new(0x00, 0xB2, 0xFF),
                 Rgb24::new(0x32, 0x32, 0x32),
@@ -511,6 +527,7 @@ controller_models! {
             device_type: 0x02,
             device_info_tail: [0x01, 0x01],
             pairing_trigger_buttons: [SL, SR],
+            hid_sdp_policy: JOYCON_HID_SDP_POLICY,
             default_colors: [
                 Rgb24::new(0xFF, 0x3B, 0x30),
                 Rgb24::new(0x32, 0x32, 0x32),
