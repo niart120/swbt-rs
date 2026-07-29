@@ -105,6 +105,32 @@ queue 外の priority shutdown latch とする。fake clock / scripted waiter �
 測定してから queue 容量と command batch 上限を固定する。Bumble 側で activity notifier を
 得られない場合は M3 の upstream 方針として扱い、短周期 polling を未測定の恒久 fallback にしない。
 
+### 測定結果
+
+clean commit `8dd703fcc6bf1abc95ff6ba75510543b40c775af` の release test を Windows
+`10.0.26200`、AMD64 Family 26 Model 68、32 logical CPUs で実行した。証拠は
+`spec/complete/unit_003/evidence/activity-wait-windows-release-20260729/` に置く。raw
+42,002 records、summary、manifest と各 SHA-256 を保持し、source は実行中不変だった。
+
+Direct/Open の10秒idleではprocess CPU delta、wait return、worker wake、transport pollが
+すべて0だった。Periodic 10,000 ticksはlateness p99 1.8713 ms、max 2.2824 ms、skip 0、
+4 ms未満のburst 0だった。単独command responseとtransport drainのp99はそれぞれ1.7 µs、
+1.1 µs、満杯queue shutdownのcompletion＋join p99は58.6 µsだった。
+
+fairnessは各deadline後にworkerをgateしたまま16 commandsと64 valid HID eventsを配置し、
+gate release request前のstagingと後のworker処理を分けた。10,000 ticksで160,000 commands、
+640,000 eventsを処理し、post-release accepted `0x30` p99は81.4 µs、error、skip、burstは
+0だった。`0x21`は300 ms holdoffを混ぜないためsend attemptを観測して意図的にrejectした。
+
+### 採用判断
+
+M2 は activity wait と command capacity / command batch / poll batches = `16/16/4` を採用する。
+短周期pollingは採用しない。測定は実`WorkerCore`、spawn済みworker loop、
+`ChannelWorkerWaiter`、protocol、`TestTransport`までで、Bumble、USB/HCI driver、air、
+Switch ACKは含まない。M3はBumble reader activityを同じnotifierへ接続できることを入口条件とし、
+できなければupstream変更またはwait designを再判断する。M5で実adapter/Switch、M8でlong-run
+jitterとpower managementを再測定する。
+
 ## 2026-07-29: M2 runtime で意図的に変える Python state semantics
 
 ### 現状

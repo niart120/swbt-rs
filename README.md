@@ -50,9 +50,9 @@ cargo build --all-features --locked
 git diff --check
 ```
 
-`cargo tree --no-default-features --edges normal --locked` の通常依存は `swbt-rs` だけになり、
-Bumble を含みません。selected Miri は nightly の `miri` component を導入した環境で次の
-command を実行します。
+`cargo tree --no-default-features --edges normal --locked` の通常依存は `serde_json` の
+依存木だけで、Bumble を含みません。selected Miri は nightly の `miri` component を
+導入した環境で次の command を実行します。
 
 ```powershell
 cargo +nightly miri test --lib --no-default-features --locked protocol::
