@@ -133,10 +133,6 @@ struct WorkerCompletion {
 
 enum WorkerCompletionWait {
     Completed(WorkerCompletion),
-    #[allow(
-        dead_code,
-        reason = "T35 supplies the deterministic timeout outcome without wall-clock waiting"
-    )]
     TimedOut,
     Disconnected,
 }
@@ -736,13 +732,14 @@ mod tests {
 
     use super::{
         DROP_COMPLETION_TIMEOUT, WorkerCompletion, WorkerCompletionWait, WorkerCompletionWaiter,
-        WorkerFailureCause, WorkerJoinError, WorkerOwner, WorkerThreadOutcome,
-        priority_shutdown_channel, spawn_worker_thread,
+        WorkerFailureCause, WorkerJoinError, WorkerOwner, WorkerTerminal, WorkerThread,
+        WorkerThreadOutcome, priority_shutdown_channel, spawn_worker_thread,
     };
 
     const DEVICE_INFO_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
     const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
     const CONNECTION_TIMEOUT: Duration = Duration::from_secs(2);
+    const DEADLOCK_WATCHDOG: Duration = Duration::from_secs(2);
 
     #[test]
     fn core_failure_preserves_completed_response_and_fails_the_queued_waiter() {
@@ -1208,6 +1205,129 @@ mod tests {
     }
 
     #[test]
+    fn drop_timeout_detaches_the_unfinished_worker_without_wall_clock_wait() {
+        let (activity, _activity_receiver) = activity_channel();
+        let (shutdown_client, mut shutdown_receiver) = priority_shutdown_channel(activity.clone());
+        let (command_client, _command_receiver) = command_channel::<()>(1, activity);
+        let (completion_sender, completion) = sync_channel(1);
+        let (worker_started, worker_started_receiver) = sync_channel(1);
+        let (worker_release, worker_release_receiver) = sync_channel(1);
+        let (completion_rejected, completion_rejected_receiver) = sync_channel(1);
+        let (worker_exited, worker_exited_receiver) = sync_channel(1);
+        let join = std_thread::spawn(move || {
+            worker_started.send(()).expect("report worker start");
+            worker_release_receiver
+                .recv()
+                .expect("test releases the unfinished worker");
+            let rejected = completion_sender
+                .send(WorkerCompletion {
+                    terminal: WorkerTerminal::Failed {
+                        cause: WorkerFailureCause::CompletionDisconnected,
+                        cleanup_error: None,
+                    },
+                    delivery_error: None,
+                })
+                .is_err();
+            completion_rejected
+                .send(rejected)
+                .expect("report late completion delivery");
+            worker_exited.send(()).expect("report worker exit");
+        });
+        worker_started_receiver
+            .recv_timeout(DEADLOCK_WATCHDOG)
+            .expect("dummy worker starts");
+        let worker_thread = WorkerThread { completion, join };
+        let (wait_observation, wait_observation_receiver) = sync_channel(1);
+        let (return_timeout, return_timeout_receiver) = sync_channel(1);
+        let owner = WorkerOwner::with_completion_waiter(
+            command_client,
+            shutdown_client,
+            worker_thread,
+            DROP_COMPLETION_TIMEOUT,
+            Box::new(ScriptedNoCompletionWaiter {
+                observation: wait_observation,
+                return_timeout: return_timeout_receiver,
+            }),
+        );
+        let (drop_finished, drop_finished_receiver) = sync_channel(1);
+        let drop_thread = std_thread::spawn(move || {
+            drop(owner);
+            drop_finished.send(()).expect("report completed owner drop");
+        });
+
+        let wait_observation = wait_observation_receiver.recv_timeout(DEADLOCK_WATCHDOG);
+        let shutdown_before_timeout = shutdown_receiver.take();
+        let worker_exit_before_timeout = worker_exited_receiver.try_recv();
+        let return_timeout_result = return_timeout.send(());
+        let drop_before_worker_release = drop_finished_receiver.recv_timeout(DEADLOCK_WATCHDOG);
+        let worker_exit_before_release = worker_exited_receiver.try_recv();
+
+        let worker_release_result = worker_release.send(());
+        let completion_rejected = completion_rejected_receiver.recv_timeout(DEADLOCK_WATCHDOG);
+        let worker_exit_after_release = worker_exited_receiver.recv_timeout(DEADLOCK_WATCHDOG);
+        let drop_after_release = if drop_before_worker_release.is_ok() {
+            None
+        } else {
+            Some(drop_finished_receiver.recv_timeout(DEADLOCK_WATCHDOG))
+        };
+        let drop_completed = drop_before_worker_release.is_ok()
+            || drop_after_release.as_ref().is_some_and(Result::is_ok);
+        let drop_thread_result = drop_completed.then(|| drop_thread.join());
+
+        assert_eq!(
+            wait_observation,
+            Ok((Duration::from_millis(100), true)),
+            "the scripted waiter must observe a connected channel without completion"
+        );
+        assert_eq!(
+            shutdown_before_timeout,
+            Some(ShutdownRequest::dropped()),
+            "Drop must publish the priority shutdown before waiting"
+        );
+        assert_eq!(
+            worker_exit_before_timeout,
+            Err(TryRecvError::Empty),
+            "the worker must still be running when the timeout is requested"
+        );
+        assert!(
+            return_timeout_result.is_ok(),
+            "the test must release the scripted timeout"
+        );
+        assert!(
+            drop_before_worker_release.is_ok(),
+            "the timed-out Drop must return without joining the unfinished worker"
+        );
+        assert_eq!(
+            worker_exit_before_release,
+            Err(TryRecvError::Empty),
+            "Drop must return while the detached worker is still running"
+        );
+        assert!(
+            worker_release_result.is_ok(),
+            "the test must release the detached worker"
+        );
+        assert_eq!(
+            completion_rejected,
+            Ok(true),
+            "a late completion must observe the dropped completion receiver"
+        );
+        assert!(
+            worker_exit_after_release.is_ok(),
+            "the detached worker must finish after the test releases it"
+        );
+        if let Some(drop_after_release) = drop_after_release {
+            assert!(
+                drop_after_release.is_ok(),
+                "the Drop test thread must remain recoverable after the watchdog"
+            );
+        }
+        assert!(
+            matches!(drop_thread_result, Some(Ok(()))),
+            "the Drop test thread must not panic"
+        );
+    }
+
+    #[test]
     fn drop_request_replaces_only_an_untaken_explicit_shutdown() {
         let (activity, wakes) = activity_channel();
         let (shutdown_client, mut shutdown_receiver) = priority_shutdown_channel(activity);
@@ -1530,6 +1650,28 @@ mod tests {
             _timeout: Duration,
         ) -> WorkerCompletionWait {
             panic!("explicit finish must disarm the bounded Drop waiter")
+        }
+    }
+
+    struct ScriptedNoCompletionWaiter {
+        observation: SyncSender<(Duration, bool)>,
+        return_timeout: MpscReceiver<()>,
+    }
+
+    impl WorkerCompletionWaiter for ScriptedNoCompletionWaiter {
+        fn wait(
+            &mut self,
+            completion: &MpscReceiver<WorkerCompletion>,
+            timeout: Duration,
+        ) -> WorkerCompletionWait {
+            let no_completion = matches!(completion.try_recv(), Err(TryRecvError::Empty));
+            self.observation
+                .send((timeout, no_completion))
+                .expect("report scripted completion observation");
+            self.return_timeout
+                .recv()
+                .expect("test releases the scripted timeout");
+            WorkerCompletionWait::TimedOut
         }
     }
 
