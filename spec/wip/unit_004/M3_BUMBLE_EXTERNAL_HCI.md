@@ -268,6 +268,14 @@ message や secret を展開せず、`source()` で原因を追えるように�
 10 ms endpoint read を内部で無限に繰り返す。このままでは idle reader を停止できず、
 100 回 open/init/close、process 後 reopen、worker join を完了扱いにしない。
 
+T05 の partial failure cleanup evidence は、有限 scripted source が `None` を返した後に
+source/sink の `Drop` を観測した範囲に限る。production USB reader の cancellation、
+completion、join、USB claim release、terminal state、reopen は確認していない。固定 revision
+の `ExternalHost::new` を使う production initializer は Controller / `TransportPort` から
+到達不能のまま保つ。T06 で cancellation-aware read、shutdown API、owned `JoinHandle`、
+enqueue 後 wake、typed reader/writer error を持つ exact revision を固定するまで production
+path へ接続しない。scripted `Drop` 成功を production cleanup の根拠にしない。
+
 T06 の green 前に、exact revision を持つ upstream PR または temporary fork で上記を解消する。
 temporary fork を使う場合も exact commit を `Cargo.toml` / `Cargo.lock` に固定し、最小再現、
 upstream issue/PR、差分、撤去条件をこの spec に記録する。外部 repository への write、
@@ -309,10 +317,11 @@ probe API の有無を M3 completion blocker にしない。
     local address、HCI/LMP、Classic判定、source-preserving error mapping を検査する。
   - 非 Classic controller は worker 起動前に拒否し、開いた transport を cleanup する。
   - capability の表示順 address が反転せず NX device-info 応答へ届くことを検査する。
-- [ ] **T05 — Bumble dependency and synchronous initialization**
+- [x] **T05 — Bumble dependency and synchronous initialization**
   - fixed revision の transport/host/HCI dependency を feature gate する。
   - injected Bumble boundary で split→host→configured device→initialize→address/identity/
-    scan-off の順序と partial failure cleanup を検査する。
+    scan-off の順序と有限 scripted transport の partial failure cleanup を検査する。
+    production reader の cancellation/join と USB release は T06 で検査する。
 - [ ] **T06 — reader wake、cancellation、terminal、join**
   - upstream gate を解消した exact revision を固定する。
   - enqueue 後 wake、wake coalescing、unplug terminal 一回、sticky error、reader shutdown/
@@ -341,19 +350,30 @@ probe API の有無を M3 completion blocker にしない。
 | refactor-done | T02: USB selector grammar | red: `cargo test usb_selector_accepts_the_supported_bumble_subset --all-features --locked` は `UsbSelector`、`AdapterSelector::as_str` / `parse_usb`、`ErrorKind::TransportOpen` 未定義の compile error。green: supported subset、invalid/unsupported syntax、serial redaction の unit test 3件が成功。index、hex 1〜4桁の VID/PID、serial、occurrence、bus/port path を owned internal typeへ変換し、ASCII 数字、`u8` / `u16` / `usize` overflow、empty segment、非 USB scheme、`pyusb:`、force、SCO、dispatch metadata を `TransportOpen` にした。refactor: VID/PID の選択方法を `First` / `Serial` / `Occurrence` に分けて不可能状態を除き、raw/parsed selector と error の `Debug` / `Display` から serial を除外。`cargo test --all-targets --all-features --locked` と default は lib 220 passed / 1 ignored と integration/example 全件、clippy `-D warnings`、rustdoc `-D warnings` が成功 |
 | refactor-done | T03: model-independent config projection | red: `cargo test transport_config_projects_model_protocol_metadata_into_complete_local_name_eir --all-features --locked` は `ControllerConfig::transport_config` 未定義の compile error。green: 3 model の name、`0x002508` Class of Device、Complete Local Name AD、zero-padded 240-byte EIR、Classic/SSP/SC/LE/scan policy と、各 model の Periodic/Direct 同値性を unit test 2件で固定。refactor: generic `ControllerConfig<M, R>` から model metadata だけを owned、非 generic の `TransportConfig` へ投影し、raw AD と Classic EIR を同じ TLV から生成。固定 Bumble revision では raw AD を `DeviceConfiguration::advertising_data`、240 bytes を HCI `WriteExtendedInquiryResponse` へ別々に渡すことを確認。`cargo test --all-targets --all-features --locked` と default は lib 222 passed / 1 ignored と integration/example 全件、clippy `-D warnings` が成功 |
 | refactor-done | T04: open returns initialized capabilities | red: `cargo test initialized_capabilities_preserve_identity_versions_and_classic_requirements --all-features --locked` は capability 型、version/USB/Classic metadata、`FakeTransport::with_capabilities` が未定義の compile error。green: capability field と Classic 判定条件、Classic ACL metadata 不在、全ゼロ address、repeated fake open、非 Classic の worker 起動前拒否と cleanup、distinctive address の device-info 応答を unit test 4件で固定。partial-open error は public `TransportOpen`、crate-private `OpenFailed`、typed backend source の三段を保持した。refactor: `RuntimeComponents` の先行 address 注入を削除し、`TransportPort::open` の immutable snapshot だけを protocol 構築へ渡した。version は 5 field の atomic `Option`、Classic ACL metadata は `Option` にして upstream の不在をゼロ値に変換しない。`cargo test --all-features --locked` と default は lib 226 passed / 1 ignored と integration/doc test 全件、`cargo clippy --all-targets --all-features --locked -- -D warnings`、all-features/default build、rustdoc `-D warnings`、`cargo fmt --check`、`git diff --check` が成功 |
+| refactor-skipped | T05: Bumble dependency and synchronous initialization | red: `cargo test bumble_initialization_uses_configured_device_and_exact_hci_order --all-features --locked` は `bumble-hci`、`bumble-host`、`bumble-transport` と初期化 module が未定義の compile error。green: `cargo test runtime::transport::bumble_tests --all-features --locked` は 4件成功。split opener だけを置換し、固定 revision の実 `ExternalHost`、`Device::from_config`、`initialize_device`、`send_command` を使って selector、USB metadata、model 由来 `DeviceConfiguration`、Reset/capability/ReadBdAddr/identity/scan-off の command 順序、HCI little-endian address の一度だけの反転、Command Complete の型と status を固定した。初期化途中の sink failure は crate-private `OpenFailed` と typed Bumble source を保持し、有限な scripted source/sink の両方を解放した。これは実 USB reader の cancellation、join、interface release を証明しない。固定 upstream の detached reader と typed error 欠落は T06 blocker のままとした。direct dependency は exact revision の `bumble-hci`、`bumble-host`、`bumble-transport` に限定し、core `bumble` は transitive のみにした。Cargo.lock の package は 27 から 236（+209）へ増え、HEAD と共通する package の版は変えていない。`cargo test --all-targets --all-features --locked` は lib 230 passed / 1 ignored と integration/example 全件、`cargo test --locked` は default で lib 226 passed / 1 ignored と integration/doc test 全件が成功した。`cargo +1.87.0 check --all-targets --all-features --locked`、clippy `-D warnings`、all-features/default build、rustdoc `-D warnings` も成功。production ownership の構造変更は T06 の upstream gate 解消後に行うため、この cycle では refactor を追加していない。実機 USB は未実行 |
 
 ## 7. 設計メモ
 
 ### 7.1 dependency
 
-現在の optional `bumble` dependency は core-only で I/O API を含まない。M3 は同じ exact
-revision の `bumble-transport`、`bumble-host`、`bumble-hci` を direct optional dependency
-として追加する。no-open discovery には `rusb` を direct optional dependency として追加する。
+T05 前の optional `bumble` dependency は core-only で I/O API を含まなかった。T05 で同じ
+exact revision の `bumble-transport`、`bumble-host`、`bumble-hci` を direct optional
+dependency とし、core `bumble` の direct dependency を除いた。core はこれらの transitive
+dependency として残る。no-open discovery には `rusb` を direct optional dependency として
+使用する。
 `bumble-controller` は transport/host の transitive dependency には含まれるが、M4 の
 virtual integration まで direct dependency に追加しない。
 
+`cargo tree --all-features --locked -p swbt-rs --depth 1` で確認した direct graph は
+`bumble-hci 0.1.0`、`bumble-host 0.1.0`、`bumble-transport 0.1.0`、`rusb 0.9.4`、
+`serde_json 1.0.151`、`tracing 0.1.44` である。Bumble 3 crate はすべて
+`bbac2a6803b8cab0920ab725a23aa408fc4fed85` を指す。
+`cargo tree --no-default-features --locked -p swbt-rs --depth 1` の direct graph は
+`serde_json 1.0.151` だけで、Bumble、rusb、tracing は default graph に入らない。
+
 `bumble-transport` は transport ごとの Cargo feature 分割がなく、Tokio、tonic、WebSocket、
-audio 関連も依存 graph に入る。M3 では build time/size/license を測定し、依存削減を
+audio 関連も依存 graph に入る。T05 の Cargo.lock では package が 27 から 236（+209）へ
+増えた。既存 package の版更新は含まない。build time/size/license は T10 で測定し、依存削減を
 未測定の印象で判断しない。
 
 ### 7.2 ownership

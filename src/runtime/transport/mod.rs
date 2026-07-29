@@ -1,3 +1,7 @@
+#[cfg(feature = "bumble")]
+mod bumble;
+#[cfg(all(test, feature = "bumble"))]
+mod bumble_tests;
 mod capabilities;
 mod config;
 
@@ -8,7 +12,7 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::time::Duration;
 
 pub(crate) use capabilities::TransportCapabilities;
-#[cfg(test)]
+#[cfg(any(feature = "bumble", test))]
 pub(crate) use capabilities::{ClassicAclBufferInfo, ControllerVersionInfo, UsbTransportMetadata};
 pub(crate) use config::TransportConfig;
 
