@@ -13,3 +13,4 @@ pub(crate) mod session;
 pub(crate) mod state;
 pub(crate) mod transport;
 pub(crate) mod worker;
+pub(crate) mod worker_thread;

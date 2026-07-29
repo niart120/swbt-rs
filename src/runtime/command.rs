@@ -21,6 +21,18 @@ pub(crate) enum CommandEnqueueError {
     not(test),
     allow(
         dead_code,
+        reason = "T26 blocking controller calls map a disconnected response to WorkerFailed"
+    )
+)]
+pub(crate) enum CommandResponseError {
+    WorkerFailed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
         reason = "T24 worker loop handles response delivery invariant failures"
     )
 )]
@@ -120,6 +132,13 @@ impl<C> CommandReceiver<C> {
         self.deliver(progress.take_command_results())
     }
 
+    pub(crate) fn deliver_completion(
+        &mut self,
+        result: CommandResult,
+    ) -> Result<(), CommandDeliveryError> {
+        self.deliver([WorkerCommandProgress::Complete(result)])
+    }
+
     fn deliver(
         &mut self,
         results: impl IntoIterator<Item = WorkerCommandProgress>,
@@ -167,6 +186,19 @@ pub(crate) struct CommandResponse {
 }
 
 impl CommandResponse {
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T26 blocking controller calls wait for a response or worker termination"
+        )
+    )]
+    pub(crate) fn recv(self) -> Result<CommandResult, CommandResponseError> {
+        self.receiver
+            .recv()
+            .map_err(|_| CommandResponseError::WorkerFailed)
+    }
+
     #[cfg_attr(
         not(test),
         allow(

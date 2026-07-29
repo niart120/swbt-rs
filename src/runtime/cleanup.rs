@@ -167,7 +167,6 @@ impl CloseCompletion {
     }
 
     #[must_use]
-    #[cfg(test)]
     pub(crate) const fn performed(&self) -> bool {
         self.performed
     }

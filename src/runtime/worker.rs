@@ -41,7 +41,7 @@ use crate::{
 
 const EXPLICIT_CLOSE_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
-pub(crate) trait MonotonicClock {
+pub(crate) trait MonotonicClock: Send {
     fn now(&self) -> Duration;
 }
 
@@ -56,7 +56,7 @@ pub(crate) enum WorkerWaitError {
     Disconnected,
 }
 
-pub(crate) trait WorkerWaiter {
+pub(crate) trait WorkerWaiter: Send {
     fn wait(
         &mut self,
         request: WorkerWaitRequest,
@@ -128,7 +128,7 @@ impl ExplicitCloseRequest {
     }
 }
 
-pub(crate) trait PriorityShutdown {
+pub(crate) trait PriorityShutdown: Send {
     fn take(&mut self) -> Option<ExplicitCloseRequest>;
 }
 
@@ -338,8 +338,8 @@ pub(crate) struct DirectRuntime<M: ControllerModel> {
 }
 
 pub(crate) trait WorkerReporting<M: ControllerModel>: ReportingMode {
-    type RuntimeState;
-    type Command;
+    type RuntimeState: Send + 'static;
+    type Command: Send + 'static;
 
     fn begin_session(
         runtime: &mut Self::RuntimeState,
