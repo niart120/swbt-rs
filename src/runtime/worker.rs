@@ -114,22 +114,27 @@ impl WorkerWaiter for ChannelWorkerWaiter {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ExplicitCloseRequest {
-    mode: CloseMode,
+pub(crate) enum ShutdownRequest {
+    Explicit(CloseMode),
+    Dropped,
 }
 
-impl ExplicitCloseRequest {
+impl ShutdownRequest {
     #[cfg_attr(
         not(test),
-        allow(dead_code, reason = "T25 and T33 construct priority close requests")
+        allow(dead_code, reason = "T33 constructs explicit priority close requests")
     )]
-    pub(crate) const fn new(mode: CloseMode) -> Self {
-        Self { mode }
+    pub(crate) const fn explicit(mode: CloseMode) -> Self {
+        Self::Explicit(mode)
+    }
+
+    pub(crate) const fn dropped() -> Self {
+        Self::Dropped
     }
 }
 
 pub(crate) trait PriorityShutdown: Send {
-    fn take(&mut self) -> Option<ExplicitCloseRequest>;
+    fn take(&mut self) -> Option<ShutdownRequest>;
 }
 
 pub(crate) trait CommandSource<C> {
@@ -999,7 +1004,7 @@ where
 
     fn close(
         &mut self,
-        request: ExplicitCloseRequest,
+        request: ShutdownRequest,
         now: Duration,
         progress: StepProgress,
     ) -> WorkerStep {
@@ -1016,15 +1021,20 @@ where
         );
         R::stop_session(&mut self.reporting);
         let now_ns = u64::try_from(now.as_nanos()).unwrap_or(u64::MAX);
-        let completion =
-            CleanupSequence::new(request.mode, EXPLICIT_CLOSE_DRAIN_TIMEOUT).run(CleanupContext {
-                connected: self.connected,
-                now_ns,
-                lifecycle: &mut self.lifecycle,
-                protocol: &self.protocol,
-                sender: &mut self.sender,
-                transport: self.transport.as_mut(),
-            });
+        let cleanup = match request {
+            ShutdownRequest::Explicit(mode) => {
+                CleanupSequence::new(mode, EXPLICIT_CLOSE_DRAIN_TIMEOUT)
+            }
+            ShutdownRequest::Dropped => CleanupSequence::for_drop(),
+        };
+        let completion = cleanup.run(CleanupContext {
+            connected: self.connected,
+            now_ns,
+            lifecycle: &mut self.lifecycle,
+            protocol: &self.protocol,
+            sender: &mut self.sender,
+            transport: self.transport.as_mut(),
+        });
         self.connected = false;
         self.connection = None;
         WorkerStep::Closed {
@@ -1716,11 +1726,11 @@ mod tests {
                 fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
             },
             worker::{
-                ChannelWorkerWaiter, CommandSource, CommonCommand, DirectCommand,
-                ExplicitCloseRequest, MonotonicClock, PeriodicCommand, PriorityShutdown,
-                StepProgress, WorkerBudget, WorkerCommandError, WorkerCommandProgress, WorkerCore,
-                WorkerCoreError, WorkerOperationError, WorkerStep, WorkerWaitError,
-                WorkerWaitRequest, WorkerWaiter, periodic_tap_times, wait_for_next_iteration,
+                ChannelWorkerWaiter, CommandSource, CommonCommand, DirectCommand, MonotonicClock,
+                PeriodicCommand, PriorityShutdown, ShutdownRequest, StepProgress, WorkerBudget,
+                WorkerCommandError, WorkerCommandProgress, WorkerCore, WorkerCoreError,
+                WorkerOperationError, WorkerStep, WorkerWaitError, WorkerWaitRequest, WorkerWaiter,
+                periodic_tap_times, wait_for_next_iteration,
             },
         },
     };
@@ -1833,7 +1843,7 @@ mod tests {
             Some(WorkerWaitRequest::Activity)
         );
 
-        let mut shutdown = ShutdownLatch::new(ExplicitCloseRequest::new(CloseMode::WithoutNeutral));
+        let mut shutdown = ShutdownLatch::new(ShutdownRequest::explicit(CloseMode::WithoutNeutral));
         shutdown_activity.notify();
         wait_for_next_iteration(&idle, &clock, &mut waiter)
             .expect("shutdown activity wakes the idle worker");
@@ -1991,7 +2001,7 @@ mod tests {
 
         harness.clock.set(release_at);
         lock(&harness.trace).clear();
-        let mut shutdown = ShutdownLatch::new(ExplicitCloseRequest::new(CloseMode::WithoutNeutral));
+        let mut shutdown = ShutdownLatch::new(ShutdownRequest::explicit(CloseMode::WithoutNeutral));
 
         let step = harness
             .worker
@@ -2044,7 +2054,7 @@ mod tests {
             Arc::clone(&harness.trace),
         );
         let mut shutdown =
-            ShutdownLatch::after_checks(ExplicitCloseRequest::new(CloseMode::WithoutNeutral), 1);
+            ShutdownLatch::after_checks(ShutdownRequest::explicit(CloseMode::WithoutNeutral), 1);
         lock(&harness.trace).clear();
 
         let step = harness
@@ -2245,7 +2255,7 @@ mod tests {
         let timer_before = harness.worker.sender_timer();
         let mut commands = TracedCommands::new([], Arc::clone(&harness.trace));
         let mut shutdown =
-            ShutdownLatch::after_checks(ExplicitCloseRequest::new(CloseMode::WithoutNeutral), 1);
+            ShutdownLatch::after_checks(ShutdownRequest::explicit(CloseMode::WithoutNeutral), 1);
         lock(&harness.trace).clear();
 
         let step = harness
@@ -2651,7 +2661,7 @@ mod tests {
         let timer_before = harness.worker.sender_timer();
         let mut commands = TracedCommands::new([], Arc::clone(&harness.trace));
         let mut shutdown =
-            ShutdownLatch::after_checks(ExplicitCloseRequest::new(CloseMode::WithoutNeutral), 1);
+            ShutdownLatch::after_checks(ShutdownRequest::explicit(CloseMode::WithoutNeutral), 1);
         lock(&harness.trace).clear();
 
         let step = harness
@@ -3187,19 +3197,19 @@ mod tests {
 
     #[derive(Default)]
     struct ShutdownLatch {
-        request: Option<ExplicitCloseRequest>,
+        request: Option<ShutdownRequest>,
         checks_before_request: usize,
     }
 
     impl ShutdownLatch {
-        const fn new(request: ExplicitCloseRequest) -> Self {
+        const fn new(request: ShutdownRequest) -> Self {
             Self {
                 request: Some(request),
                 checks_before_request: 0,
             }
         }
 
-        const fn after_checks(request: ExplicitCloseRequest, checks_before_request: usize) -> Self {
+        const fn after_checks(request: ShutdownRequest, checks_before_request: usize) -> Self {
             Self {
                 request: Some(request),
                 checks_before_request,
@@ -3208,7 +3218,7 @@ mod tests {
     }
 
     impl PriorityShutdown for ShutdownLatch {
-        fn take(&mut self) -> Option<ExplicitCloseRequest> {
+        fn take(&mut self) -> Option<ShutdownRequest> {
             if self.request.is_some() && self.checks_before_request > 0 {
                 self.checks_before_request -= 1;
                 return None;

@@ -1,21 +1,28 @@
 use std::{
     io,
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
-    sync::mpsc::{Receiver, SyncSender, sync_channel},
+    sync::{
+        Arc, Mutex,
+        mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel},
+    },
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use crate::{
     model::ControllerModel,
     runtime::{
         cleanup::{CloseCompletion, ExplicitCloseError},
-        command::{CommandDeliveryError, CommandReceiver},
+        command::{CommandClient, CommandDeliveryError, CommandReceiver},
+        transport::ActivityNotifier,
         worker::{
-            MonotonicClock, PriorityShutdown, WorkerCore, WorkerCoreError, WorkerReporting,
-            WorkerStep, WorkerWaitError, WorkerWaiter, wait_for_next_iteration,
+            MonotonicClock, PriorityShutdown, ShutdownRequest, WorkerCore, WorkerCoreError,
+            WorkerReporting, WorkerStep, WorkerWaitError, WorkerWaiter, wait_for_next_iteration,
         },
     },
 };
+
+const DROP_COMPLETION_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 #[cfg_attr(
@@ -79,6 +86,136 @@ struct WorkerCompletion {
     delivery_error: Option<CommandDeliveryError>,
 }
 
+enum WorkerCompletionWait {
+    Completed(WorkerCompletion),
+    #[allow(
+        dead_code,
+        reason = "T35 supplies the deterministic timeout outcome without wall-clock waiting"
+    )]
+    TimedOut,
+    Disconnected,
+}
+
+trait WorkerCompletionWaiter: Send {
+    fn wait(
+        &mut self,
+        completion: &Receiver<WorkerCompletion>,
+        timeout: Duration,
+    ) -> WorkerCompletionWait;
+}
+
+#[allow(
+    dead_code,
+    reason = "T31 constructs the production waiter; T25 and T35 inject scripted waiters"
+)]
+struct ChannelWorkerCompletionWaiter;
+
+impl WorkerCompletionWaiter for ChannelWorkerCompletionWaiter {
+    fn wait(
+        &mut self,
+        completion: &Receiver<WorkerCompletion>,
+        timeout: Duration,
+    ) -> WorkerCompletionWait {
+        match completion.recv_timeout(timeout) {
+            Ok(completion) => WorkerCompletionWait::Completed(completion),
+            Err(RecvTimeoutError::Timeout) => WorkerCompletionWait::TimedOut,
+            Err(RecvTimeoutError::Disconnected) => WorkerCompletionWait::Disconnected,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShutdownState {
+    Running,
+    Requested(ShutdownRequest),
+    Taken,
+}
+
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "T31 constructs the shared priority shutdown channel"
+    )
+)]
+pub(crate) struct PriorityShutdownClient {
+    state: Arc<Mutex<ShutdownState>>,
+    activity: ActivityNotifier,
+}
+
+pub(crate) struct PriorityShutdownReceiver {
+    state: Arc<Mutex<ShutdownState>>,
+}
+
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "T31 constructs the shared priority shutdown channel"
+    )
+)]
+pub(crate) fn priority_shutdown_channel(
+    activity: ActivityNotifier,
+) -> (PriorityShutdownClient, PriorityShutdownReceiver) {
+    let state = Arc::new(Mutex::new(ShutdownState::Running));
+    (
+        PriorityShutdownClient {
+            state: Arc::clone(&state),
+            activity,
+        },
+        PriorityShutdownReceiver { state },
+    )
+}
+
+impl PriorityShutdownClient {
+    fn request(&self, request: ShutdownRequest) -> bool {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let changed = match (*state, request) {
+            (ShutdownState::Running, _) => {
+                *state = ShutdownState::Requested(request);
+                true
+            }
+            (ShutdownState::Requested(ShutdownRequest::Explicit(_)), ShutdownRequest::Dropped) => {
+                *state = ShutdownState::Requested(ShutdownRequest::Dropped);
+                true
+            }
+            (
+                ShutdownState::Requested(ShutdownRequest::Dropped),
+                ShutdownRequest::Explicit(_) | ShutdownRequest::Dropped,
+            )
+            | (
+                ShutdownState::Requested(ShutdownRequest::Explicit(_)),
+                ShutdownRequest::Explicit(_),
+            )
+            | (ShutdownState::Taken, _) => false,
+        };
+        drop(state);
+        if changed {
+            self.activity.notify();
+        }
+        changed
+    }
+}
+
+impl PriorityShutdown for PriorityShutdownReceiver {
+    fn take(&mut self) -> Option<ShutdownRequest> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match *state {
+            ShutdownState::Requested(request) => {
+                *state = ShutdownState::Taken;
+                Some(request)
+            }
+            ShutdownState::Running | ShutdownState::Taken => None,
+        }
+    }
+}
+
 #[cfg_attr(
     not(test),
     allow(
@@ -102,31 +239,116 @@ impl WorkerThread {
     pub(crate) fn finish(self) -> WorkerThreadOutcome {
         let Self { completion, join } = self;
         let Ok(completion) = completion.recv() else {
-            return WorkerThreadOutcome::Failed {
-                cause: WorkerFailureCause::CompletionDisconnected,
-                delivery_error: None,
-                join_error: join.join().err().map(|_| WorkerJoinError::Panicked),
-            };
+            return finish_disconnected(join);
         };
+        finish_completed(completion, join)
+    }
 
-        match completion.terminal {
-            WorkerTerminal::Closed(close) => {
-                let result = if close.performed() {
-                    close.finish_with_join(|| join.join().map_err(|_| WorkerJoinError::Panicked))
-                } else {
-                    join.join()
-                        .map_err(|_| ExplicitCloseError::Join(WorkerJoinError::Panicked))
-                };
-                WorkerThreadOutcome::Closed {
-                    result,
-                    delivery_error: completion.delivery_error,
-                }
-            }
-            WorkerTerminal::Failed(cause) => WorkerThreadOutcome::Failed {
-                cause,
+    fn finish_with_waiter(
+        self,
+        waiter: &mut dyn WorkerCompletionWaiter,
+        timeout: Duration,
+    ) -> Option<WorkerThreadOutcome> {
+        let Self { completion, join } = self;
+        match waiter.wait(&completion, timeout) {
+            WorkerCompletionWait::Completed(completion) => Some(finish_completed(completion, join)),
+            WorkerCompletionWait::TimedOut | WorkerCompletionWait::Disconnected => None,
+        }
+    }
+}
+
+fn finish_completed(completion: WorkerCompletion, join: JoinHandle<()>) -> WorkerThreadOutcome {
+    match completion.terminal {
+        WorkerTerminal::Closed(close) => {
+            let result = if close.performed() {
+                close.finish_with_join(|| join.join().map_err(|_| WorkerJoinError::Panicked))
+            } else {
+                join.join()
+                    .map_err(|_| ExplicitCloseError::Join(WorkerJoinError::Panicked))
+            };
+            WorkerThreadOutcome::Closed {
+                result,
                 delivery_error: completion.delivery_error,
-                join_error: join.join().err().map(|_| WorkerJoinError::Panicked),
-            },
+            }
+        }
+        WorkerTerminal::Failed(cause) => WorkerThreadOutcome::Failed {
+            cause,
+            delivery_error: completion.delivery_error,
+            join_error: join.join().err().map(|_| WorkerJoinError::Panicked),
+        },
+    }
+}
+
+fn finish_disconnected(join: JoinHandle<()>) -> WorkerThreadOutcome {
+    WorkerThreadOutcome::Failed {
+        cause: WorkerFailureCause::CompletionDisconnected,
+        delivery_error: None,
+        join_error: join.join().err().map(|_| WorkerJoinError::Panicked),
+    }
+}
+
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "T31 owns the command and worker thread handles in the controller"
+    )
+)]
+pub(crate) struct WorkerOwner<C> {
+    commands: Option<CommandClient<C>>,
+    shutdown: PriorityShutdownClient,
+    thread: Option<WorkerThread>,
+    drop_timeout: Duration,
+    completion_waiter: Box<dyn WorkerCompletionWaiter>,
+}
+
+impl<C> WorkerOwner<C> {
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "T31 constructs the controller worker owner")
+    )]
+    #[cfg_attr(
+        test,
+        allow(dead_code, reason = "T31 constructs the controller worker owner")
+    )]
+    pub(crate) fn new(
+        commands: CommandClient<C>,
+        shutdown: PriorityShutdownClient,
+        thread: WorkerThread,
+    ) -> Self {
+        Self {
+            commands: Some(commands),
+            shutdown,
+            thread: Some(thread),
+            drop_timeout: DROP_COMPLETION_TIMEOUT,
+            completion_waiter: Box::new(ChannelWorkerCompletionWaiter),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_completion_waiter(
+        commands: CommandClient<C>,
+        shutdown: PriorityShutdownClient,
+        thread: WorkerThread,
+        drop_timeout: Duration,
+        completion_waiter: Box<dyn WorkerCompletionWaiter>,
+    ) -> Self {
+        Self {
+            commands: Some(commands),
+            shutdown,
+            thread: Some(thread),
+            drop_timeout,
+            completion_waiter,
+        }
+    }
+}
+
+impl<C> Drop for WorkerOwner<C> {
+    fn drop(&mut self) {
+        drop(self.commands.take());
+        let _ = self.shutdown.request(ShutdownRequest::dropped());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.finish_with_waiter(self.completion_waiter.as_mut(), self.drop_timeout);
         }
     }
 }
@@ -166,22 +388,26 @@ where
                 )
             }));
 
-            match caught {
-                Ok(completion) => {
-                    publish_completion(&completion_sender, completion);
-                    drop(commands);
-                }
-                Err(payload) => {
-                    publish_completion(
-                        &completion_sender,
-                        WorkerCompletion {
-                            terminal: WorkerTerminal::Failed(WorkerFailureCause::Panicked),
-                            delivery_error: None,
-                        },
-                    );
-                    drop(commands);
-                    resume_unwind(payload);
-                }
+            let (completion, panic_payload) = match caught {
+                Ok(completion) => (completion, None),
+                Err(payload) => (
+                    WorkerCompletion {
+                        terminal: WorkerTerminal::Failed(WorkerFailureCause::Panicked),
+                        delivery_error: None,
+                    },
+                    Some(payload),
+                ),
+            };
+
+            drop(waiter);
+            drop(shutdown);
+            drop(clock);
+            drop(worker);
+            publish_completion(&completion_sender, completion);
+            drop(commands);
+
+            if let Some(payload) = panic_payload {
+                resume_unwind(payload);
             }
         })?;
     Ok(WorkerThread { completion, join })
@@ -261,7 +487,9 @@ mod tests {
         sync::{
             Arc, Mutex, MutexGuard,
             atomic::{AtomicBool, Ordering},
+            mpsc::{Receiver as MpscReceiver, SyncSender, TryRecvError, sync_channel},
         },
+        thread as std_thread,
         time::Duration,
     };
 
@@ -280,14 +508,18 @@ mod tests {
                 fake::{FakeTransport, FakeTransportControl},
             },
             worker::{
-                ChannelWorkerWaiter, CommandSource, CommonCommand, DirectCommand,
-                ExplicitCloseRequest, MonotonicClock, PriorityShutdown, WorkerBudget,
-                WorkerCommandError, WorkerCore, WorkerCoreError, WorkerStep,
+                ChannelWorkerWaiter, CommandSource, CommonCommand, DirectCommand, MonotonicClock,
+                PriorityShutdown, ShutdownRequest, WorkerBudget, WorkerCommandError, WorkerCore,
+                WorkerCoreError, WorkerStep,
             },
         },
     };
 
-    use super::{WorkerFailureCause, WorkerJoinError, WorkerThreadOutcome, spawn_worker_thread};
+    use super::{
+        DROP_COMPLETION_TIMEOUT, WorkerCompletion, WorkerCompletionWait, WorkerCompletionWaiter,
+        WorkerFailureCause, WorkerJoinError, WorkerOwner, WorkerThreadOutcome,
+        priority_shutdown_channel, spawn_worker_thread,
+    };
 
     const DEVICE_INFO_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
     const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
@@ -434,7 +666,7 @@ mod tests {
             }))
             .expect("enqueue pending tap");
         let shutdown =
-            ShutdownScript::after_checks(ExplicitCloseRequest::new(CloseMode::WithNeutral), 1);
+            ShutdownScript::after_checks(ShutdownRequest::explicit(CloseMode::WithNeutral), 1);
 
         let worker_thread = spawn_worker_thread(
             worker,
@@ -498,6 +730,127 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn drop_skips_neutral_and_drain_then_joins_the_completed_worker() {
+        let (activity, activity_receiver) = activity_channel();
+        let (mut transport, control) = FakeTransport::with_limits(16, 3);
+        transport
+            .open(activity.clone())
+            .expect("open fake transport");
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let (teardown_started, teardown_started_receiver) = sync_channel(1);
+        let (teardown_release, teardown_release_receiver) = sync_channel(1);
+        let clock = FakeClock::at(Duration::ZERO);
+        let mut worker = WorkerCore::new_direct(
+            protocol(),
+            Box::new(DropTracingTransport {
+                inner: transport,
+                trace: Arc::clone(&trace),
+                teardown_started,
+                teardown_release: teardown_release_receiver,
+            }),
+            WorkerBudget::new(2, 1),
+            Box::new(|_| {}),
+        );
+        prime_ready(&mut worker, &control, &clock);
+        lock(&trace).clear();
+
+        let (shutdown_client, shutdown_receiver) = priority_shutdown_channel(activity.clone());
+        let (command_client, command_receiver) = command_channel(1, activity);
+        let worker_thread = spawn_worker_thread(
+            worker,
+            clock,
+            shutdown_receiver,
+            command_receiver,
+            ChannelWorkerWaiter::new(activity_receiver),
+        )
+        .expect("spawn worker thread");
+        let requested_timeouts = Arc::new(Mutex::new(Vec::new()));
+        let (completion_received, completion_received_receiver) = sync_channel(1);
+        let owner = WorkerOwner::with_completion_waiter(
+            command_client,
+            shutdown_client,
+            worker_thread,
+            DROP_COMPLETION_TIMEOUT,
+            Box::new(RecordingCompletionWaiter {
+                requested_timeouts: Arc::clone(&requested_timeouts),
+                completion_received,
+            }),
+        );
+        let (drop_finished, drop_finished_receiver) = sync_channel(1);
+
+        let drop_thread = std_thread::spawn(move || {
+            drop(owner);
+            drop_finished.send(()).expect("report completed owner drop");
+        });
+
+        teardown_started_receiver
+            .recv()
+            .expect("worker reaches resource teardown before completion");
+        assert_eq!(
+            *lock(&requested_timeouts),
+            [DROP_COMPLETION_TIMEOUT],
+            "Drop must request the bounded completion wait"
+        );
+        assert_eq!(
+            *lock(&trace),
+            [DropTrace::Disconnect, DropTrace::TransportClose],
+            "Drop must skip neutral input and interrupt drain"
+        );
+        assert_eq!(
+            completion_received_receiver.try_recv(),
+            Err(TryRecvError::Empty),
+            "completion must not publish before worker-owned resources finish teardown"
+        );
+        assert_eq!(
+            drop_finished_receiver.try_recv(),
+            Err(TryRecvError::Empty),
+            "Drop must still be waiting for bounded completion during resource teardown"
+        );
+
+        teardown_release
+            .send(())
+            .expect("release worker thread teardown");
+        completion_received_receiver
+            .recv()
+            .expect("completion follows worker-owned resource teardown");
+        drop_finished_receiver
+            .recv()
+            .expect("owner Drop finishes after join");
+        drop_thread.join().expect("join Drop test thread");
+    }
+
+    #[test]
+    fn drop_request_replaces_only_an_untaken_explicit_shutdown() {
+        let (activity, wakes) = activity_channel();
+        let (shutdown_client, mut shutdown_receiver) = priority_shutdown_channel(activity);
+
+        assert!(shutdown_client.request(ShutdownRequest::explicit(CloseMode::WithNeutral)));
+        assert!(shutdown_client.request(ShutdownRequest::dropped()));
+        assert!(
+            !shutdown_client.request(ShutdownRequest::explicit(CloseMode::WithoutNeutral)),
+            "an explicit request must not replace the higher-priority Drop request"
+        );
+        assert_eq!(shutdown_receiver.take(), Some(ShutdownRequest::dropped()));
+        assert_eq!(shutdown_receiver.take(), None);
+        wakes.try_recv().expect("latched shutdown wakes the worker");
+        assert_eq!(
+            wakes.try_recv(),
+            Err(TryRecvError::Empty),
+            "wake notifications coalesce while the first token is pending"
+        );
+
+        let (activity, _) = activity_channel();
+        let (shutdown_client, mut shutdown_receiver) = priority_shutdown_channel(activity);
+        let explicit = ShutdownRequest::explicit(CloseMode::WithNeutral);
+        assert!(shutdown_client.request(explicit));
+        assert_eq!(shutdown_receiver.take(), Some(explicit));
+        assert!(
+            !shutdown_client.request(ShutdownRequest::dropped()),
+            "Drop cannot replace a request that the worker already took"
+        );
+    }
+
     fn prime_ready(
         worker: &mut WorkerCore<Pro, Direct>,
         control: &FakeTransportControl,
@@ -543,12 +896,12 @@ mod tests {
 
     #[derive(Default)]
     struct ShutdownScript {
-        request: Option<ExplicitCloseRequest>,
+        request: Option<ShutdownRequest>,
         checks_before_request: usize,
     }
 
     impl ShutdownScript {
-        const fn after_checks(request: ExplicitCloseRequest, checks_before_request: usize) -> Self {
+        const fn after_checks(request: ShutdownRequest, checks_before_request: usize) -> Self {
             Self {
                 request: Some(request),
                 checks_before_request,
@@ -557,7 +910,7 @@ mod tests {
     }
 
     impl PriorityShutdown for ShutdownScript {
-        fn take(&mut self) -> Option<ExplicitCloseRequest> {
+        fn take(&mut self) -> Option<ShutdownRequest> {
             if self.request.is_some() && self.checks_before_request > 0 {
                 self.checks_before_request -= 1;
                 return None;
@@ -651,6 +1004,86 @@ mod tests {
 
         fn close(&mut self) -> TransportResult<()> {
             Ok(())
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum DropTrace {
+        Send,
+        Drain,
+        Disconnect,
+        TransportClose,
+    }
+
+    struct DropTracingTransport {
+        inner: FakeTransport,
+        trace: Arc<Mutex<Vec<DropTrace>>>,
+        teardown_started: SyncSender<()>,
+        teardown_release: MpscReceiver<()>,
+    }
+
+    impl TransportPort for DropTracingTransport {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+            self.inner.open(activity)
+        }
+
+        fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+            self.inner.poll(timeout)
+        }
+
+        fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
+            lock(&self.trace).push(DropTrace::Send);
+            self.inner.send_interrupt(payload)
+        }
+
+        fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+            lock(&self.trace).push(DropTrace::Drain);
+            self.inner.drain_interrupt(timeout)
+        }
+
+        fn disconnect(&mut self) -> TransportResult<()> {
+            lock(&self.trace).push(DropTrace::Disconnect);
+            self.inner.disconnect()
+        }
+
+        fn close(&mut self) -> TransportResult<()> {
+            lock(&self.trace).push(DropTrace::TransportClose);
+            self.inner.close()
+        }
+    }
+
+    impl Drop for DropTracingTransport {
+        fn drop(&mut self) {
+            self.teardown_started
+                .send(())
+                .expect("report worker thread teardown");
+            self.teardown_release
+                .recv()
+                .expect("test releases worker thread teardown");
+        }
+    }
+
+    struct RecordingCompletionWaiter {
+        requested_timeouts: Arc<Mutex<Vec<Duration>>>,
+        completion_received: SyncSender<()>,
+    }
+
+    impl WorkerCompletionWaiter for RecordingCompletionWaiter {
+        fn wait(
+            &mut self,
+            completion: &MpscReceiver<WorkerCompletion>,
+            timeout: Duration,
+        ) -> WorkerCompletionWait {
+            lock(&self.requested_timeouts).push(timeout);
+            match completion.recv() {
+                Ok(completion) => {
+                    self.completion_received
+                        .send(())
+                        .expect("record completion reception");
+                    WorkerCompletionWait::Completed(completion)
+                }
+                Err(_) => WorkerCompletionWait::Disconnected,
+            }
         }
     }
 

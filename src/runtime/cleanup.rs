@@ -14,10 +14,6 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CloseMode {
     WithNeutral,
-    #[allow(
-        dead_code,
-        reason = "T25 and T33 construct close-without-neutral requests"
-    )]
     WithoutNeutral,
 }
 
@@ -86,6 +82,7 @@ pub(crate) struct CleanupContext<'a, M: ControllerModel> {
 pub(crate) struct CleanupSequence {
     mode: CloseMode,
     drain_timeout: Duration,
+    drain_interrupt: bool,
 }
 
 impl CleanupSequence {
@@ -93,6 +90,15 @@ impl CleanupSequence {
         Self {
             mode,
             drain_timeout,
+            drain_interrupt: true,
+        }
+    }
+
+    pub(crate) const fn for_drop() -> Self {
+        Self {
+            mode: CloseMode::WithoutNeutral,
+            drain_timeout: Duration::ZERO,
+            drain_interrupt: false,
         }
     }
 
@@ -120,11 +126,13 @@ impl CleanupSequence {
                     .map(|_| ()),
             );
         }
-        record_first_failure(
-            &mut first_failure,
-            CleanupPhase::DrainInterrupt,
-            transport.drain_interrupt(self.drain_timeout),
-        );
+        if self.drain_interrupt {
+            record_first_failure(
+                &mut first_failure,
+                CleanupPhase::DrainInterrupt,
+                transport.drain_interrupt(self.drain_timeout),
+            );
+        }
         record_first_failure(
             &mut first_failure,
             CleanupPhase::Disconnect,
