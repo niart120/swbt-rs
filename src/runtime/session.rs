@@ -174,8 +174,7 @@ mod tests {
         let (mut transport, _control) = open_transport();
         let mut sessions = ConnectionSessions::new();
         let mut sender = ReportSender::<Pro>::new();
-        let mut reporting =
-            PeriodicPolicy::start(Duration::ZERO, REPORT_PERIOD).expect("valid policy");
+        let mut reporting = PeriodicPolicy::new(REPORT_PERIOD).expect("valid policy");
         let mut observed = ObservedSubcommands::default();
         let mut input = InputStateStore::<Pro>::new();
 

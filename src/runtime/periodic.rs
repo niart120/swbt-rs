@@ -153,17 +153,48 @@ impl StdError for PeriodicError {
 
 pub(crate) type PeriodicResult = Result<AutomaticInput, PeriodicError>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PeriodicStart {
+    HeldOff { until: Duration },
+    Started { first_deadline: Duration },
+}
+
 pub(crate) struct PeriodicPolicy {
-    scheduler: ReportScheduler,
+    period: Duration,
+    scheduler: Option<ReportScheduler>,
     reply_holdoff_until: Option<Duration>,
 }
 
 impl PeriodicPolicy {
-    pub(crate) fn start(started_at: Duration, period: Duration) -> Result<Self, SchedulerError> {
+    pub(crate) fn new(period: Duration) -> Result<Self, SchedulerError> {
+        if period.is_zero() {
+            return Err(SchedulerError::ZeroPeriod);
+        }
         Ok(Self {
-            scheduler: ReportScheduler::start(started_at, period)?,
+            period,
+            scheduler: None,
             reply_holdoff_until: None,
         })
+    }
+
+    pub(crate) fn start_when_unheld(
+        &mut self,
+        now: Duration,
+    ) -> Result<PeriodicStart, SchedulerError> {
+        if let Some(until) = self.reply_holdoff_until {
+            if now < until {
+                return Ok(PeriodicStart::HeldOff { until });
+            }
+        }
+        if self.scheduler.is_none() {
+            self.scheduler = Some(ReportScheduler::start(now, self.period)?);
+        }
+        let first_deadline = self
+            .scheduler
+            .as_ref()
+            .expect("scheduler was started above")
+            .next_deadline();
+        Ok(PeriodicStart::Started { first_deadline })
     }
 
     pub(crate) fn record_output_completion(
@@ -191,15 +222,22 @@ impl PeriodicPolicy {
     }
 
     pub(crate) fn reset_for_new_session(&mut self) {
+        self.stop_session();
+    }
+
+    pub(crate) fn stop_session(&mut self) {
+        self.scheduler = None;
         self.reply_holdoff_until = None;
     }
 
     #[must_use]
-    pub(crate) fn next_deadline(&self) -> Duration {
-        self.reply_holdoff_until
-            .map_or(self.scheduler.next_deadline(), |holdoff| {
-                holdoff.max(self.scheduler.next_deadline())
-            })
+    pub(crate) fn next_deadline(&self) -> Option<Duration> {
+        self.scheduler.as_ref().map(|scheduler| {
+            self.reply_holdoff_until
+                .map_or(scheduler.next_deadline(), |holdoff| {
+                    holdoff.max(scheduler.next_deadline())
+                })
+        })
     }
 
     pub(crate) fn send_due<M: ControllerModel>(
@@ -210,13 +248,14 @@ impl PeriodicPolicy {
         sender: &mut ReportSender<M>,
         transport: &mut dyn TransportPort,
     ) -> PeriodicResult {
+        let scheduler = self.scheduler.as_mut().ok_or(PeriodicError::NotReady)?;
         if let Some(until) = self.reply_holdoff_until {
             if now < until {
                 return Ok(AutomaticInput::HeldOff { until });
             }
         }
 
-        let TickDecision::Due { skipped } = self.scheduler.step(now)? else {
+        let TickDecision::Due { skipped } = scheduler.step(now)? else {
             return Ok(AutomaticInput::NotDue);
         };
         let snapshot = state.snapshot();
@@ -242,7 +281,7 @@ mod tests {
         runtime::{
             connection::ObservedSubcommands,
             output::{OutputHandling, OutputHandlingContext, OutputHandlingError, handle_output},
-            periodic::{AutomaticInput, PeriodicError, PeriodicPolicy, begin_tap},
+            periodic::{AutomaticInput, PeriodicError, PeriodicPolicy, PeriodicStart, begin_tap},
             sender::ReportSender,
             state::InputStateStore,
             transport::{
@@ -271,7 +310,7 @@ mod tests {
             .expect("IMU reply accepted");
         assert!(matches!(accepted, OutputHandling::ReplyAccepted(_)));
         assert_eq!(harness.policy.reply_holdoff_until(), Some(REPLY_HOLDOFF));
-        assert_eq!(harness.policy.next_deadline(), REPLY_HOLDOFF);
+        assert_eq!(harness.policy.next_deadline(), Some(REPLY_HOLDOFF));
 
         harness.store.commit(pressed_state(ButtonKind::B));
         assert_eq!(
@@ -288,7 +327,10 @@ mod tests {
             .send_due(REPLY_HOLDOFF)
             .expect("input accepted at holdoff boundary");
         assert!(matches!(sent, AutomaticInput::Sent { skipped: 2, .. }));
-        assert_eq!(harness.policy.next_deadline(), Duration::from_millis(400));
+        assert_eq!(
+            harness.policy.next_deadline(),
+            Some(Duration::from_millis(400))
+        );
         assert_eq!(
             harness
                 .send_due(REPLY_HOLDOFF)
@@ -325,7 +367,7 @@ mod tests {
         };
         assert_eq!(error.kind(), TransportErrorKind::SendRejected);
         assert_eq!(harness.policy.reply_holdoff_until(), None);
-        assert_eq!(harness.policy.next_deadline(), REPORT_PERIOD);
+        assert_eq!(harness.policy.next_deadline(), Some(REPORT_PERIOD));
 
         assert_eq!(
             harness
@@ -379,7 +421,10 @@ mod tests {
             .send_due(Duration::from_millis(400))
             .expect("input accepted at extended boundary");
         assert!(matches!(sent, AutomaticInput::Sent { skipped: 3, .. }));
-        assert_eq!(harness.policy.next_deadline(), Duration::from_millis(500));
+        assert_eq!(
+            harness.policy.next_deadline(),
+            Some(Duration::from_millis(500))
+        );
         assert_eq!(
             harness
                 .control
@@ -495,9 +540,17 @@ mod tests {
             let (mut transport, control) = FakeTransport::with_limits(8, 8);
             let (notifier, _wake_receiver) = activity_channel();
             transport.open(notifier).expect("open fake transport");
+            let mut policy = PeriodicPolicy::new(REPORT_PERIOD).expect("valid periodic period");
+            assert_eq!(
+                policy
+                    .start_when_unheld(Duration::ZERO)
+                    .expect("start periodic schedule"),
+                PeriodicStart::Started {
+                    first_deadline: REPORT_PERIOD,
+                }
+            );
             Self {
-                policy: PeriodicPolicy::start(Duration::ZERO, REPORT_PERIOD)
-                    .expect("valid periodic schedule"),
+                policy,
                 protocol: SwitchHidProtocol::new(
                     None,
                     DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),

@@ -4,6 +4,7 @@ pub(crate) mod handshake;
 pub(crate) mod lifecycle;
 pub(crate) mod output;
 pub(crate) mod periodic;
+pub(crate) mod readiness;
 pub(crate) mod scheduler;
 pub(crate) mod sender;
 pub(crate) mod session;

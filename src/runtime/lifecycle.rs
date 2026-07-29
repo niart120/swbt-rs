@@ -6,6 +6,8 @@
     )
 )]
 
+use crate::runtime::readiness::ReadySession;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LifecycleState {
     Configured,
@@ -86,6 +88,33 @@ impl LifecycleStateMachine {
 
     pub(crate) fn fail_open(&mut self) {
         self.opening = false;
+    }
+
+    pub(crate) fn begin_connection(&mut self) -> bool {
+        if self.state != LifecycleState::Open {
+            return false;
+        }
+        self.state = LifecycleState::Connecting;
+        true
+    }
+
+    pub(crate) fn mark_ready(&mut self, _ready: ReadySession) -> bool {
+        if self.state != LifecycleState::Connecting {
+            return false;
+        }
+        self.state = LifecycleState::Ready;
+        true
+    }
+
+    pub(crate) fn mark_connection_ended(&mut self) -> bool {
+        if !matches!(
+            self.state,
+            LifecycleState::Connecting | LifecycleState::Ready
+        ) {
+            return false;
+        }
+        self.state = LifecycleState::Open;
+        true
     }
 
     pub(crate) fn request_close(&mut self) -> LifecycleAction {
