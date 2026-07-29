@@ -1,11 +1,3 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T19 defines readiness coordination before T21 worker integration"
-    )
-)]
-
 use std::{error::Error as StdError, fmt, time::Duration};
 
 use crate::{
@@ -149,8 +141,7 @@ impl ReadinessGate {
         handshake: &mut Option<Handshake>,
         sender: &ReportSender<M>,
     ) -> Result<ReadinessProgress, ReadinessError> {
-        self.ensure_current(sessions)?;
-        self.ensure_before_timeout(now)?;
+        self.ensure_active(now, sessions)?;
         if !self.collect_handshake(handshake)? {
             return Ok(ReadinessProgress::Pending(ReadinessWait::Handshake));
         }
@@ -168,8 +159,7 @@ impl ReadinessGate {
         sender: &ReportSender<M>,
         periodic: &mut PeriodicPolicy,
     ) -> Result<ReadinessProgress, ReadinessError> {
-        self.ensure_current(sessions)?;
-        self.ensure_before_timeout(now)?;
+        self.ensure_active(now, sessions)?;
         if !self.collect_handshake(handshake)? {
             return Ok(ReadinessProgress::Pending(ReadinessWait::Handshake));
         }
@@ -196,6 +186,15 @@ impl ReadinessGate {
     ) -> ReadinessError {
         handshake.take();
         error
+    }
+
+    pub(crate) fn ensure_active(
+        &self,
+        now: Duration,
+        sessions: &ConnectionSessions,
+    ) -> Result<(), ReadinessError> {
+        self.ensure_current(sessions)?;
+        self.ensure_before_timeout(now)
     }
 
     fn ensure_current(&self, sessions: &ConnectionSessions) -> Result<(), ReadinessError> {
@@ -255,7 +254,7 @@ mod tests {
 
     use crate::{
         model::Pro,
-        protocol::{DeviceInfoBluetoothAddress, SwitchHidProtocol},
+        protocol::SwitchHidProtocol,
         runtime::{
             connection::ObservedSubcommands,
             handshake::{Handshake, HandshakeProgress},
@@ -925,9 +924,6 @@ mod tests {
     }
 
     fn protocol() -> SwitchHidProtocol<Pro> {
-        SwitchHidProtocol::new(
-            None,
-            DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-        )
+        SwitchHidProtocol::new(None, DEVICE_INFO_ADDRESS)
     }
 }

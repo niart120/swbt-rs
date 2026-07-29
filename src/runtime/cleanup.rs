@@ -1,11 +1,3 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T20 defines explicit cleanup before T21 worker integration"
-    )
-)]
-
 use std::time::Duration;
 
 use crate::{
@@ -22,6 +14,10 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CloseMode {
     WithNeutral,
+    #[allow(
+        dead_code,
+        reason = "T25 and T33 construct close-without-neutral requests"
+    )]
     WithoutNeutral,
 }
 
@@ -35,23 +31,43 @@ pub(crate) enum CleanupPhase {
 
 #[derive(Debug)]
 pub(crate) struct CleanupFailure {
+    #[allow(
+        dead_code,
+        reason = "T24 and T26 map cleanup failures after joining the worker"
+    )]
     phase: CleanupPhase,
+    #[allow(
+        dead_code,
+        reason = "T24 and T26 preserve the cleanup transport source"
+    )]
     error: TransportError,
 }
 
 impl CleanupFailure {
     #[must_use]
+    #[allow(
+        dead_code,
+        reason = "T24 and T26 map cleanup failures after joining the worker"
+    )]
     pub(crate) const fn phase(&self) -> CleanupPhase {
         self.phase
     }
 
     #[must_use]
+    #[allow(
+        dead_code,
+        reason = "T24 and T26 preserve the cleanup transport source"
+    )]
     pub(crate) const fn source_error(&self) -> &TransportError {
         &self.error
     }
 }
 
 #[derive(Debug)]
+#[allow(
+    dead_code,
+    reason = "T24 and T26 combine cleanup, join, and public close errors"
+)]
 pub(crate) enum ExplicitCloseError<J> {
     Cleanup(CleanupFailure),
     Join(J),
@@ -130,7 +146,15 @@ impl CleanupSequence {
 }
 
 pub(crate) struct CloseCompletion {
+    #[allow(
+        dead_code,
+        reason = "T24 consumes the one-shot completion before joining the worker"
+    )]
     performed: bool,
+    #[allow(
+        dead_code,
+        reason = "T24 and T26 preserve cleanup failure through worker join"
+    )]
     first_failure: Option<CleanupFailure>,
 }
 
@@ -143,10 +167,15 @@ impl CloseCompletion {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) const fn performed(&self) -> bool {
         self.performed
     }
 
+    #[allow(
+        dead_code,
+        reason = "T24 joins the worker after consuming cleanup completion"
+    )]
     pub(crate) fn finish_with_join<J>(
         self,
         join: impl FnOnce() -> Result<(), J>,
@@ -184,9 +213,7 @@ mod tests {
     use crate::{
         input::InputState,
         model::Pro,
-        protocol::{
-            DeviceInfoBluetoothAddress, OutputReport, SwitchHidProtocol, parse_output_report,
-        },
+        protocol::{OutputReport, SwitchHidProtocol, parse_output_report},
         runtime::{
             cleanup::{
                 CleanupContext, CleanupPhase, CleanupSequence, CloseMode, ExplicitCloseError,
@@ -680,9 +707,6 @@ mod tests {
     }
 
     fn protocol() -> SwitchHidProtocol<Pro> {
-        SwitchHidProtocol::new(
-            None,
-            DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-        )
+        SwitchHidProtocol::new(None, DEVICE_INFO_ADDRESS)
     }
 }

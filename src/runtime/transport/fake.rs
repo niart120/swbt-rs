@@ -15,6 +15,7 @@ use super::{
 pub(in crate::runtime) enum ScriptedSendOutcome {
     Accepted,
     Rejected,
+    Closed,
     AcceptedThenDisconnect { reason: Option<u8> },
     AcceptedThenEvent(TransportEvent),
 }
@@ -60,6 +61,7 @@ enum QueuedEvent {
 
 #[derive(Clone)]
 enum Terminal {
+    Closed,
     EventQueueOverflow,
     Source(Arc<dyn StdError + Send + Sync>),
 }
@@ -166,13 +168,13 @@ impl TransportPort for FakeTransport {
             return Err(self.terminal_error());
         }
 
-        let receive_timeout = if matches!(terminal, Some(Terminal::Source(_))) {
+        let receive_timeout = if terminal.is_some() {
             Duration::ZERO
         } else {
             timeout
         };
         let Some(first) = self.receive_first(receive_timeout)? else {
-            if matches!(self.terminal(), Some(Terminal::Source(_))) {
+            if self.terminal().is_some() {
                 self.source_terminal_observed = true;
                 return Err(self.terminal_error());
             }
@@ -197,7 +199,7 @@ impl TransportPort for FakeTransport {
                         Some(Terminal::EventQueueOverflow) => {
                             return Err(self.terminal_error());
                         }
-                        Some(Terminal::Source(_)) => {
+                        Some(Terminal::Closed | Terminal::Source(_)) => {
                             self.source_terminal_observed = true;
                         }
                         None => {}
@@ -267,11 +269,19 @@ impl FakeTransportControl {
         *lock(&self.shared.counters)
     }
 
-    pub(super) fn inject_connected(&self) -> TransportResult<()> {
+    pub(in crate::runtime) fn inject_connected(&self) -> TransportResult<()> {
         self.shared.enqueue_if_open(TransportEvent::Connected)
     }
 
-    pub(super) fn inject_hid_output(
+    pub(in crate::runtime) fn inject_hid_channel_opened(
+        &self,
+        channel: HidChannel,
+    ) -> TransportResult<()> {
+        self.shared
+            .enqueue_if_open(TransportEvent::HidChannelOpened { channel })
+    }
+
+    pub(in crate::runtime) fn inject_hid_output(
         &self,
         channel: HidChannel,
         payload: &[u8],
@@ -282,7 +292,15 @@ impl FakeTransportControl {
         })
     }
 
-    pub(super) fn terminate_with(
+    pub(in crate::runtime) fn inject_disconnected(
+        &self,
+        reason: Option<u8>,
+    ) -> TransportResult<()> {
+        self.shared
+            .enqueue_if_open(TransportEvent::Disconnected { reason })
+    }
+
+    pub(in crate::runtime) fn terminate_with(
         &self,
         source: impl StdError + Send + Sync + 'static,
     ) -> TransportResult<()> {
@@ -359,6 +377,11 @@ impl Shared {
             ScriptedSendOutcome::Rejected => {
                 return Err(TransportError::new(TransportErrorKind::SendRejected));
             }
+            ScriptedSendOutcome::Closed => {
+                *terminal = Some(Terminal::Closed);
+                Self::notify(&lifecycle);
+                return Err(TransportError::new(TransportErrorKind::Closed));
+            }
             ScriptedSendOutcome::Accepted => None,
             ScriptedSendOutcome::AcceptedThenDisconnect { reason } => {
                 Some(TransportEvent::Disconnected { reason })
@@ -400,6 +423,7 @@ impl Shared {
 
 fn terminal_error(terminal: &Terminal) -> TransportError {
     match terminal {
+        Terminal::Closed => TransportError::new(TransportErrorKind::Closed),
         Terminal::EventQueueOverflow => TransportError::new(TransportErrorKind::EventQueueOverflow),
         Terminal::Source(source) => {
             TransportError::with_source(TransportErrorKind::SourceTerminated, Arc::clone(source))

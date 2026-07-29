@@ -1,11 +1,3 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T18 defines handshake retry before T21 worker integration"
-    )
-)]
-
 use std::{error::Error as StdError, fmt, time::Duration};
 
 use crate::{
@@ -126,6 +118,7 @@ impl Handshake {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) const fn bootstrap_stopped(&self) -> bool {
         self.bootstrap_stopped
     }
@@ -240,7 +233,7 @@ mod tests {
 
     use crate::{
         model::Pro,
-        protocol::{DeviceInfoBluetoothAddress, SwitchHidProtocol},
+        protocol::SwitchHidProtocol,
         runtime::{
             connection::ObservedSubcommands,
             handshake::{Handshake, HandshakeProgress},
@@ -738,10 +731,7 @@ mod tests {
     }
 
     fn protocol() -> SwitchHidProtocol<Pro> {
-        SwitchHidProtocol::new(
-            None,
-            DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-        )
+        SwitchHidProtocol::new(None, DEVICE_INFO_ADDRESS)
     }
 
     fn open_transport() -> (RecordingTransport, FakeTransportControl) {

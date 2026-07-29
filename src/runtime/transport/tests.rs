@@ -94,7 +94,7 @@ fn open_close_are_idempotent_and_send_requires_open() {
 }
 
 #[test]
-fn send_outcomes_distinguish_acceptance_rejection_and_later_disconnect() {
+fn send_outcomes_distinguish_acceptance_rejection_later_disconnect_and_terminal_close() {
     let (mut transport, control) = FakeTransport::with_limits(4, 4);
     let (notifier, _wake_receiver) = activity_channel();
     transport.open(notifier).expect("open");
@@ -125,11 +125,31 @@ fn send_outcomes_distinguish_acceptance_rejection_and_later_disconnect() {
         .close()
         .expect("send rejection does not prevent cleanup");
     assert_eq!(control.counters().close, 1);
+
+    let (mut closed_transport, closed_control) = FakeTransport::with_limits(1, 1);
+    let (notifier, _wake_receiver) = activity_channel();
+    closed_transport.open(notifier).expect("open terminal fake");
+    closed_control.script_sends([ScriptedSendOutcome::Closed]);
+    let error = closed_transport
+        .send_interrupt(b"terminal-close")
+        .expect_err("scripted close is terminal");
+    assert_error_kind(&error, TransportErrorKind::Closed);
+    let error = closed_transport
+        .poll(Duration::ZERO)
+        .expect_err("closed send outcome remains terminal for poll");
+    assert_error_kind(&error, TransportErrorKind::Closed);
+    let error = closed_transport
+        .send_interrupt(b"after-terminal-close")
+        .expect_err("closed send outcome remains terminal for send");
+    assert_error_kind(&error, TransportErrorKind::Closed);
+    closed_transport
+        .close()
+        .expect("terminally closed fake still runs explicit close");
 }
 
 #[test]
 fn zero_poll_routes_channels_in_fifo_order_and_respects_batch_limit() {
-    let (mut transport, control) = FakeTransport::with_limits(4, 2);
+    let (mut transport, control) = FakeTransport::with_limits(6, 2);
     let (notifier, _wake_receiver) = activity_channel();
     transport.open(notifier).expect("open");
 
@@ -139,30 +159,47 @@ fn zero_poll_routes_channels_in_fifo_order_and_respects_batch_limit() {
             .expect("empty zero poll")
             .is_empty()
     );
+    control.inject_connected().expect("connected event");
+    control
+        .inject_hid_channel_opened(HidChannel::Control)
+        .expect("control channel opened");
+    control
+        .inject_hid_channel_opened(HidChannel::Interrupt)
+        .expect("interrupt channel opened");
     control
         .inject_hid_output(HidChannel::Control, b"control")
         .expect("control event");
     control
         .inject_hid_output(HidChannel::Interrupt, b"interrupt")
         .expect("interrupt event");
-    control.inject_connected().expect("connected event");
 
     assert_eq!(
         transport.poll(Duration::ZERO).expect("first batch"),
         [
-            TransportEvent::HidOutput {
+            TransportEvent::Connected,
+            TransportEvent::HidChannelOpened {
                 channel: HidChannel::Control,
-                payload: Box::from(*b"control"),
-            },
-            TransportEvent::HidOutput {
-                channel: HidChannel::Interrupt,
-                payload: Box::from(*b"interrupt"),
             },
         ]
     );
     assert_eq!(
         transport.poll(Duration::ZERO).expect("second batch"),
-        [TransportEvent::Connected]
+        [
+            TransportEvent::HidChannelOpened {
+                channel: HidChannel::Interrupt,
+            },
+            TransportEvent::HidOutput {
+                channel: HidChannel::Control,
+                payload: Box::from(*b"control"),
+            },
+        ]
+    );
+    assert_eq!(
+        transport.poll(Duration::ZERO).expect("third batch"),
+        [TransportEvent::HidOutput {
+            channel: HidChannel::Interrupt,
+            payload: Box::from(*b"interrupt"),
+        }]
     );
 }
 

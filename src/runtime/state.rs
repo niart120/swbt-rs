@@ -5,10 +5,6 @@ pub(crate) struct InputStateStore<M: ControllerModel> {
 }
 
 impl<M: ControllerModel> InputStateStore<M> {
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "T21 constructs the worker-owned state store")
-    )]
     pub(crate) fn new() -> Self {
         Self {
             committed: InputState::neutral(),
@@ -36,7 +32,7 @@ mod tests {
     use crate::{
         input::{InputState, ProButton},
         model::{ButtonKind, Pro},
-        protocol::{DeviceInfoBluetoothAddress, SwitchHidProtocol},
+        protocol::SwitchHidProtocol,
         runtime::{
             sender::ReportSender,
             state::InputStateStore,
@@ -100,10 +96,7 @@ mod tests {
     }
 
     fn protocol() -> SwitchHidProtocol<Pro> {
-        SwitchHidProtocol::new(
-            None,
-            DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-        )
+        SwitchHidProtocol::new(None, DEVICE_INFO_ADDRESS)
     }
 
     fn open_transport() -> (FakeTransport, FakeTransportControl) {

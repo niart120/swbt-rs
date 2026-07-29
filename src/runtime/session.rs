@@ -1,11 +1,3 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T17 defines connection-session coordination before M2 worker integration"
-    )
-)]
-
 use std::{error::Error as StdError, fmt, num::NonZeroU64};
 
 use crate::{
@@ -146,8 +138,8 @@ mod tests {
         input::{InputState, ProButton},
         model::{ButtonKind, Pro},
         protocol::{
-            DeviceInfoBluetoothAddress, OutputReport, PreparedOutputAction, ProtocolSession,
-            SwitchHidProtocol, parse_output_report,
+            OutputReport, PreparedOutputAction, ProtocolSession, SwitchHidProtocol,
+            parse_output_report,
         },
         runtime::{
             connection::ObservedSubcommands,
@@ -292,10 +284,7 @@ mod tests {
     }
 
     fn protocol() -> SwitchHidProtocol<Pro> {
-        SwitchHidProtocol::new(
-            None,
-            DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-        )
+        SwitchHidProtocol::new(None, DEVICE_INFO_ADDRESS)
     }
 
     fn open_transport() -> (FakeTransport, FakeTransportControl) {

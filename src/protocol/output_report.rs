@@ -13,6 +13,7 @@ pub(crate) struct RawRumble([u8; RUMBLE_SIZE]);
 
 impl RawRumble {
     #[must_use]
+    #[cfg(test)]
     pub(crate) const fn bytes(&self) -> &[u8; RUMBLE_SIZE] {
         &self.0
     }
@@ -73,6 +74,7 @@ impl<'a> OutputReport<'a> {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) const fn subcommand(self) -> Option<SubcommandRequest<'a>> {
         match self {
             Self::Subcommand { request, .. } => Some(request),

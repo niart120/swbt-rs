@@ -27,6 +27,7 @@ impl PreparedInputReport {
 }
 
 #[must_use]
+#[cfg(test)]
 pub(crate) fn encode_neutral_0x30<M: ControllerModel>(timer: u8) -> PreparedInputReport {
     encode_0x30(&InputState::<M>::neutral(), timer, &[0; 36])
 }

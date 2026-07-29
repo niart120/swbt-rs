@@ -1,11 +1,3 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T05 defines report sending before T21 worker integration"
-    )
-)]
-
 use std::marker::PhantomData;
 
 use crate::{
@@ -39,6 +31,7 @@ impl<M: ControllerModel> ReportSender<M> {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) const fn timer(&self) -> u8 {
         self.committed.next_timer
     }
@@ -159,10 +152,7 @@ mod tests {
     use crate::{
         input::{ImuFrame, InputState, Stick},
         model::Pro,
-        protocol::{
-            DeviceInfoBluetoothAddress, OutputReport, PreparedOutputAction, SwitchHidProtocol,
-            parse_output_report,
-        },
+        protocol::{OutputReport, PreparedOutputAction, SwitchHidProtocol, parse_output_report},
         runtime::{
             sender::ReportSender,
             transport::{
@@ -367,10 +357,7 @@ mod tests {
     }
 
     fn protocol() -> SwitchHidProtocol<Pro> {
-        SwitchHidProtocol::new(
-            None,
-            DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-        )
+        SwitchHidProtocol::new(None, DEVICE_INFO_ADDRESS)
     }
 
     fn open_transport() -> (

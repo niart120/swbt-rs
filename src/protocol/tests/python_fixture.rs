@@ -12,7 +12,6 @@ use crate::{
         output_report::parse_output_report,
         session::ProtocolSession,
         spi::VirtualSpiFlash,
-        subcommand::DeviceInfoBluetoothAddress,
     },
 };
 
@@ -357,8 +356,7 @@ fn project_subcommand<M: ControllerModel>(case: &Value) -> Value {
     .expect("fixture Bluetooth address must be 6 bytes");
     let payload = decode_hex(text(&input["payload_hex"], "payload_hex"));
     let subcommand_id = u8_number(&input["subcommand_id"]);
-    let protocol =
-        SwitchHidProtocol::<M>::new(None, DeviceInfoBluetoothAddress::from_wire_bytes(address));
+    let protocol = SwitchHidProtocol::<M>::new(None, address);
     let mut raw = vec![0x01, 0x0A];
     raw.extend_from_slice(&NEUTRAL_RUMBLE);
     raw.push(subcommand_id);

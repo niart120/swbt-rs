@@ -1,11 +1,3 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T15 defines Direct policy before T21 worker integration"
-    )
-)]
-
 use std::{error::Error as StdError, fmt, time::Duration};
 
 use crate::{
@@ -91,6 +83,7 @@ impl StdError for DirectTapError {
 }
 
 pub(crate) enum DirectTapStimulus {
+    #[cfg(test)]
     Time(Duration),
     Transport(TransportEvent),
     Shutdown,
@@ -124,6 +117,20 @@ impl<M: ControllerModel> PendingDirectTap<M> {
         self.release_at
     }
 
+    pub(crate) fn finish(
+        self,
+        now: Duration,
+        state: &mut InputStateStore<M>,
+        protocol: &SwitchHidProtocol<M>,
+        sender: &mut ReportSender<M>,
+        transport: &mut dyn TransportPort,
+    ) -> Result<(), DirectTapError> {
+        let now_ns = monotonic_ns(now)?;
+        send_candidate(self.released, now_ns, state, protocol, sender, transport)
+            .map(|_acceptance| ())
+            .map_err(DirectTapError::Transport)
+    }
+
     pub(crate) fn step(
         self,
         stimulus: DirectTapStimulus,
@@ -139,18 +146,14 @@ impl<M: ControllerModel> PendingDirectTap<M> {
         } = context;
 
         match stimulus {
+            #[cfg(test)]
             DirectTapStimulus::Time(now) if now < self.release_at => DirectTapStep::Pending {
                 tap: self,
                 output: None,
             },
+            #[cfg(test)]
             DirectTapStimulus::Time(now) => {
-                let result = monotonic_ns(now)
-                    .and_then(|now_ns| {
-                        send_candidate(self.released, now_ns, state, protocol, sender, transport)
-                            .map_err(DirectTapError::Transport)
-                    })
-                    .map(|_acceptance| ());
-                DirectTapStep::Complete(result)
+                DirectTapStep::Complete(self.finish(now, state, protocol, sender, transport))
             }
             DirectTapStimulus::Transport(TransportEvent::HidOutput { channel, payload }) => {
                 let current = state.snapshot();
@@ -183,6 +186,12 @@ impl<M: ControllerModel> PendingDirectTap<M> {
                 tap: self,
                 output: None,
             },
+            DirectTapStimulus::Transport(TransportEvent::HidChannelOpened { .. }) => {
+                DirectTapStep::Pending {
+                    tap: self,
+                    output: None,
+                }
+            }
         }
     }
 }
@@ -225,7 +234,7 @@ mod tests {
         controller::input::{press_candidate, tap_plan},
         input::{InputState, ProButton},
         model::{ButtonKind, Pro},
-        protocol::{DeviceInfoBluetoothAddress, SwitchHidProtocol},
+        protocol::SwitchHidProtocol,
         runtime::{
             connection::ObservedSubcommands,
             direct::{
@@ -496,10 +505,7 @@ mod tests {
             let (notifier, _wake_receiver) = activity_channel();
             transport.open(notifier).expect("open fake transport");
             Self {
-                protocol: SwitchHidProtocol::new(
-                    None,
-                    DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-                ),
+                protocol: SwitchHidProtocol::new(None, DEVICE_INFO_ADDRESS),
                 sender: ReportSender::new(),
                 store: InputStateStore::new(),
                 observed: ObservedSubcommands::default(),

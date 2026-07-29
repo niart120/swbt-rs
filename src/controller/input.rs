@@ -16,18 +16,16 @@ pub(crate) struct TapPlan<M: ControllerModel> {
 }
 
 impl<M: ControllerModel> TapPlan<M> {
+    #[must_use]
+    pub(crate) const fn duration(&self) -> Duration {
+        self.duration
+    }
+
     pub(crate) fn into_parts(self) -> (InputState<M>, InputState<M>, Duration) {
         (self.pressed, self.released, self.duration)
     }
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T21 connects common press commands to the reporting-specific runtime policy"
-    )
-)]
 pub(crate) fn press_candidate<M: ControllerModel>(
     current: &InputState<M>,
     buttons: impl IntoIterator<Item = Button<M>>,
@@ -36,13 +34,6 @@ pub(crate) fn press_candidate<M: ControllerModel>(
     Ok(press_validated(current, &buttons))
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T21 connects common release commands to the reporting-specific runtime policy"
-    )
-)]
 pub(crate) fn release_candidate<M: ControllerModel>(
     current: &InputState<M>,
     buttons: impl IntoIterator<Item = Button<M>>,
@@ -51,24 +42,10 @@ pub(crate) fn release_candidate<M: ControllerModel>(
     Ok(release_validated(current, &buttons))
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T21 connects neutral commands to the reporting-specific runtime policy"
-    )
-)]
 pub(crate) fn neutral_candidate<M: ControllerModel>() -> InputState<M> {
     InputState::neutral()
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T14 and T15 connect validated tap plans to each reporting policy"
-    )
-)]
 pub(crate) fn tap_plan<M: ControllerModel>(
     current: &InputState<M>,
     buttons: impl IntoIterator<Item = Button<M>>,

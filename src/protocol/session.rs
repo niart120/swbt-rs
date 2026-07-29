@@ -18,13 +18,6 @@ impl ReportModeSelection {
             Self::Unsupported(requested)
         }
     }
-
-    const fn requested(self) -> u8 {
-        match self {
-            Self::StandardFull => SUPPORTED_INPUT_REPORT_MODE,
-            Self::Unsupported(requested) => requested,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -38,9 +31,14 @@ pub(crate) struct ProtocolSession {
 
 impl ProtocolSession {
     #[must_use]
+    #[allow(
+        dead_code,
+        reason = "T26 projects the accepted report mode into GamepadStatus"
+    )]
     pub(crate) const fn report_mode(self) -> Option<u8> {
         match self.report_mode {
-            Some(selection) => Some(selection.requested()),
+            Some(ReportModeSelection::StandardFull) => Some(SUPPORTED_INPUT_REPORT_MODE),
+            Some(ReportModeSelection::Unsupported(requested)) => Some(requested),
             None => None,
         }
     }
@@ -51,6 +49,7 @@ impl ProtocolSession {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) const fn unsupported_report_mode(self) -> Option<u8> {
         match self.report_mode {
             Some(ReportModeSelection::Unsupported(requested)) => Some(requested),
@@ -59,6 +58,7 @@ impl ProtocolSession {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) const fn player_lights(self) -> Option<u8> {
         self.player_lights
     }
@@ -69,6 +69,7 @@ impl ProtocolSession {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) const fn imu_enabled(self) -> bool {
         !matches!(self.imu_mode, ImuMode::Disabled)
     }
@@ -79,6 +80,7 @@ impl ProtocolSession {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) const fn vibration_enabled(self) -> bool {
         self.vibration_enabled
     }

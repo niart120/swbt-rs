@@ -17,13 +17,6 @@ pub(crate) enum OutputHandling {
     ReplyAccepted(SendAcceptance),
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T07 preserves output context before T21 worker integration"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct OutputObservation {
     pub(crate) channel: HidChannel,
@@ -77,13 +70,6 @@ impl StdError for OutputHandlingError {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T07 defines output handling before T21 worker integration"
-    )
-)]
 pub(crate) fn handle_output<M: ControllerModel>(
     channel: HidChannel,
     raw: &[u8],
@@ -122,7 +108,7 @@ mod tests {
     use crate::{
         input::{ImuFrame, InputState},
         model::Pro,
-        protocol::{DeviceInfoBluetoothAddress, ProtocolError, SwitchHidProtocol},
+        protocol::{ProtocolError, SwitchHidProtocol},
         runtime::{
             connection::ObservedSubcommands,
             output::{
@@ -316,10 +302,7 @@ mod tests {
             let (notifier, _wake_receiver) = activity_channel();
             transport.open(notifier).expect("open fake transport");
             Self {
-                protocol: SwitchHidProtocol::new(
-                    None,
-                    DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-                ),
+                protocol: SwitchHidProtocol::new(None, DEVICE_INFO_ADDRESS),
                 sender: ReportSender::new(),
                 observed: ObservedSubcommands::default(),
                 transport,

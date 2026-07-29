@@ -6,7 +6,7 @@ use super::{
     error::ProtocolError,
     imu::{ImuEncodingState, encode_imu_block},
     input_report::{PreparedInputReport, encode_0x30},
-    output_report::{OutputReport, RawRumble, SubcommandRequest, parse_output_report},
+    output_report::SubcommandRequest,
     session::ProtocolSession,
     spi::VirtualSpiFlash,
     subcommand::{
@@ -14,6 +14,9 @@ use super::{
         try_prepare_spi_reply, try_prepare_stateful_reply, try_prepare_stateless_reply,
     },
 };
+
+#[cfg(test)]
+use super::output_report::{OutputReport, RawRumble, parse_output_report};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct InputPreparation {
@@ -45,6 +48,7 @@ pub(crate) enum PreparedOutputAction {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg(test)]
 pub(crate) enum OutputPreparation<'a> {
     RumbleOnly {
         packet_id: u8,
@@ -65,13 +69,17 @@ pub(crate) struct SwitchHidProtocol<M: ControllerModel> {
 
 impl<M: ControllerModel> SwitchHidProtocol<M> {
     #[must_use]
-    pub(crate) fn new(
-        colors: Option<ControllerColors>,
-        device_info_address: DeviceInfoBluetoothAddress,
-    ) -> Self {
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T31 and T33 controller orchestration construct the protocol"
+        )
+    )]
+    pub(crate) fn new(colors: Option<ControllerColors>, device_info_address: [u8; 6]) -> Self {
         Self {
             spi: VirtualSpiFlash::new(colors),
-            device_info_address,
+            device_info_address: DeviceInfoBluetoothAddress::from_wire_bytes(device_info_address),
         }
     }
 
@@ -96,6 +104,7 @@ impl<M: ControllerModel> SwitchHidProtocol<M> {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn prepare_output_report<'a>(
         &self,
         raw: &'a [u8],

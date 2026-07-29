@@ -7,7 +7,7 @@ use crate::{
         facade::{OutputPreparation, PreparedOutputAction, SwitchHidProtocol},
         imu::{ImuEncodingState, ImuMode},
         session::ProtocolSession,
-        subcommand::{DeviceInfoBluetoothAddress, PreparedSubcommandReply},
+        subcommand::PreparedSubcommandReply,
     },
 };
 
@@ -396,10 +396,7 @@ fn facade_uses_the_explicit_input_state_even_when_the_session_is_not_ready() {
 }
 
 fn protocol(colors: Option<ControllerColors>) -> SwitchHidProtocol<Pro> {
-    SwitchHidProtocol::new(
-        colors,
-        DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-    )
+    SwitchHidProtocol::new(colors, DEVICE_INFO_ADDRESS)
 }
 
 fn reply_from(prepared: OutputPreparation<'_>) -> PreparedSubcommandReply {

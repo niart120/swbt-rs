@@ -1,11 +1,3 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T16 defines lifecycle transitions before M2 worker integration"
-    )
-)]
-
 use crate::runtime::readiness::ReadySession;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,8 +78,17 @@ impl LifecycleStateMachine {
         }
     }
 
+    #[allow(
+        dead_code,
+        reason = "T31 and T32 controller orchestration handles transport open failure"
+    )]
     pub(crate) fn fail_open(&mut self) {
         self.opening = false;
+    }
+
+    pub(crate) fn mark_failed(&mut self) {
+        self.opening = false;
+        self.state = LifecycleState::Failed;
     }
 
     pub(crate) fn begin_connection(&mut self) -> bool {

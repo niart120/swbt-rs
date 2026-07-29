@@ -1,11 +1,3 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T11 defines periodic policy before T21 worker integration"
-    )
-)]
-
 use std::{error::Error as StdError, fmt, time::Duration};
 
 use crate::{
@@ -18,7 +10,9 @@ use crate::{
         scheduler::{ReportScheduler, SchedulerError, TickDecision},
         sender::ReportSender,
         state::InputStateStore,
-        transport::{SendAcceptance, TransportError, TransportPort, TransportResult},
+        transport::{
+            SendAcceptance, TransportError, TransportErrorKind, TransportPort, TransportResult,
+        },
     },
 };
 
@@ -33,16 +27,10 @@ pub(crate) fn commit_candidate<M: ControllerModel>(
 
 pub(crate) struct PendingPeriodicTap<M: ControllerModel> {
     released: InputState<M>,
-    duration: Duration,
     first_error: Option<TransportError>,
 }
 
 impl<M: ControllerModel> PendingPeriodicTap<M> {
-    #[must_use]
-    pub(crate) const fn duration(&self) -> Duration {
-        self.duration
-    }
-
     pub(crate) fn finish(
         self,
         now_ns: u64,
@@ -55,9 +43,20 @@ impl<M: ControllerModel> PendingPeriodicTap<M> {
             commit_and_send_candidate(self.released, now_ns, state, protocol, sender, transport)
                 .err();
 
-        match self.first_error.or(release_error) {
-            Some(error) => Err(PeriodicError::Transport(error)),
-            None => Ok(()),
+        match (self.first_error, release_error) {
+            (None, None) => Ok(()),
+            (Some(error), None) | (None, Some(error)) => Err(PeriodicError::Transport {
+                error,
+                later_terminal: None,
+            }),
+            (Some(error), Some(release_error)) => {
+                let later_terminal = (release_error.kind() != TransportErrorKind::SendRejected)
+                    .then_some(release_error);
+                Err(PeriodicError::Transport {
+                    error,
+                    later_terminal,
+                })
+            }
         }
     }
 }
@@ -75,12 +74,20 @@ pub(crate) fn begin_tap<M: ControllerModel>(
         return Err(PeriodicError::NotReady);
     }
 
-    let (pressed, released, duration) = plan.into_parts();
+    let (pressed, released, _duration) = plan.into_parts();
     let first_error =
         commit_and_send_candidate(pressed, now_ns, state, protocol, sender, transport).err();
+    let first_error = match first_error {
+        Some(error) if error.kind() != TransportErrorKind::SendRejected => {
+            return Err(PeriodicError::Transport {
+                error,
+                later_terminal: None,
+            });
+        }
+        first_error => first_error,
+    };
     Ok(PendingPeriodicTap {
         released,
-        duration,
         first_error,
     })
 }
@@ -114,7 +121,10 @@ pub(crate) enum PeriodicError {
     NotReady,
     Scheduler(SchedulerError),
     ClockOverflow,
-    Transport(TransportError),
+    Transport {
+        error: TransportError,
+        later_terminal: Option<TransportError>,
+    },
 }
 
 impl From<SchedulerError> for PeriodicError {
@@ -125,7 +135,10 @@ impl From<SchedulerError> for PeriodicError {
 
 impl From<TransportError> for PeriodicError {
     fn from(error: TransportError) -> Self {
-        Self::Transport(error)
+        Self::Transport {
+            error,
+            later_terminal: None,
+        }
     }
 }
 
@@ -135,7 +148,9 @@ impl fmt::Display for PeriodicError {
             Self::NotReady => formatter.write_str("periodic input requires a ready runtime"),
             Self::Scheduler(error) => write!(formatter, "periodic scheduler error: {error}"),
             Self::ClockOverflow => formatter.write_str("monotonic clock exceeds nanosecond range"),
-            Self::Transport(error) => write!(formatter, "periodic transport error: {error}"),
+            Self::Transport { error, .. } => {
+                write!(formatter, "periodic transport error: {error}")
+            }
         }
     }
 }
@@ -146,7 +161,7 @@ impl StdError for PeriodicError {
             Self::NotReady => None,
             Self::Scheduler(error) => Some(error),
             Self::ClockOverflow => None,
-            Self::Transport(error) => Some(error),
+            Self::Transport { error, .. } => Some(error),
         }
     }
 }
@@ -277,7 +292,7 @@ mod tests {
         controller::input::tap_plan,
         input::{InputState, ProButton},
         model::{ButtonKind, Pro},
-        protocol::{DeviceInfoBluetoothAddress, SwitchHidProtocol},
+        protocol::SwitchHidProtocol,
         runtime::{
             connection::ObservedSubcommands,
             output::{OutputHandling, OutputHandlingContext, OutputHandlingError, handle_output},
@@ -500,17 +515,21 @@ mod tests {
         .expect("ready tap starts even when its press send fails");
 
         assert_eq!(store.snapshot(), pressed);
-        assert_eq!(pending.duration(), Duration::from_millis(80));
         assert_eq!(transport.attempts.len(), 1);
 
         let error = pending
             .finish(20, &mut store, &protocol, &mut sender, &mut transport)
             .expect_err("the first of two send failures must be returned");
 
-        let PeriodicError::Transport(error) = error else {
+        let PeriodicError::Transport {
+            error,
+            later_terminal: Some(later_terminal),
+        } = error
+        else {
             panic!("tap send failure must retain its transport error");
         };
         assert_eq!(error.kind(), TransportErrorKind::SendRejected);
+        assert_eq!(later_terminal.kind(), TransportErrorKind::Closed);
         assert_eq!(store.snapshot(), released);
         assert_eq!(sender.timer(), 0);
         assert_eq!(transport.attempts.len(), 2);
@@ -551,10 +570,7 @@ mod tests {
             );
             Self {
                 policy,
-                protocol: SwitchHidProtocol::new(
-                    None,
-                    DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-                ),
+                protocol: SwitchHidProtocol::new(None, DEVICE_INFO_ADDRESS),
                 sender: ReportSender::new(),
                 store: InputStateStore::new(),
                 observed: ObservedSubcommands::default(),
@@ -615,10 +631,7 @@ mod tests {
     }
 
     fn protocol() -> SwitchHidProtocol<Pro> {
-        SwitchHidProtocol::new(
-            None,
-            DeviceInfoBluetoothAddress::from_wire_bytes(DEVICE_INFO_ADDRESS),
-        )
+        SwitchHidProtocol::new(None, DEVICE_INFO_ADDRESS)
     }
 
     struct FailingTransport {

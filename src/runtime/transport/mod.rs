@@ -1,11 +1,3 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T02 defines the transport contract before M2 worker integration"
-    )
-)]
-
 use std::error::Error as StdError;
 use std::fmt;
 use std::sync::Arc;
@@ -18,11 +10,19 @@ pub(in crate::runtime) mod fake;
 mod tests;
 
 #[derive(Clone)]
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "T22 registers the coalescing activity notifier")
+)]
 pub(crate) struct ActivityNotifier {
     sender: SyncSender<()>,
 }
 
 impl ActivityNotifier {
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "T22 wakes the worker without blocking producers")
+    )]
     pub(crate) fn notify(&self) {
         match self.sender.try_send(()) {
             Ok(()) | Err(TrySendError::Full(())) | Err(TrySendError::Disconnected(())) => {}
@@ -30,6 +30,10 @@ impl ActivityNotifier {
     }
 }
 
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "T22 constructs the coalescing activity channel")
+)]
 pub(crate) fn activity_channel() -> (ActivityNotifier, Receiver<()>) {
     let (sender, receiver) = sync_channel(1);
     (ActivityNotifier { sender }, receiver)
@@ -39,18 +43,39 @@ pub(crate) fn activity_channel() -> (ActivityNotifier, Receiver<()>) {
 pub(crate) struct SendAcceptance(());
 
 impl SendAcceptance {
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 concrete transports construct accepted send tokens"
+        )
+    )]
     pub(in crate::runtime) const ACCEPTED: Self = Self(());
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "M3 concrete transports produce HID channel events"
+    )
+)]
 pub(crate) enum HidChannel {
     Control,
     Interrupt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "M3 concrete transports produce runtime events")
+)]
 pub(crate) enum TransportEvent {
     Connected,
+    HidChannelOpened {
+        channel: HidChannel,
+    },
     HidOutput {
         channel: HidChannel,
         payload: Box<[u8]>,
@@ -62,22 +87,52 @@ pub(crate) enum TransportEvent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TransportErrorKind {
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "M3 concrete transports report closed ports")
+    )]
     Closed,
     SendRejected,
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 concrete transports report event queue overflow"
+        )
+    )]
     EventQueueOverflow,
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 concrete transports report terminated event sources"
+        )
+    )]
     SourceTerminated,
 }
 
+#[derive(Clone)]
 pub(crate) struct TransportError {
     kind: TransportErrorKind,
     source: Option<Arc<dyn StdError + Send + Sync>>,
 }
 
 impl TransportError {
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "M3 concrete transports construct typed errors")
+    )]
     pub(crate) const fn new(kind: TransportErrorKind) -> Self {
         Self { kind, source: None }
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 concrete transports preserve sanitized backend sources"
+        )
+    )]
     pub(crate) fn with_source(
         kind: TransportErrorKind,
         source: Arc<dyn StdError + Send + Sync>,
@@ -125,6 +180,13 @@ impl StdError for TransportError {
 pub(crate) type TransportResult<T> = Result<T, TransportError>;
 
 pub(crate) trait TransportPort: Send {
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 concrete ports are opened by T31 orchestration"
+        )
+    )]
     fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()>;
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>>;
