@@ -269,6 +269,17 @@ impl StepProgress {
             WorkerWaitRequest::ActivityOrDeadline,
         ))
     }
+
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T24 worker loop delivers command results after each step"
+        )
+    )]
+    pub(crate) fn take_command_results(&mut self) -> Vec<WorkerCommandProgress> {
+        std::mem::take(&mut self.command_results)
+    }
 }
 
 #[cfg_attr(
@@ -1693,6 +1704,7 @@ mod tests {
         reporting::{Direct, Periodic},
         runtime::{
             cleanup::CloseMode,
+            command::{CommandEnqueueError, command_channel},
             direct::{DirectTapError, DirectTapInterruption},
             lifecycle::LifecycleState,
             output::{OutputHandlingError, OutputObservation},
@@ -1717,6 +1729,49 @@ mod tests {
     const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
     const REPORT_PERIOD: Duration = Duration::from_millis(8);
     const CONNECTION_TIMEOUT: Duration = Duration::from_secs(2);
+
+    #[test]
+    fn bounded_queue_feeds_one_worker_command_and_its_typed_response() {
+        let mut harness = DirectHarness::ready();
+        let (activity, wakes) = activity_channel();
+        let (client, mut commands) = command_channel(1, activity);
+        let response = client
+            .try_enqueue(DirectCommand::Common(CommonCommand::Tap {
+                buttons: vec![ProButton::B],
+                duration: Duration::ZERO,
+            }))
+            .expect("first command fits");
+        wakes.try_recv().expect("accepted command wakes worker");
+        assert!(matches!(
+            client.try_enqueue(DirectCommand::Common(CommonCommand::Press(vec![
+                ProButton::A,
+            ]))),
+            Err(CommandEnqueueError::Busy)
+        ));
+        assert_eq!(wakes.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty));
+        let mut shutdown = ShutdownLatch::default();
+
+        let WorkerStep::Continue(mut progress) =
+            harness
+                .worker
+                .step(&harness.clock, &mut shutdown, &mut commands)
+        else {
+            panic!("accepted command must keep worker running");
+        };
+        assert_eq!(progress.commands, 1);
+        assert_eq!(progress.due_actions, 1);
+        assert!(matches!(
+            progress.command_results.as_slice(),
+            [
+                WorkerCommandProgress::Pending,
+                WorkerCommandProgress::Complete(Ok(()))
+            ]
+        ));
+        commands
+            .deliver_progress(&mut progress)
+            .expect("deliver worker result to its response");
+        assert!(matches!(response.try_recv(), Ok(Ok(()))));
+    }
 
     #[test]
     fn queued_command_transport_and_shutdown_activity_wakes_the_idle_worker() {
