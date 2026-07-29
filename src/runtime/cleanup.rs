@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{error::Error as StdError, fmt, time::Duration};
 
 use crate::{
     input::InputState,
@@ -33,14 +33,14 @@ pub(crate) struct CleanupFailure {
         reason = "T24 and T26 map cleanup failures after joining the worker"
     )]
     phase: CleanupPhase,
-    #[allow(
-        dead_code,
-        reason = "T24 and T26 preserve the cleanup transport source"
-    )]
     error: TransportError,
 }
 
 impl CleanupFailure {
+    pub(crate) const fn new(phase: CleanupPhase, error: TransportError) -> Self {
+        Self { phase, error }
+    }
+
     #[must_use]
     #[allow(
         dead_code,
@@ -57,6 +57,18 @@ impl CleanupFailure {
     )]
     pub(crate) const fn source_error(&self) -> &TransportError {
         &self.error
+    }
+}
+
+impl fmt::Display for CleanupFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("controller runtime cleanup failed")
+    }
+}
+
+impl StdError for CleanupFailure {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(&self.error)
     }
 }
 
@@ -218,7 +230,7 @@ fn record_first_failure(
         return;
     }
     if let Err(error) = result {
-        *first_failure = Some(CleanupFailure { phase, error });
+        *first_failure = Some(CleanupFailure::new(phase, error));
     }
 }
 

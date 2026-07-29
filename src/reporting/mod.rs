@@ -3,7 +3,11 @@
 pub(crate) mod sealed {
     use std::{fmt::Debug, time::Duration};
 
-    use crate::error::{Error, ErrorKind};
+    use crate::{
+        error::{Error, ErrorKind},
+        model::ControllerModel,
+        runtime::worker::CommonCommand,
+    };
 
     const MIN_REPORT_PERIOD: Duration = Duration::from_millis(1);
     const DEFAULT_REPORT_PERIOD: Duration = Duration::from_millis(8);
@@ -12,9 +16,11 @@ pub(crate) mod sealed {
     pub trait Sealed {
         type BuilderOptions: Debug + Send + Sync + 'static;
         type Config: Debug + Send + Sync + 'static;
+        type Command<M: ControllerModel>: Send + 'static;
 
         fn default_options() -> Self::BuilderOptions;
         fn validate(options: Self::BuilderOptions) -> crate::Result<Self::Config>;
+        fn common<M: ControllerModel>(command: CommonCommand<M>) -> Self::Command<M>;
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +113,7 @@ pub enum Periodic {}
 impl sealed::Sealed for Periodic {
     type BuilderOptions = sealed::PeriodicBuilderOptions;
     type Config = sealed::PeriodicConfig;
+    type Command<M: crate::model::ControllerModel> = crate::runtime::worker::PeriodicCommand<M>;
 
     fn default_options() -> Self::BuilderOptions {
         sealed::PeriodicBuilderOptions::default()
@@ -114,6 +121,12 @@ impl sealed::Sealed for Periodic {
 
     fn validate(options: Self::BuilderOptions) -> crate::Result<Self::Config> {
         options.validate()
+    }
+
+    fn common<M: crate::model::ControllerModel>(
+        command: crate::runtime::worker::CommonCommand<M>,
+    ) -> Self::Command<M> {
+        crate::runtime::worker::PeriodicCommand::Common(command)
     }
 }
 
@@ -128,11 +141,18 @@ pub enum Direct {}
 impl sealed::Sealed for Direct {
     type BuilderOptions = ();
     type Config = ();
+    type Command<M: crate::model::ControllerModel> = crate::runtime::worker::DirectCommand<M>;
 
     fn default_options() -> Self::BuilderOptions {}
 
     fn validate(options: Self::BuilderOptions) -> crate::Result<Self::Config> {
         Ok(options)
+    }
+
+    fn common<M: crate::model::ControllerModel>(
+        command: crate::runtime::worker::CommonCommand<M>,
+    ) -> Self::Command<M> {
+        crate::runtime::worker::DirectCommand::Common(command)
     }
 }
 

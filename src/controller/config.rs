@@ -3,7 +3,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[cfg(test)]
 use std::time::Duration;
 
 use crate::{
@@ -138,7 +137,6 @@ pub(super) enum ProfileConfig<M: ControllerModel> {
 }
 
 impl<M: ControllerModel> ControllerConfig<M, reporting::Periodic> {
-    #[cfg(test)]
     pub(super) fn report_period(&self) -> Duration {
         self.mode.report_period()
     }

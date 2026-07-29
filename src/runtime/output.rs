@@ -97,10 +97,10 @@ pub(crate) fn handle_output<M: ControllerModel>(
         OutputReport::Rumble { .. } => Ok(OutputHandling::RumbleOnly),
         OutputReport::Subcommand { request, .. } => {
             observed.observe(request.id());
-            if let Some(status) = status
-                && let Some(id) = observed.last()
-            {
-                status.record_subcommand(id);
+            if let Some(status) = status {
+                if let Some(id) = observed.last() {
+                    status.record_subcommand(id);
+                }
             }
             let prepared = sender.prepare_reply(protocol, request, current)?;
             let accepted = sender.send_reply(prepared, transport)?;

@@ -4,6 +4,7 @@ mod build;
 mod config;
 mod create;
 pub(crate) mod input;
+mod runtime;
 
 #[cfg(test)]
 mod build_tests;
@@ -11,6 +12,8 @@ mod build_tests;
 mod config_tests;
 #[cfg(test)]
 mod create_profile_tests;
+#[cfg(test)]
+mod runtime_tests;
 
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -18,11 +21,16 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::diagnostics::GamepadStatus;
-use crate::input::InputState;
+use crate::error::{Error, ErrorKind};
+use crate::input::{Button, InputState};
 use crate::model::{self, ControllerModel};
 use crate::profile::ControllerColors;
 use crate::reporting::{self, ReportingMode};
-use crate::runtime::status::{StatusPublisher, StatusReader, status_projection};
+use crate::runtime::{
+    cleanup::CloseMode,
+    status::{StatusPublisher, StatusReader, status_projection},
+    worker::{CommonCommand, DirectCommand, PeriodicCommand},
+};
 use crate::{AdapterSelector, CreateProfileOptions};
 
 use build::{FileProfileReader, ProfileReadPort, read_typed_profile};
@@ -35,8 +43,8 @@ use create::{CreateProfilePlan, CreateProfileRuntimeBackend, ReadyRuntime};
 ///
 /// Read-only status and input snapshots do not wait for transport I/O.
 /// A builder can be created without opening an adapter or starting a worker.
-/// Lifecycle-changing operations are not exposed in the current package
-/// surface. Controllers are transferable between threads but intentionally
+/// Input and close operations wait for the owned worker when a runtime is
+/// active. Controllers are transferable between threads but intentionally
 /// cannot be shared between threads.
 pub struct Controller<M: ControllerModel, R: ReportingMode> {
     _runtime: Option<ReadyRuntime<M, R>>,
@@ -122,6 +130,170 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     #[must_use]
     pub fn snapshot(&self) -> InputState<M> {
         self.status_reader.snapshot()
+    }
+
+    /// Presses one or more model-valid buttons.
+    ///
+    /// The call blocks until the worker has completed the reporting-specific
+    /// state transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
+    /// runtime, or in Direct mode when the transport is not Ready. An empty
+    /// button set returns [`ErrorKind::InvalidInput`]. Queue, shutdown,
+    /// transport, and worker failures are returned as structured
+    /// [`crate::Error`] values.
+    pub fn press(&mut self, buttons: impl IntoIterator<Item = Button<M>>) -> crate::Result<()> {
+        self.request_common(CommonCommand::Press(buttons.into_iter().collect()))
+    }
+
+    /// Releases one or more model-valid buttons.
+    ///
+    /// The call blocks until the worker has completed the reporting-specific
+    /// state transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
+    /// runtime, or in Direct mode when the transport is not Ready. An empty
+    /// button set returns [`ErrorKind::InvalidInput`]. Queue, shutdown,
+    /// transport, and worker failures are returned as structured
+    /// [`crate::Error`] values.
+    pub fn release(&mut self, buttons: impl IntoIterator<Item = Button<M>>) -> crate::Result<()> {
+        self.request_common(CommonCommand::Release(buttons.into_iter().collect()))
+    }
+
+    /// Presses buttons, waits for `duration`, and then releases them.
+    ///
+    /// The worker remains responsive to protocol traffic while this blocking
+    /// call waits for the release. Durations from zero through 24 hours are
+    /// accepted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
+    /// runtime or the transport is not Ready. Empty buttons or a duration
+    /// greater than 24 hours return
+    /// [`ErrorKind::InvalidInput`]. Queue, shutdown, transport, and worker
+    /// failures are returned as structured [`crate::Error`] values.
+    pub fn tap(
+        &mut self,
+        buttons: impl IntoIterator<Item = Button<M>>,
+        duration: Duration,
+    ) -> crate::Result<()> {
+        self.request_common(CommonCommand::Tap {
+            buttons: buttons.into_iter().collect(),
+            duration,
+        })
+    }
+
+    /// Restores the model-valid neutral input state.
+    ///
+    /// The call blocks until the worker has completed the reporting-specific
+    /// state transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
+    /// runtime, or in Direct mode when the transport is not Ready. Queue,
+    /// shutdown, transport, and worker failures are returned as structured
+    /// [`crate::Error`] values.
+    pub fn neutral(&mut self) -> crate::Result<()> {
+        self.request_common(CommonCommand::Neutral)
+    }
+
+    /// Closes the runtime, attempting a trailing neutral report first.
+    ///
+    /// Cleanup continues through drain, disconnect, transport close, worker
+    /// completion, and join if sending the neutral report fails. Calling this
+    /// method when no runtime remains records
+    /// [`crate::LifecycleState::Closed`] and succeeds.
+    ///
+    /// # Errors
+    ///
+    /// Returns a cleanup, worker-termination, or worker-join error after all
+    /// remaining cleanup phases have been attempted. An additional failure
+    /// from the same close operation is available through
+    /// [`crate::Error::related_error`].
+    pub fn close(&mut self) -> crate::Result<()> {
+        self.close_with_mode(CloseMode::WithNeutral)
+    }
+
+    /// Closes the runtime without sending a trailing neutral report.
+    ///
+    /// Bounded drain, disconnect, transport close, worker completion, and join
+    /// still run. Calling this method when no runtime remains records
+    /// [`crate::LifecycleState::Closed`] and succeeds.
+    ///
+    /// # Errors
+    ///
+    /// Returns a cleanup, worker-termination, or worker-join error after all
+    /// remaining cleanup phases have been attempted. An additional failure
+    /// from the same close operation is available through
+    /// [`crate::Error::related_error`].
+    pub fn close_without_neutral(&mut self) -> crate::Result<()> {
+        self.close_with_mode(CloseMode::WithoutNeutral)
+    }
+
+    fn request_common(&mut self, command: CommonCommand<M>) -> crate::Result<()> {
+        let command = <R as reporting::sealed::Sealed>::common(command);
+        self.ready_runtime()?.request(command)
+    }
+
+    fn ready_runtime(&mut self) -> crate::Result<&mut ReadyRuntime<M, R>> {
+        self._runtime.as_mut().ok_or_else(|| {
+            Error::new(
+                ErrorKind::TransportClosed,
+                "controller runtime is not ready",
+            )
+        })
+    }
+
+    fn close_with_mode(&mut self, mode: CloseMode) -> crate::Result<()> {
+        let Some(runtime) = self._runtime.take() else {
+            self.status_publisher
+                .set_lifecycle(crate::LifecycleState::Closed);
+            return Ok(());
+        };
+        runtime.close(mode)
+    }
+}
+
+impl<M: ControllerModel> Controller<M, reporting::Periodic> {
+    /// Replaces the committed input used by periodic reporting.
+    ///
+    /// The call blocks until the worker has committed the model-valid state.
+    /// Transport delivery is performed later by the periodic scheduler.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
+    /// runtime. Queue, shutdown, and worker failures are returned as structured
+    /// [`crate::Error`] values.
+    pub fn apply(&mut self, state: InputState<M>) -> crate::Result<()> {
+        self.ready_runtime()?.request(PeriodicCommand::Apply(state))
+    }
+
+    /// Returns the validated periodic input-report interval.
+    #[must_use]
+    pub fn report_period(&self) -> Duration {
+        self.config.report_period()
+    }
+}
+
+impl<M: ControllerModel> Controller<M, reporting::Direct> {
+    /// Sends and commits one model-valid input state.
+    ///
+    /// The snapshot is committed only after the transport accepts the report.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
+    /// runtime or the transport is not Ready. Queue, shutdown, transport, and
+    /// worker failures are returned as structured [`crate::Error`] values.
+    pub fn send(&mut self, state: InputState<M>) -> crate::Result<()> {
+        self.ready_runtime()?.request(DirectCommand::Send(state))
     }
 }
 

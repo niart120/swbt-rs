@@ -15,6 +15,8 @@ pub(crate) mod state;
 pub(crate) mod status;
 #[cfg(test)]
 mod status_tests;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub(crate) mod transport;
 pub(crate) mod worker;
 pub(crate) mod worker_thread;

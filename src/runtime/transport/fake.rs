@@ -21,10 +21,10 @@ pub(in crate::runtime) enum ScriptedSendOutcome {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct FakeTransportCounters {
-    pub(super) open: usize,
-    pub(super) disconnect: usize,
-    pub(super) close: usize,
+pub(crate) struct FakeTransportCounters {
+    pub(crate) open: usize,
+    pub(crate) disconnect: usize,
+    pub(crate) close: usize,
 }
 
 #[derive(Clone)]
@@ -265,7 +265,7 @@ impl FakeTransportControl {
         lock(&self.shared.accepted_interrupts).clone()
     }
 
-    pub(super) fn counters(&self) -> FakeTransportCounters {
+    pub(crate) fn counters(&self) -> FakeTransportCounters {
         *lock(&self.shared.counters)
     }
 

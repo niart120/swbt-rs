@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, time::Duration};
+use std::time::Duration;
 
 #[cfg(test)]
 use std::path::Path;
@@ -10,8 +10,11 @@ use crate::{
     profile::{
         ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState, ProfileDocument,
     },
-    reporting::ReportingMode,
-    runtime::status::{StatusPublisher, status_projection},
+    reporting::{self, ReportingMode},
+    runtime::{
+        cleanup::CloseMode,
+        status::{StatusPublisher, status_projection},
+    },
 };
 
 use super::{
@@ -77,14 +80,25 @@ struct ReopenedCreateProfilePlan<M: ControllerModel, R: ReportingMode> {
     pair_timeout: Duration,
 }
 
-trait RuntimeOwner: Send {}
+/// Type-erased command and shutdown boundary for a ready controller runtime.
+pub(super) trait ReadyRuntimePort<M, R>: Send
+where
+    M: ControllerModel,
+    R: ReportingMode,
+{
+    /// Sends one reporting-specific command and waits for its worker response.
+    fn request(
+        &mut self,
+        command: <R as reporting::sealed::Sealed>::Command<M>,
+    ) -> crate::Result<()>;
 
-impl<T: Send> RuntimeOwner for T {}
+    /// Performs explicit cleanup and consumes the runtime owner.
+    fn close(self: Box<Self>, mode: CloseMode) -> crate::Result<()>;
+}
 
 /// Runtime ownership returned only after a backend reports protocol readiness.
 pub(super) struct ReadyRuntime<M: ControllerModel, R: ReportingMode> {
-    _owner: Box<dyn RuntimeOwner>,
-    _types: PhantomData<fn() -> (M, R)>,
+    port: Box<dyn ReadyRuntimePort<M, R>>,
 }
 
 impl<M: ControllerModel, R: ReportingMode> ReadyRuntime<M, R> {
@@ -92,14 +106,58 @@ impl<M: ControllerModel, R: ReportingMode> ReadyRuntime<M, R> {
         not(test),
         allow(
             dead_code,
-            reason = "T33 constructs a ready runtime from the concrete worker owner"
+            reason = "T33 fake-runtime tests construct this port before T34 exposes lifecycle entrypoints"
         )
     )]
-    pub(super) fn new(owner: impl Send + 'static) -> Self {
+    pub(super) fn from_port(port: impl ReadyRuntimePort<M, R> + 'static) -> Self {
         Self {
-            _owner: Box::new(owner),
-            _types: PhantomData,
+            port: Box::new(port),
         }
+    }
+
+    pub(super) fn request(
+        &mut self,
+        command: <R as reporting::sealed::Sealed>::Command<M>,
+    ) -> crate::Result<()> {
+        self.port.request(command)
+    }
+
+    pub(super) fn close(self, mode: CloseMode) -> crate::Result<()> {
+        self.port.close(mode)
+    }
+
+    #[cfg(test)]
+    pub(super) fn new(owner: impl Send + 'static) -> Self {
+        Self::from_port(TestRuntimeToken(owner))
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    dead_code,
+    reason = "the token is retained solely to verify ready runtime ownership and Drop"
+)]
+struct TestRuntimeToken<T: Send>(T);
+
+#[cfg(test)]
+impl<M, R, T> ReadyRuntimePort<M, R> for TestRuntimeToken<T>
+where
+    M: ControllerModel,
+    R: ReportingMode,
+    T: Send,
+{
+    fn request(
+        &mut self,
+        _command: <R as reporting::sealed::Sealed>::Command<M>,
+    ) -> crate::Result<()> {
+        Err(Error::new(
+            ErrorKind::WorkerFailed,
+            "test runtime token cannot process worker commands",
+        ))
+    }
+
+    fn close(self: Box<Self>, _mode: CloseMode) -> crate::Result<()> {
+        Ok(())
     }
 }
 
@@ -134,7 +192,12 @@ pub(super) trait CreateProfileRuntimeAttempt<M: ControllerModel, R: ReportingMod
     /// disarm their `Drop` fallback before returning. Resource-owning
     /// implementations also provide that fallback for panic and early-return
     /// paths.
-    fn cleanup_without_neutral(self);
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured worker or transport error after attempting every
+    /// cleanup phase.
+    fn cleanup_without_neutral(self) -> crate::Result<()>;
 
     /// Transfers a successfully paired attempt into controller ownership.
     fn into_ready(self) -> ReadyRuntime<M, R>;
@@ -154,12 +217,16 @@ where
     let (status_publisher, status_reader) = status_projection();
     let mut attempt = backend.begin_attempt(status_publisher.clone());
     if let Err(primary) = attempt.open(&reopened.config) {
-        attempt.cleanup_without_neutral();
-        return Err(primary);
+        return Err(with_cleanup_error(
+            primary,
+            attempt.cleanup_without_neutral(),
+        ));
     }
     if let Err(primary) = attempt.pair_to_ready(reopened.pair_timeout) {
-        attempt.cleanup_without_neutral();
-        return Err(primary);
+        return Err(with_cleanup_error(
+            primary,
+            attempt.cleanup_without_neutral(),
+        ));
     }
     let runtime = attempt.into_ready();
 
@@ -169,6 +236,13 @@ where
         status_reader,
         runtime,
     ))
+}
+
+fn with_cleanup_error(primary: Error, cleanup: crate::Result<()>) -> Error {
+    match cleanup {
+        Ok(()) => primary,
+        Err(cleanup) => primary.with_related(cleanup),
+    }
 }
 
 pub(super) fn validate_target<M: ControllerModel, R: ReportingMode>(

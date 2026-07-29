@@ -1,4 +1,5 @@
 use std::{
+    convert::Infallible,
     marker::PhantomData,
     sync::mpsc::{Receiver, RecvTimeoutError},
     time::Duration,
@@ -10,9 +11,12 @@ use crate::{
     input::{Button, InputState},
     model::ControllerModel,
     protocol::SwitchHidProtocol,
-    reporting::{Direct, Periodic, ReportingMode},
+    reporting::{self, Direct, Periodic, ReportingMode},
     runtime::{
-        cleanup::{CleanupContext, CleanupSequence, CloseCompletion, CloseMode},
+        cleanup::{
+            CleanupContext, CleanupFailure, CleanupSequence, CloseCompletion, CloseMode,
+            ExplicitCloseError,
+        },
         connection::ObservedSubcommands,
         direct::{
             DirectTapContext, DirectTapError, DirectTapStep, DirectTapStimulus, PendingDirectTap,
@@ -167,7 +171,7 @@ impl WorkerBudget {
     dead_code,
     reason = "T33 controller input methods construct the complete command surface"
 )]
-pub(crate) enum CommonCommand<M: ControllerModel> {
+pub enum CommonCommand<M: ControllerModel> {
     Press(Vec<Button<M>>),
     Release(Vec<Button<M>>),
     Tap {
@@ -181,7 +185,7 @@ pub(crate) enum CommonCommand<M: ControllerModel> {
     dead_code,
     reason = "T33 Periodic controller methods construct reporting-specific commands"
 )]
-pub(crate) enum PeriodicCommand<M: ControllerModel> {
+pub enum PeriodicCommand<M: ControllerModel> {
     Common(CommonCommand<M>),
     Apply(InputState<M>),
 }
@@ -190,9 +194,46 @@ pub(crate) enum PeriodicCommand<M: ControllerModel> {
     dead_code,
     reason = "T33 Direct controller methods construct reporting-specific commands"
 )]
-pub(crate) enum DirectCommand<M: ControllerModel> {
+pub enum DirectCommand<M: ControllerModel> {
     Common(CommonCommand<M>),
     Send(InputState<M>),
+}
+
+pub(crate) enum RuntimeCommand<M, R>
+where
+    M: ControllerModel,
+    R: ReportingMode,
+{
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T33 test injection pairs through the worker before T34 public entrypoints"
+        )
+    )]
+    Pair {
+        timeout: Duration,
+    },
+    Input(<R as reporting::sealed::Sealed>::Command<M>),
+}
+
+struct InputCommandSource<'a, M, R>
+where
+    M: ControllerModel,
+    R: ReportingMode,
+{
+    commands: &'a mut dyn CommandSource<<R as reporting::sealed::Sealed>::Command<M>>,
+    _types: PhantomData<fn() -> (M, R)>,
+}
+
+impl<M, R> CommandSource<RuntimeCommand<M, R>> for InputCommandSource<'_, M, R>
+where
+    M: ControllerModel,
+    R: ReportingMode,
+{
+    fn try_next(&mut self) -> Option<RuntimeCommand<M, R>> {
+        self.commands.try_next().map(RuntimeCommand::Input)
+    }
 }
 
 #[derive(Debug)]
@@ -203,6 +244,7 @@ pub(crate) enum DirectCommand<M: ControllerModel> {
 pub(crate) enum WorkerCommandError {
     Input(Error),
     Lifecycle(LifecycleCommandError),
+    Pair(PairingError),
     Periodic(PeriodicError),
     Direct(DirectTapError),
     ClockOverflow,
@@ -239,6 +281,13 @@ pub(crate) enum WorkerCoreError {
     Session(SessionError),
     Handshake(HandshakeError),
     Transport(TransportError),
+}
+
+#[derive(Debug)]
+pub(crate) enum PairingError {
+    Begin(WorkerCoreError),
+    Readiness(ReadinessError),
+    WorkerFailed,
 }
 
 impl WorkerCoreError {
@@ -357,7 +406,24 @@ pub(crate) struct DirectRuntime<M: ControllerModel> {
 
 pub(crate) trait WorkerReporting<M: ControllerModel>: ReportingMode {
     type RuntimeState: Send + 'static;
-    type Command: Send + 'static;
+
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T33 tests build concrete workers before M3 supplies a backend"
+        )
+    )]
+    fn build_worker(
+        protocol: SwitchHidProtocol<M>,
+        transport: Box<dyn TransportPort>,
+        config: &<Self as reporting::sealed::Sealed>::Config,
+        budget: WorkerBudget,
+        observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
+        status: StatusPublisher<M>,
+    ) -> WorkerCore<M, Self>
+    where
+        Self: Sized;
 
     fn begin_session(
         runtime: &mut Self::RuntimeState,
@@ -369,7 +435,7 @@ pub(crate) trait WorkerReporting<M: ControllerModel>: ReportingMode {
 
     fn handle_command(
         runtime: &mut Self::RuntimeState,
-        command: Self::Command,
+        command: <Self as reporting::sealed::Sealed>::Command<M>,
         context: ReportingCommandContext<'_, M>,
     ) -> WorkerCommandProgress;
 
@@ -485,6 +551,7 @@ where
     observed: ObservedSubcommands,
     sessions: ConnectionSessions,
     connection: Option<ConnectionWork>,
+    pair_pending: bool,
     connected: bool,
     status: StatusPublisher<M>,
     transport: Box<dyn TransportPort>,
@@ -599,6 +666,7 @@ where
             observed: ObservedSubcommands::default(),
             sessions: ConnectionSessions::new(),
             connection: None,
+            pair_pending: false,
             connected: false,
             status,
             transport,
@@ -661,35 +729,61 @@ where
         &mut self,
         clock: &dyn MonotonicClock,
         shutdown: &mut dyn PriorityShutdown,
-        commands: &mut dyn CommandSource<R::Command>,
+        commands: &mut dyn CommandSource<<R as reporting::sealed::Sealed>::Command<M>>,
+    ) -> WorkerStep {
+        let mut commands = InputCommandSource::<M, R> {
+            commands,
+            _types: PhantomData,
+        };
+        self.step_runtime(clock, shutdown, &mut commands)
+    }
+
+    pub(crate) fn step_runtime(
+        &mut self,
+        clock: &dyn MonotonicClock,
+        shutdown: &mut dyn PriorityShutdown,
+        commands: &mut dyn CommandSource<RuntimeCommand<M, R>>,
     ) -> WorkerStep {
         let mut progress = StepProgress::new();
         if let Some(request) = shutdown.take() {
             return self.close(request, clock.now(), progress);
         }
 
-        if !R::has_pending(&self.reporting) {
+        if !self.pair_pending && !R::has_pending(&self.reporting) {
             for _ in 0..self.budget.command_batch {
                 let Some(command) = commands.try_next() else {
                     break;
                 };
                 progress.commands += 1;
-                let result = match self.lifecycle.ensure_input_command() {
-                    Ok(()) => R::handle_command(
-                        &mut self.reporting,
-                        command,
-                        ReportingCommandContext {
-                            ready: self.lifecycle.state() == LifecycleState::Ready,
-                            now: clock.now(),
-                            input: &mut self.input,
-                            protocol: &self.protocol,
-                            sender: &mut self.sender,
-                            transport: self.transport.as_mut(),
-                        },
-                    ),
-                    Err(error) => {
-                        WorkerCommandProgress::Complete(Err(WorkerCommandError::Lifecycle(error)))
+                let result = match command {
+                    RuntimeCommand::Pair { timeout } => {
+                        match self.begin_connection(clock.now(), timeout) {
+                            Ok(_) => {
+                                self.pair_pending = true;
+                                WorkerCommandProgress::Pending
+                            }
+                            Err(error) => WorkerCommandProgress::Complete(Err(
+                                WorkerCommandError::Pair(PairingError::Begin(error)),
+                            )),
+                        }
                     }
+                    RuntimeCommand::Input(command) => match self.lifecycle.ensure_input_command() {
+                        Ok(()) => R::handle_command(
+                            &mut self.reporting,
+                            command,
+                            ReportingCommandContext {
+                                ready: self.lifecycle.state() == LifecycleState::Ready,
+                                now: clock.now(),
+                                input: &mut self.input,
+                                protocol: &self.protocol,
+                                sender: &mut self.sender,
+                                transport: self.transport.as_mut(),
+                            },
+                        ),
+                        Err(error) => WorkerCommandProgress::Complete(Err(
+                            WorkerCommandError::Lifecycle(error),
+                        )),
+                    },
                 };
                 let (result, terminal) = match nonterminal_command_progress(result) {
                     Ok(result) => (result, None),
@@ -708,7 +802,10 @@ where
                 }
             }
         }
-        if progress.commands == self.budget.command_batch && !R::has_pending(&self.reporting) {
+        if progress.commands == self.budget.command_batch
+            && !self.pair_pending
+            && !R::has_pending(&self.reporting)
+        {
             progress.immediate = true;
         }
 
@@ -849,18 +946,18 @@ where
             ReportingEvent::Passthrough(TransportEvent::Connected) => {
                 self.connected = true;
                 self.status.set_connected(true);
-                if let Some(connection) = self.connection.as_mut()
-                    && let Some(handshake) = connection.handshake.as_mut()
-                {
-                    handshake.observe_link(connection.session_id);
+                if let Some(connection) = self.connection.as_mut() {
+                    if let Some(handshake) = connection.handshake.as_mut() {
+                        handshake.observe_link(connection.session_id);
+                    }
                 }
                 Ok(true)
             }
             ReportingEvent::Passthrough(TransportEvent::HidChannelOpened { channel }) => {
-                if let Some(connection) = self.connection.as_mut()
-                    && let Some(handshake) = connection.handshake.as_mut()
-                {
-                    handshake.observe_channel(connection.session_id, channel);
+                if let Some(connection) = self.connection.as_mut() {
+                    if let Some(handshake) = connection.handshake.as_mut() {
+                        handshake.observe_channel(connection.session_id, channel);
+                    }
                 }
                 Ok(true)
             }
@@ -940,6 +1037,10 @@ where
             let error = connection.readiness.abort(
                 &mut connection.handshake,
                 ReadinessError::Disconnected { reason },
+            );
+            self.complete_pairing(
+                Err(WorkerCommandError::Pair(PairingError::Readiness(error))),
+                progress,
             );
             progress
                 .operation_errors
@@ -1025,6 +1126,7 @@ where
                     return Err(WorkerCoreError::InvalidLifecycle);
                 }
                 self.status.set_lifecycle(self.lifecycle.state());
+                self.complete_pairing(Ok(()), progress);
                 actions += 1;
             }
             Err(error) => {
@@ -1041,6 +1143,10 @@ where
         progress: &mut StepProgress,
     ) {
         let error = connection.readiness.abort(&mut connection.handshake, error);
+        self.complete_pairing(
+            Err(WorkerCommandError::Pair(PairingError::Readiness(error))),
+            progress,
+        );
         progress
             .operation_errors
             .push(WorkerOperationError::Readiness(error));
@@ -1057,8 +1163,9 @@ where
         &mut self,
         request: ShutdownRequest,
         now: Duration,
-        progress: StepProgress,
+        mut progress: StepProgress,
     ) -> WorkerStep {
+        self.complete_pairing(Err(WorkerCommandError::Shutdown), &mut progress);
         let interrupted = R::cancel_for_shutdown(
             &mut self.reporting,
             ReportingEventContext {
@@ -1101,11 +1208,70 @@ where
         }
     }
 
-    fn fail(&mut self, error: WorkerCoreError, progress: StepProgress) -> WorkerStep {
+    pub(crate) fn cleanup_unspawned_without_neutral(
+        &mut self,
+        now: Duration,
+    ) -> Result<(), CleanupFailure> {
+        let WorkerStep::Closed { completion, .. } = self.close(
+            ShutdownRequest::explicit(CloseMode::WithoutNeutral),
+            now,
+            StepProgress::new(),
+        ) else {
+            unreachable!("closing an unspawned worker must produce a closed step");
+        };
+
+        finish_cleanup_without_join(completion)
+    }
+
+    pub(crate) fn cleanup_after_failure_without_neutral(
+        &mut self,
+        now: Duration,
+    ) -> Result<(), CleanupFailure> {
+        R::stop_session(&mut self.reporting);
+        let completion =
+            CleanupSequence::new(CloseMode::WithoutNeutral, EXPLICIT_CLOSE_DRAIN_TIMEOUT).run(
+                CleanupContext {
+                    connected: self.connected,
+                    now_ns: u64::try_from(now.as_nanos()).unwrap_or(u64::MAX),
+                    lifecycle: &mut self.lifecycle,
+                    protocol: &self.protocol,
+                    sender: &mut self.sender,
+                    status: None,
+                    transport: self.transport.as_mut(),
+                },
+            );
+        self.connected = false;
+        self.connection = None;
+        if let Some(session_id) = self.sessions.current() {
+            self.sessions.end_current(session_id);
+        }
+
+        finish_cleanup_without_join(completion)
+    }
+
+    fn fail(&mut self, error: WorkerCoreError, mut progress: StepProgress) -> WorkerStep {
+        self.complete_pairing(
+            Err(WorkerCommandError::Pair(PairingError::WorkerFailed)),
+            &mut progress,
+        );
         self.lifecycle.mark_failed();
         self.connected = false;
         self.status.fail(error.status_message());
         WorkerStep::Failed { error, progress }
+    }
+
+    fn complete_pairing(
+        &mut self,
+        result: Result<(), WorkerCommandError>,
+        progress: &mut StepProgress,
+    ) {
+        if self.pair_pending {
+            self.pair_pending = false;
+            progress
+                .command_results
+                .push(WorkerCommandProgress::Complete(result));
+            progress.immediate = true;
+        }
     }
 
     pub(crate) fn status_publisher(&self) -> StatusPublisher<M> {
@@ -1149,9 +1315,36 @@ where
     }
 }
 
+fn finish_cleanup_without_join(completion: CloseCompletion) -> Result<(), CleanupFailure> {
+    match completion.finish_with_join(|| Ok::<(), Infallible>(())) {
+        Ok(()) => Ok(()),
+        Err(ExplicitCloseError::Cleanup(cleanup)) => Err(cleanup),
+        Err(ExplicitCloseError::Join(join)) => match join {},
+        Err(ExplicitCloseError::CleanupAndJoin { join, .. }) => match join {},
+    }
+}
+
 impl<M: ControllerModel> WorkerReporting<M> for Periodic {
     type RuntimeState = PeriodicRuntime<M>;
-    type Command = PeriodicCommand<M>;
+
+    fn build_worker(
+        protocol: SwitchHidProtocol<M>,
+        transport: Box<dyn TransportPort>,
+        config: &<Self as reporting::sealed::Sealed>::Config,
+        budget: WorkerBudget,
+        observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
+        status: StatusPublisher<M>,
+    ) -> WorkerCore<M, Self> {
+        WorkerCore::new_periodic_with_status(
+            protocol,
+            transport,
+            config.report_period(),
+            budget,
+            observe_output,
+            status,
+        )
+        .expect("validated report period is non-zero")
+    }
 
     fn begin_session(
         runtime: &mut Self::RuntimeState,
@@ -1165,7 +1358,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
 
     fn handle_command(
         runtime: &mut Self::RuntimeState,
-        command: Self::Command,
+        command: <Self as reporting::sealed::Sealed>::Command<M>,
         context: ReportingCommandContext<'_, M>,
     ) -> WorkerCommandProgress {
         match command {
@@ -1372,7 +1565,17 @@ fn periodic_tap_times(
 
 impl<M: ControllerModel> WorkerReporting<M> for Direct {
     type RuntimeState = DirectRuntime<M>;
-    type Command = DirectCommand<M>;
+
+    fn build_worker(
+        protocol: SwitchHidProtocol<M>,
+        transport: Box<dyn TransportPort>,
+        _config: &<Self as reporting::sealed::Sealed>::Config,
+        budget: WorkerBudget,
+        observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
+        status: StatusPublisher<M>,
+    ) -> WorkerCore<M, Self> {
+        WorkerCore::new_direct_with_status(protocol, transport, budget, observe_output, status)
+    }
 
     fn begin_session(
         _runtime: &mut Self::RuntimeState,
@@ -1386,7 +1589,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Direct {
 
     fn handle_command(
         runtime: &mut Self::RuntimeState,
-        command: Self::Command,
+        command: <Self as reporting::sealed::Sealed>::Command<M>,
         context: ReportingCommandContext<'_, M>,
     ) -> WorkerCommandProgress {
         if !context.ready {
@@ -1779,13 +1982,14 @@ mod tests {
         protocol::SwitchHidProtocol,
         reporting::{Direct, Periodic},
         runtime::{
-            cleanup::CloseMode,
+            cleanup::{CleanupPhase, CloseMode},
             command::{CommandEnqueueError, command_channel},
             direct::{DirectTapError, DirectTapInterruption},
             lifecycle::LifecycleState,
             output::{OutputHandlingError, OutputObservation},
             periodic::PeriodicError,
             readiness::ReadinessError,
+            status::status_projection,
             transport::{
                 ActivityNotifier, HidChannel, SendAcceptance, TransportErrorKind, TransportEvent,
                 TransportPort, TransportResult, activity_channel,
@@ -1793,10 +1997,10 @@ mod tests {
             },
             worker::{
                 ChannelWorkerWaiter, CommandSource, CommonCommand, DirectCommand, MonotonicClock,
-                PeriodicCommand, PriorityShutdown, ShutdownRequest, StepProgress, WorkerBudget,
-                WorkerCommandError, WorkerCommandProgress, WorkerCore, WorkerCoreError,
-                WorkerOperationError, WorkerStep, WorkerWaitError, WorkerWaitRequest, WorkerWaiter,
-                periodic_tap_times, wait_for_next_iteration,
+                PairingError, PeriodicCommand, PriorityShutdown, RuntimeCommand, ShutdownRequest,
+                StepProgress, WorkerBudget, WorkerCommandError, WorkerCommandProgress, WorkerCore,
+                WorkerCoreError, WorkerOperationError, WorkerStep, WorkerWaitError,
+                WorkerWaitRequest, WorkerWaiter, periodic_tap_times, wait_for_next_iteration,
             },
         },
     };
@@ -1847,6 +2051,185 @@ mod tests {
             .deliver_progress(&mut progress)
             .expect("deliver worker result to its response");
         assert!(matches!(response.try_recv(), Ok(Ok(()))));
+    }
+
+    #[test]
+    fn pair_response_stays_pending_until_ready_and_blocks_following_input() {
+        let (transport, control, trace) = tracing_transport();
+        let clock = FakeClock::at(Duration::ZERO);
+        let mut worker = WorkerCore::new_direct(
+            protocol(),
+            Box::new(transport),
+            WorkerBudget::new(2, 1),
+            observer(trace),
+        );
+        let (activity, _wakes) = activity_channel();
+        let (client, mut commands) = command_channel(2, activity);
+        let pair = client
+            .try_enqueue(RuntimeCommand::<Pro, Direct>::Pair {
+                timeout: CONNECTION_TIMEOUT,
+            })
+            .expect("pair command fits");
+        let input = client
+            .try_enqueue(RuntimeCommand::Input(DirectCommand::Common(
+                CommonCommand::Press(vec![ProButton::A]),
+            )))
+            .expect("following input fits");
+        let mut shutdown = ShutdownLatch::default();
+
+        let WorkerStep::Continue(mut accepted) =
+            worker.step_runtime(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("accepted pair must keep the worker running");
+        };
+        assert_eq!(accepted.commands, 1);
+        assert!(matches!(
+            accepted.command_results.as_slice(),
+            [WorkerCommandProgress::Pending]
+        ));
+        commands
+            .deliver_progress(&mut accepted)
+            .expect("retain the pair response");
+        assert!(matches!(
+            pair.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            input.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+
+        let WorkerStep::Continue(blocked) =
+            worker.step_runtime(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("pending pair must keep the worker running");
+        };
+        assert_eq!(blocked.commands, 0, "input must stay queued before Ready");
+
+        control.inject_connected().expect("link event");
+        control
+            .inject_hid_channel_opened(HidChannel::Control)
+            .expect("control channel");
+        control
+            .inject_hid_channel_opened(HidChannel::Interrupt)
+            .expect("interrupt channel");
+        control
+            .inject_hid_output(HidChannel::Control, &subcommand_report(0x03, &[0x30]))
+            .expect("report mode");
+        control
+            .inject_hid_output(HidChannel::Interrupt, &subcommand_report(0x30, &[0x01]))
+            .expect("player lights");
+
+        let WorkerStep::Continue(handshake) =
+            worker.step_runtime(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("fake topology events must keep pairing active");
+        };
+        assert_eq!(worker.lifecycle_state(), LifecycleState::Connecting);
+        assert_eq!(handshake.commands, 0);
+        assert!(handshake.command_results.is_empty());
+        assert!(matches!(
+            pair.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+
+        let WorkerStep::Continue(mut ready) =
+            worker.step_runtime(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("fake protocol replies must reach Ready");
+        };
+        assert_eq!(worker.lifecycle_state(), LifecycleState::Ready);
+        assert_eq!(ready.commands, 0);
+        assert!(matches!(
+            ready.command_results.as_slice(),
+            [WorkerCommandProgress::Complete(Ok(()))]
+        ));
+        commands
+            .deliver_progress(&mut ready)
+            .expect("complete the retained pair response");
+        assert!(matches!(pair.try_recv(), Ok(Ok(()))));
+        assert!(matches!(
+            input.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+
+        let WorkerStep::Continue(mut input_step) =
+            worker.step_runtime(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("Ready input must keep the worker running");
+        };
+        assert_eq!(input_step.commands, 1);
+        commands
+            .deliver_progress(&mut input_step)
+            .expect("deliver input after pair completion");
+        assert!(matches!(input.try_recv(), Ok(Ok(()))));
+    }
+
+    #[test]
+    fn pair_timeout_completes_the_retained_response_once() {
+        let (transport, _control, trace) = tracing_transport();
+        let clock = FakeClock::at(Duration::ZERO);
+        let mut worker = WorkerCore::new_direct(
+            protocol(),
+            Box::new(transport),
+            WorkerBudget::new(2, 1),
+            observer(trace),
+        );
+        let (activity, _wakes) = activity_channel();
+        let (client, mut commands) = command_channel(1, activity);
+        let response = client
+            .try_enqueue(RuntimeCommand::<Pro, Direct>::Pair {
+                timeout: CONNECTION_TIMEOUT,
+            })
+            .expect("pair command fits");
+        let mut shutdown = ShutdownLatch::default();
+
+        let WorkerStep::Continue(mut accepted) =
+            worker.step_runtime(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("accepted pair must keep the worker running");
+        };
+        commands
+            .deliver_progress(&mut accepted)
+            .expect("retain pair response");
+        assert!(matches!(
+            response.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+
+        clock.set(CONNECTION_TIMEOUT);
+        let WorkerStep::Continue(mut timed_out) =
+            worker.step_runtime(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("pair timeout is a recoverable command failure");
+        };
+        assert!(matches!(
+            timed_out.command_results.as_slice(),
+            [WorkerCommandProgress::Complete(Err(
+                WorkerCommandError::Pair(PairingError::Readiness(ReadinessError::TimedOut))
+            ))]
+        ));
+        commands
+            .deliver_progress(&mut timed_out)
+            .expect("complete retained pair response");
+        assert!(matches!(
+            response.try_recv(),
+            Ok(Err(WorkerCommandError::Pair(PairingError::Readiness(
+                ReadinessError::TimedOut
+            ))))
+        ));
+        assert!(matches!(
+            response.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected)
+        ));
+
+        let WorkerStep::Continue(after_timeout) =
+            worker.step_runtime(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("worker remains open after pair timeout");
+        };
+        assert!(after_timeout.command_results.is_empty());
+        assert_eq!(worker.lifecycle_state(), LifecycleState::Open);
     }
 
     #[test]
@@ -2165,6 +2548,45 @@ mod tests {
                 Trace::Disconnect,
                 Trace::TransportClose,
             ]
+        );
+    }
+
+    #[test]
+    fn unspawned_worker_cleanup_returns_failure_and_closes_without_neutral() {
+        let (transport, control, trace) = tracing_transport();
+        let (status, status_reader) = status_projection();
+        let mut worker = WorkerCore::new_direct_with_status(
+            protocol(),
+            Box::new(transport),
+            WorkerBudget::new(1, 1),
+            Box::new(|_| {}),
+            status,
+        );
+        control
+            .terminate_with(std::io::Error::other("sensitive backend detail"))
+            .expect("terminate fake transport before cleanup");
+
+        let failure = worker
+            .cleanup_unspawned_without_neutral(Duration::from_millis(125))
+            .expect_err("drain failure must reach the spawn caller");
+
+        assert_eq!(failure.phase(), CleanupPhase::DrainInterrupt);
+        assert_eq!(
+            failure.source_error().kind(),
+            TransportErrorKind::SourceTerminated
+        );
+        assert_eq!(worker.lifecycle_state(), LifecycleState::Closed);
+        let status = status_reader.status::<Direct>();
+        assert_eq!(status.lifecycle, LifecycleState::Closed);
+        assert!(!status.connected);
+        assert_eq!(status.report_mode, None);
+        assert_eq!(
+            *lock(&trace),
+            [Trace::Drain, Trace::Disconnect, Trace::TransportClose]
+        );
+        assert!(
+            control.accepted_interrupts().is_empty(),
+            "without-neutral cleanup must not send an input report"
         );
     }
 

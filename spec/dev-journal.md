@@ -282,3 +282,57 @@ primary と cleanup の両 source を利用者が辿れる構造化 error 境界
 
 T34 の public backend 不在、T35 の worker Drop timeout/detach、M6 の atomic create/replace、
 lock、key preservation は、それぞれの既存 item へ残す。
+
+## 2026-07-29: T33 typed Pair と concrete runtime の所有権
+
+### 現状
+
+T31/T32 の create-profile orchestrator は、profile の create-new、typed reopen、runtime
+attempt の open/pair/cleanup/Ready 移譲を固定した。ただし Ready 所有権は test token でも
+表現でき、実際の command channel、worker thread、transport cleanup、join までは接続して
+いなかった。
+
+T33 は Pair を reporting 固有 input の外側に置き、同じ bounded FIFO と one-shot response で
+Ready、timeout、disconnect、shutdown、terminal failure を同期呼出元へ返す必要がある。
+
+### 観察
+
+Pair response を Ready 前に完了すると、後続 input が接続確立前に dequeue される。Pair を
+worker 内の pending operation として先頭に保持すれば、Ready status 公開後に同じ response を
+完了し、次の iteration から input を処理できる。
+
+runtime resource の失敗時点は一つではない。transport は `open()` が部分取得後に error または
+panic になり得る。worker は Pair enqueue 前、Pair response 保持中、thread spawn/start handoff
+中にも終了し得る。caller が generic channel errorだけをprimaryにすると、実際の
+`TransportError`がcleanup側へ降格する。transportをBoxのlocal変数のまま`open()`すると、
+panic時にattemptのDrop fallbackも実行できない。
+
+標準の`Error::source()`はprimaryの因果列を一つだけ表す。同じ操作で起きたcleanup、
+command-result delivery、joinの失敗をsourceへ直列化すると、primary causeとの関係と発生順が
+失われる。explicit closeの実順はcleanup、delivery、joinである。terminal worker failureでは
+cause、delivery、without-neutral cleanup、joinの順になる。
+
+### 方針
+
+Periodic/Directのsealed policyにmodel型付きcommand GATを置き、外側の`RuntimeCommand`がPairと
+reporting inputを分ける。Ready所有権は`ReadyRuntimePort<M, R>`を介して
+`WorkerOwner<RuntimeCommand<M, R>>`へ接続し、`Any` downcastや任意tokenをproduction経路に
+使わない。
+
+terminal outcomeをworker failureの正本にする。Pair responseまたはenqueueがterminalを示した
+場合はownerを消費してcompletionとjoinを回収し、typed core/transport causeをprimaryへ戻す。
+worker threadは公開statusをFailedにした後、neutralを送らず1秒bounded drain、disconnect、
+transport closeを一度だけ行う。cleanup、delivery、joinは`Error::related_error()`へ発生順で
+連結し、`Display`/`Debug`にはbackend sourceを出さない。
+
+transportは`open()`呼出し前にattemptへ格納する。thread spawnはOS thread作成成功後にworkerと
+transportをhandoffし、失敗時はcaller側の所有権でcleanupする。明示
+`cleanup_without_neutral()`はdrainを残す。attempt/ownerの`Drop`はpairing、neutral、drainを
+行わずdisconnect/closeへ進む。worker completionを100 msだけ待ってdetachする境界はT35に
+残す。
+
+fakeにするのはtransport、event注入、manual clock、waiter、backend factoryだけとする。
+Pro/Joy-Con L/Joy-Con R×Periodic/Directは実際のWorkerCore、command channel、worker thread、
+owner、Ready runtime、Controllerを通す。Periodicの300 ms holdoffはwait requestの絶対deadlineを
+観測してmanual clockを進め、実時間timeoutはdeadlock watchdogにだけ使う。public backend不在の
+`UnsupportedCapability`はT34、Bumble concrete factoryはM3で接続する。

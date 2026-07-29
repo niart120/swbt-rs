@@ -1,5 +1,6 @@
 use std::{
-    io,
+    error::Error as StdError,
+    fmt, io,
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     sync::{
         Arc, Mutex,
@@ -12,17 +13,57 @@ use std::{
 use crate::{
     model::ControllerModel,
     runtime::{
-        cleanup::{CloseCompletion, ExplicitCloseError},
-        command::{CommandClient, CommandDeliveryError, CommandReceiver},
+        cleanup::{CleanupFailure, CloseCompletion, CloseMode, ExplicitCloseError},
+        command::{
+            CommandClient, CommandDeliveryError, CommandEnqueueError, CommandReceiver,
+            CommandResponse,
+        },
         transport::ActivityNotifier,
         worker::{
-            MonotonicClock, PriorityShutdown, ShutdownRequest, WorkerCore, WorkerCoreError,
-            WorkerReporting, WorkerStep, WorkerWaitError, WorkerWaiter, wait_for_next_iteration,
+            MonotonicClock, PriorityShutdown, RuntimeCommand, ShutdownRequest, WorkerCore,
+            WorkerCoreError, WorkerReporting, WorkerStep, WorkerWaitError, WorkerWaiter,
+            wait_for_next_iteration,
         },
     },
 };
 
 const DROP_COMPLETION_TIMEOUT: Duration = Duration::from_millis(100);
+
+pub(crate) struct WorkerSpawnError {
+    source: io::Error,
+    cleanup: Option<CleanupFailure>,
+}
+
+impl WorkerSpawnError {
+    pub(crate) fn new(source: io::Error, cleanup: Option<CleanupFailure>) -> Self {
+        Self { source, cleanup }
+    }
+
+    #[must_use]
+    pub(crate) fn into_parts(self) -> (io::Error, Option<CleanupFailure>) {
+        (self.source, self.cleanup)
+    }
+}
+
+impl fmt::Debug for WorkerSpawnError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkerSpawnError")
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Display for WorkerSpawnError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("controller worker thread could not be spawned")
+    }
+}
+
+impl StdError for WorkerSpawnError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(&self.source)
+    }
+}
 
 #[derive(Debug)]
 #[cfg_attr(
@@ -72,13 +113,17 @@ pub(crate) enum WorkerThreadOutcome {
     Failed {
         cause: WorkerFailureCause,
         delivery_error: Option<CommandDeliveryError>,
+        cleanup_error: Option<CleanupFailure>,
         join_error: Option<WorkerJoinError>,
     },
 }
 
 enum WorkerTerminal {
     Closed(CloseCompletion),
-    Failed(WorkerFailureCause),
+    Failed {
+        cause: WorkerFailureCause,
+        cleanup_error: Option<CleanupFailure>,
+    },
 }
 
 struct WorkerCompletion {
@@ -229,6 +274,11 @@ pub(crate) struct WorkerThread {
 }
 
 impl WorkerThread {
+    #[cfg(test)]
+    pub(crate) fn is_finished(&self) -> bool {
+        self.join.is_finished()
+    }
+
     #[cfg_attr(
         not(test),
         allow(
@@ -271,9 +321,13 @@ fn finish_completed(completion: WorkerCompletion, join: JoinHandle<()>) -> Worke
                 delivery_error: completion.delivery_error,
             }
         }
-        WorkerTerminal::Failed(cause) => WorkerThreadOutcome::Failed {
+        WorkerTerminal::Failed {
+            cause,
+            cleanup_error,
+        } => WorkerThreadOutcome::Failed {
             cause,
             delivery_error: completion.delivery_error,
+            cleanup_error,
             join_error: join.join().err().map(|_| WorkerJoinError::Panicked),
         },
     }
@@ -283,6 +337,7 @@ fn finish_disconnected(join: JoinHandle<()>) -> WorkerThreadOutcome {
     WorkerThreadOutcome::Failed {
         cause: WorkerFailureCause::CompletionDisconnected,
         delivery_error: None,
+        cleanup_error: None,
         join_error: join.join().err().map(|_| WorkerJoinError::Panicked),
     }
 }
@@ -325,6 +380,35 @@ impl<C> WorkerOwner<C> {
         }
     }
 
+    pub(crate) fn try_enqueue(&self, command: C) -> Result<CommandResponse, CommandEnqueueError> {
+        self.commands
+            .as_ref()
+            .ok_or(CommandEnqueueError::Disconnected)?
+            .try_enqueue(command)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_finished(&self) -> bool {
+        self.thread.as_ref().is_some_and(WorkerThread::is_finished)
+    }
+
+    pub(crate) fn finish_explicit(mut self, mode: CloseMode) -> WorkerThreadOutcome {
+        drop(self.commands.take());
+        let _ = self.shutdown.request(ShutdownRequest::explicit(mode));
+        self.thread
+            .take()
+            .expect("active worker owner must retain its worker thread")
+            .finish()
+    }
+
+    pub(crate) fn finish_terminal(mut self) -> WorkerThreadOutcome {
+        drop(self.commands.take());
+        self.thread
+            .take()
+            .expect("active worker owner must retain its worker thread")
+            .finish()
+    }
+
     #[cfg(test)]
     fn with_completion_waiter(
         commands: CommandClient<C>,
@@ -345,6 +429,9 @@ impl<C> WorkerOwner<C> {
 
 impl<C> Drop for WorkerOwner<C> {
     fn drop(&mut self) {
+        if self.thread.is_none() {
+            return;
+        }
         drop(self.commands.take());
         let _ = self.shutdown.request(ShutdownRequest::dropped());
         if let Some(thread) = self.thread.take() {
@@ -363,10 +450,10 @@ impl<C> Drop for WorkerOwner<C> {
 pub(crate) fn spawn_worker_thread<M, R, C, S, W>(
     mut worker: WorkerCore<M, R>,
     clock: C,
-    mut shutdown: S,
-    mut commands: CommandReceiver<R::Command>,
-    mut waiter: W,
-) -> io::Result<WorkerThread>
+    shutdown: S,
+    commands: CommandReceiver<RuntimeCommand<M, R>>,
+    waiter: W,
+) -> Result<WorkerThread, WorkerSpawnError>
 where
     M: ControllerModel,
     R: WorkerReporting<M>,
@@ -375,56 +462,135 @@ where
     W: WorkerWaiter + 'static,
 {
     let (completion_sender, completion) = sync_channel(1);
-    let status = worker.status_publisher();
-    let join = thread::Builder::new()
+    let (start_sender, start_receiver) = sync_channel(1);
+    let join = match thread::Builder::new()
         .name("swbt-worker".to_owned())
         .spawn(move || {
-            let caught = catch_unwind(AssertUnwindSafe(|| {
-                run_worker_loop(
-                    &mut worker,
-                    &clock,
-                    &mut shutdown,
-                    &mut commands,
-                    &mut waiter,
-                )
-            }));
-
-            let (completion, mut panic_payload) = match caught {
-                Ok(completion) => (completion, None),
-                Err(payload) => (
-                    WorkerCompletion {
-                        terminal: WorkerTerminal::Failed(WorkerFailureCause::Panicked),
-                        delivery_error: None,
-                    },
-                    Some(payload),
-                ),
-            };
-            let teardown = catch_unwind(AssertUnwindSafe(move || {
-                drop(waiter);
-                drop(shutdown);
-                drop(clock);
-                drop(worker);
-            }));
-            let teardown_panicked = teardown.is_err();
-            if let Err(payload) = teardown {
-                if panic_payload.is_none() {
-                    panic_payload = Some(payload);
-                }
+            if let Ok(start) = start_receiver.recv() {
+                run_started_worker(start);
             }
-            if teardown_panicked {
-                status.fail("worker panicked");
-            } else if let WorkerTerminal::Failed(cause) = &completion.terminal {
-                status.fail(worker_failure_status(cause));
-            }
+        }) {
+        Ok(join) => join,
+        Err(source) => {
+            let cleanup = worker.cleanup_unspawned_without_neutral(clock.now()).err();
+            return Err(WorkerSpawnError::new(source, cleanup));
+        }
+    };
 
-            publish_completion(&completion_sender, completion);
-            drop(commands);
+    let start = WorkerStart {
+        worker,
+        clock,
+        shutdown,
+        commands,
+        waiter,
+        completion_sender,
+    };
+    if let Err(error) = start_sender.send(start) {
+        let mut start = error.0;
+        let cleanup = start
+            .worker
+            .cleanup_unspawned_without_neutral(start.clock.now())
+            .err();
+        let _ = join.join();
+        return Err(WorkerSpawnError::new(
+            io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "worker start channel disconnected",
+            ),
+            cleanup,
+        ));
+    }
 
-            if let Some(payload) = panic_payload {
-                resume_unwind(payload);
-            }
-        })?;
     Ok(WorkerThread { completion, join })
+}
+
+struct WorkerStart<M, R, C, S, W>
+where
+    M: ControllerModel,
+    R: WorkerReporting<M>,
+{
+    worker: WorkerCore<M, R>,
+    clock: C,
+    shutdown: S,
+    commands: CommandReceiver<RuntimeCommand<M, R>>,
+    waiter: W,
+    completion_sender: SyncSender<WorkerCompletion>,
+}
+
+fn run_started_worker<M, R, C, S, W>(start: WorkerStart<M, R, C, S, W>)
+where
+    M: ControllerModel,
+    R: WorkerReporting<M>,
+    C: MonotonicClock,
+    S: PriorityShutdown,
+    W: WorkerWaiter,
+{
+    let WorkerStart {
+        mut worker,
+        clock,
+        mut shutdown,
+        mut commands,
+        mut waiter,
+        completion_sender,
+    } = start;
+    let status = worker.status_publisher();
+    let caught = catch_unwind(AssertUnwindSafe(|| {
+        run_worker_loop(
+            &mut worker,
+            &clock,
+            &mut shutdown,
+            &mut commands,
+            &mut waiter,
+        )
+    }));
+
+    let (completion, mut panic_payload) = match caught {
+        Ok(completion) => (completion, None),
+        Err(payload) => {
+            status.fail("worker panicked");
+            let cleanup = catch_unwind(AssertUnwindSafe(|| {
+                worker
+                    .cleanup_after_failure_without_neutral(clock.now())
+                    .err()
+            }))
+            .ok()
+            .flatten();
+            (
+                WorkerCompletion {
+                    terminal: WorkerTerminal::Failed {
+                        cause: WorkerFailureCause::Panicked,
+                        cleanup_error: cleanup,
+                    },
+                    delivery_error: None,
+                },
+                Some(payload),
+            )
+        }
+    };
+    let teardown = catch_unwind(AssertUnwindSafe(move || {
+        drop(waiter);
+        drop(shutdown);
+        drop(clock);
+        drop(worker);
+    }));
+    let teardown_panicked = teardown.is_err();
+    if let Err(payload) = teardown {
+        if panic_payload.is_none() {
+            panic_payload = Some(payload);
+        }
+    }
+    if teardown_panicked {
+        status.fail("worker panicked");
+    } else if let WorkerTerminal::Failed { cause, .. } = &completion.terminal {
+        status.fail(worker_failure_status(cause));
+    }
+
+    publish_completion(&completion_sender, completion);
+    drop(commands);
+
+    if let Some(payload) = panic_payload {
+        resume_unwind(payload);
+    }
 }
 
 fn worker_failure_status(cause: &WorkerFailureCause) -> &'static str {
@@ -441,7 +607,7 @@ fn run_worker_loop<M, R, C, S, W>(
     worker: &mut WorkerCore<M, R>,
     clock: &C,
     shutdown: &mut S,
-    commands: &mut CommandReceiver<R::Command>,
+    commands: &mut CommandReceiver<RuntimeCommand<M, R>>,
     waiter: &mut W,
 ) -> WorkerCompletion
 where
@@ -452,21 +618,23 @@ where
     W: WorkerWaiter,
 {
     loop {
-        match worker.step(clock, shutdown, commands) {
+        match worker.step_runtime(clock, shutdown, commands) {
             WorkerStep::Continue(mut progress) => {
                 if let Err(error) = commands.deliver_progress(&mut progress) {
-                    return WorkerCompletion {
-                        terminal: WorkerTerminal::Failed(WorkerFailureCause::CommandDelivery(
-                            error,
-                        )),
-                        delivery_error: None,
-                    };
+                    return complete_worker_failure(
+                        worker,
+                        clock,
+                        WorkerFailureCause::CommandDelivery(error),
+                        None,
+                    );
                 }
                 if let Err(error) = wait_for_next_iteration(&progress, clock, waiter) {
-                    return WorkerCompletion {
-                        terminal: WorkerTerminal::Failed(WorkerFailureCause::Wait(error)),
-                        delivery_error: None,
-                    };
+                    return complete_worker_failure(
+                        worker,
+                        clock,
+                        WorkerFailureCause::Wait(error),
+                        None,
+                    );
                 }
             }
             WorkerStep::Closed {
@@ -475,10 +643,10 @@ where
                 mut progress,
             } => {
                 let mut delivery_error = commands.deliver_progress(&mut progress).err();
-                if delivery_error.is_none()
-                    && let Some(error) = interrupted
-                {
-                    delivery_error = commands.deliver_completion(Err(error)).err();
+                if delivery_error.is_none() {
+                    if let Some(error) = interrupted {
+                        delivery_error = commands.deliver_completion(Err(error)).err();
+                    }
                 }
                 return WorkerCompletion {
                     terminal: WorkerTerminal::Closed(completion),
@@ -490,12 +658,39 @@ where
                 mut progress,
             } => {
                 let delivery_error = commands.deliver_progress(&mut progress).err();
-                return WorkerCompletion {
-                    terminal: WorkerTerminal::Failed(WorkerFailureCause::Core(error)),
+                return complete_worker_failure(
+                    worker,
+                    clock,
+                    WorkerFailureCause::Core(error),
                     delivery_error,
-                };
+                );
             }
         }
+    }
+}
+
+fn complete_worker_failure<M, R>(
+    worker: &mut WorkerCore<M, R>,
+    clock: &dyn MonotonicClock,
+    cause: WorkerFailureCause,
+    delivery_error: Option<CommandDeliveryError>,
+) -> WorkerCompletion
+where
+    M: ControllerModel,
+    R: WorkerReporting<M>,
+{
+    worker
+        .status_publisher()
+        .fail(worker_failure_status(&cause));
+    let cleanup_error = worker
+        .cleanup_after_failure_without_neutral(clock.now())
+        .err();
+    WorkerCompletion {
+        terminal: WorkerTerminal::Failed {
+            cause,
+            cleanup_error,
+        },
+        delivery_error,
     }
 }
 
@@ -523,7 +718,7 @@ mod tests {
         protocol::SwitchHidProtocol,
         reporting::Direct,
         runtime::{
-            cleanup::CloseMode,
+            cleanup::{CleanupPhase, CloseMode},
             command::{CommandResponseError, command_channel},
             direct::{DirectTapError, DirectTapInterruption},
             transport::{
@@ -533,8 +728,8 @@ mod tests {
             },
             worker::{
                 ChannelWorkerWaiter, CommandSource, CommonCommand, DirectCommand, MonotonicClock,
-                PriorityShutdown, ShutdownRequest, WorkerBudget, WorkerCommandError, WorkerCore,
-                WorkerCoreError, WorkerStep,
+                PriorityShutdown, RuntimeCommand, ShutdownRequest, WorkerBudget,
+                WorkerCommandError, WorkerCore, WorkerCoreError, WorkerStep,
             },
         },
     };
@@ -564,10 +759,14 @@ mod tests {
         );
         let (client, commands) = command_channel(2, activity);
         let completed = client
-            .try_enqueue(DirectCommand::Common(CommonCommand::Neutral))
+            .try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
+                CommonCommand::Neutral,
+            )))
             .expect("enqueue first command");
         let waiting = client
-            .try_enqueue(DirectCommand::Common(CommonCommand::Neutral))
+            .try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
+                CommonCommand::Neutral,
+            )))
             .expect("enqueue queued command");
         control
             .terminate_with(TestSourceError)
@@ -594,6 +793,7 @@ mod tests {
         let WorkerThreadOutcome::Failed {
             cause: WorkerFailureCause::Core(WorkerCoreError::Transport(error)),
             delivery_error: None,
+            cleanup_error: Some(cleanup),
             join_error: None,
         } = worker_thread.finish()
         else {
@@ -603,6 +803,8 @@ mod tests {
             error.kind(),
             crate::runtime::transport::TransportErrorKind::SourceTerminated
         );
+        assert_eq!(cleanup.phase(), CleanupPhase::DrainInterrupt);
+        assert_eq!(control.counters().close, 1);
     }
 
     #[test]
@@ -633,13 +835,17 @@ mod tests {
 
         let (client, commands) = command_channel(2, activity);
         let pending = client
-            .try_enqueue(DirectCommand::Common(CommonCommand::Tap {
-                buttons: vec![ProButton::B],
-                duration: Duration::from_secs(1),
-            }))
+            .try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
+                CommonCommand::Tap {
+                    buttons: vec![ProButton::B],
+                    duration: Duration::from_secs(1),
+                },
+            )))
             .expect("enqueue pending tap");
         let queued = client
-            .try_enqueue(DirectCommand::Common(CommonCommand::Neutral))
+            .try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
+                CommonCommand::Neutral,
+            )))
             .expect("enqueue command behind the tap");
 
         let worker_thread = spawn_worker_thread(
@@ -666,6 +872,7 @@ mod tests {
             WorkerThreadOutcome::Failed {
                 cause: WorkerFailureCause::Panicked,
                 delivery_error: None,
+                cleanup_error: None,
                 join_error: Some(WorkerJoinError::Panicked),
             }
         ));
@@ -753,10 +960,12 @@ mod tests {
         prime_ready(&mut worker, &control, &clock);
         let (client, commands) = command_channel(1, activity);
         let pending = client
-            .try_enqueue(DirectCommand::Common(CommonCommand::Tap {
-                buttons: vec![ProButton::B],
-                duration: Duration::from_secs(1),
-            }))
+            .try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
+                CommonCommand::Tap {
+                    buttons: vec![ProButton::B],
+                    duration: Duration::from_secs(1),
+                },
+            )))
             .expect("enqueue pending tap");
         let shutdown =
             ShutdownScript::after_checks(ShutdownRequest::explicit(CloseMode::WithNeutral), 1);
@@ -788,18 +997,28 @@ mod tests {
     #[test]
     fn disconnected_activity_source_completes_before_the_worker_is_joined() {
         let (activity, activity_receiver) = activity_channel();
-        let (client, commands) = command_channel::<DirectCommand<Pro>>(1, activity.clone());
+        let (client, commands) =
+            command_channel::<RuntimeCommand<Pro, Direct>>(1, activity.clone());
         drop(client);
-        let mut transport = IgnoringActivityTransport;
+        let (drain_started, drain_started_receiver) = sync_channel(1);
+        let (drain_release, drain_release_receiver) = sync_channel(1);
+        let mut transport = IgnoringActivityTransport {
+            drain_started,
+            drain_release: drain_release_receiver,
+        };
         transport
             .open(activity.clone())
             .expect("open idle transport");
         drop(activity);
-        let worker = WorkerCore::new_direct(
+        let controller = crate::Controller::<Pro, Direct>::builder("test:wait-failure-status")
+            .build()
+            .expect("ephemeral test controller");
+        let worker = WorkerCore::new_direct_with_status(
             protocol(),
             Box::new(transport),
             WorkerBudget::new(1, 1),
             Box::new(|_| {}),
+            controller.status_publisher(),
         );
 
         let worker_thread = spawn_worker_thread(
@@ -811,6 +1030,16 @@ mod tests {
         )
         .expect("spawn worker thread");
 
+        drain_started_receiver
+            .recv()
+            .expect("wait failure begins terminal cleanup");
+        let status = controller.status();
+        assert_eq!(status.lifecycle, crate::LifecycleState::Failed);
+        assert_eq!(status.worker_failure.as_deref(), Some("worker wait failed"));
+        drain_release
+            .send(())
+            .expect("release terminal cleanup drain");
+
         assert!(matches!(
             worker_thread.finish(),
             WorkerThreadOutcome::Failed {
@@ -818,9 +1047,74 @@ mod tests {
                     crate::runtime::worker::WorkerWaitError::Disconnected
                 ),
                 delivery_error: None,
+                cleanup_error: None,
                 join_error: None,
             }
         ));
+    }
+
+    #[test]
+    fn explicit_without_neutral_finishes_and_disarms_owner_drop() {
+        let (activity, activity_receiver) = activity_channel();
+        let (mut transport, control) = FakeTransport::with_limits(16, 3);
+        transport
+            .open(activity.clone())
+            .expect("open fake transport");
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let clock = FakeClock::at(Duration::ZERO);
+        let mut worker = WorkerCore::new_direct(
+            protocol(),
+            Box::new(ExplicitCloseTracingTransport {
+                inner: transport,
+                trace: Arc::clone(&trace),
+            }),
+            WorkerBudget::new(2, 1),
+            Box::new(|_| {}),
+        );
+        prime_ready(&mut worker, &control, &clock);
+
+        let (shutdown_client, shutdown_receiver) = priority_shutdown_channel(activity.clone());
+        let (command_client, command_receiver) = command_channel(1, activity);
+        let worker_thread = spawn_worker_thread(
+            worker,
+            clock,
+            shutdown_receiver,
+            command_receiver,
+            ChannelWorkerWaiter::new(activity_receiver),
+        )
+        .expect("spawn worker thread");
+        let owner = WorkerOwner::with_completion_waiter(
+            command_client,
+            shutdown_client,
+            worker_thread,
+            DROP_COMPLETION_TIMEOUT,
+            Box::new(NeverCompletionWaiter),
+        );
+
+        let response = owner
+            .try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
+                CommonCommand::Neutral,
+            )))
+            .expect("owner forwards a typed runtime command");
+        assert!(matches!(response.recv(), Ok(Ok(()))));
+        lock(&trace).clear();
+
+        assert!(matches!(
+            owner.finish_explicit(CloseMode::WithoutNeutral),
+            WorkerThreadOutcome::Closed {
+                result: Ok(()),
+                delivery_error: None,
+            }
+        ));
+        assert_eq!(
+            *lock(&trace),
+            [
+                DropTrace::Drain,
+                DropTrace::Disconnect,
+                DropTrace::TransportClose,
+            ],
+            "explicit without-neutral must drain and close once without using Drop cleanup"
+        );
     }
 
     #[test]
@@ -1110,7 +1404,10 @@ mod tests {
         }
     }
 
-    struct IgnoringActivityTransport;
+    struct IgnoringActivityTransport {
+        drain_started: SyncSender<()>,
+        drain_release: MpscReceiver<()>,
+    }
 
     impl TransportPort for IgnoringActivityTransport {
         fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<()> {
@@ -1126,6 +1423,12 @@ mod tests {
         }
 
         fn drain_interrupt(&mut self, _timeout: Duration) -> TransportResult<()> {
+            self.drain_started
+                .send(())
+                .expect("report terminal cleanup drain");
+            self.drain_release
+                .recv()
+                .expect("wait for terminal cleanup release");
             Ok(())
         }
 
@@ -1180,6 +1483,53 @@ mod tests {
         fn close(&mut self) -> TransportResult<()> {
             lock(&self.trace).push(DropTrace::TransportClose);
             self.inner.close()
+        }
+    }
+
+    struct ExplicitCloseTracingTransport {
+        inner: FakeTransport,
+        trace: Arc<Mutex<Vec<DropTrace>>>,
+    }
+
+    impl TransportPort for ExplicitCloseTracingTransport {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+            self.inner.open(activity)
+        }
+
+        fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+            self.inner.poll(timeout)
+        }
+
+        fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
+            lock(&self.trace).push(DropTrace::Send);
+            self.inner.send_interrupt(payload)
+        }
+
+        fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+            lock(&self.trace).push(DropTrace::Drain);
+            self.inner.drain_interrupt(timeout)
+        }
+
+        fn disconnect(&mut self) -> TransportResult<()> {
+            lock(&self.trace).push(DropTrace::Disconnect);
+            self.inner.disconnect()
+        }
+
+        fn close(&mut self) -> TransportResult<()> {
+            lock(&self.trace).push(DropTrace::TransportClose);
+            self.inner.close()
+        }
+    }
+
+    struct NeverCompletionWaiter;
+
+    impl WorkerCompletionWaiter for NeverCompletionWaiter {
+        fn wait(
+            &mut self,
+            _completion: &MpscReceiver<WorkerCompletion>,
+            _timeout: Duration,
+        ) -> WorkerCompletionWait {
+            panic!("explicit finish must disarm the bounded Drop waiter")
         }
     }
 

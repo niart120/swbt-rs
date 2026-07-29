@@ -15,9 +15,17 @@ target `swbt` を提供し、model-valid input、crate 内部の Switch HID prot
   `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` から生成した 45 fixture を直接検査します。
 - `ControllerBuilder::build()` は adapter や worker を開始せず、profile path 未指定なら
   一時 controller、既存 path なら controller model を検査した Configured controller を返します。
+- `press()`、`release()`、`tap()`、`neutral()`、Periodic `apply()`、Direct `send()` を
+  型付き worker command へ接続しています。Ready runtime に対する `close()` と
+  `close_without_neutral()` は priority shutdown、cleanup、worker join を実行します。
+  3 model × 2 reporting の crate 内 fake-runtime test で Pair→Ready→入力→worker join を
+  検査しています。
+- `build()` 直後の Configured controller には Ready runtime がないため、入力操作は
+  `ErrorKind::TransportClosed` を返します。
 - default feature は空です。`bumble` feature を有効にした場合だけ、基準 commit
   `bbac2a6803b8cab0920ab725a23aa408fc4fed85` の依存を組み込みます。
-- Bluetooth transport と Bumble の接続、公開 lifecycle / input 操作は未実装です。
+- Bluetooth transport と Bumble の接続、公開 `open()` / `pair()` / `create_profile()` は
+  未実装です。
 - Bluetooth adapter や対象機器を使う実機検証は未実施です。
 
 ## 開発

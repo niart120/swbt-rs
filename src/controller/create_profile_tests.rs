@@ -348,12 +348,13 @@ impl CreateProfileRuntimeAttempt<Pro, Periodic> for FakeRuntimeAttempt {
         Ok(())
     }
 
-    fn cleanup_without_neutral(mut self) {
+    fn cleanup_without_neutral(mut self) -> crate::Result<()> {
         lock(&self.events).push(CreateEvent::CleanupWithoutNeutral);
         self.probe
             .explicit_cleanup_count
             .fetch_add(1, Ordering::SeqCst);
         drop(self.lease.take());
+        Ok(())
     }
 
     fn into_ready(mut self) -> ReadyRuntime<Pro, Periodic> {
