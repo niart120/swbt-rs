@@ -5,29 +5,29 @@ const COMPLETE_LOCAL_NAME_DATA_TYPE: u8 = 0x09;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct HidServiceConfig {
-    report_descriptor: Box<[u8]>,
-    sdp_policy: HidSdpPolicy,
+    pub(super) report_descriptor: Box<[u8]>,
+    pub(super) sdp_policy: HidSdpPolicy,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct HidSdpPolicy {
-    service_name: Box<str>,
-    service_description: Option<Box<str>>,
-    provider_name: Option<Box<str>>,
-    device_release_number: Option<u16>,
-    bluetooth_profile_version: u16,
-    parser_version: u16,
-    device_subclass: u8,
-    country_code: u8,
-    virtual_cable: bool,
-    reconnect_initiate: bool,
-    remote_wake: Option<bool>,
-    profile_version: u16,
-    supervision_timeout: u16,
-    normally_connectable: bool,
-    boot_device: bool,
-    ssr_host_max_latency: u16,
-    ssr_host_min_timeout: u16,
+    pub(super) service_name: Box<str>,
+    pub(super) service_description: Option<Box<str>>,
+    pub(super) provider_name: Option<Box<str>>,
+    pub(super) device_release_number: Option<u16>,
+    pub(super) bluetooth_profile_version: u16,
+    pub(super) parser_version: u16,
+    pub(super) device_subclass: u8,
+    pub(super) country_code: u8,
+    pub(super) virtual_cable: bool,
+    pub(super) reconnect_initiate: bool,
+    pub(super) remote_wake: Option<bool>,
+    pub(super) profile_version: u16,
+    pub(super) supervision_timeout: u16,
+    pub(super) normally_connectable: bool,
+    pub(super) boot_device: bool,
+    pub(super) ssr_host_max_latency: u16,
+    pub(super) ssr_host_min_timeout: u16,
 }
 
 #[cfg_attr(
@@ -50,7 +50,7 @@ pub(crate) struct TransportConfig {
     classic_ssp_enabled: bool,
     le_enabled: bool,
     le_simultaneous_enabled: bool,
-    hid_service: HidServiceConfig,
+    pub(super) hid_service: HidServiceConfig,
 }
 
 #[cfg_attr(

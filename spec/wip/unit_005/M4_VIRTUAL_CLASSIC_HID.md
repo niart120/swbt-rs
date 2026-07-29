@@ -285,7 +285,7 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 - [x] **T01 — model HID/SDP source audit**
   - Python v0.6.0 fixture が descriptor 203 bytes と SHA-256、Pro/Joy-Con policy を固定する。
   - 3 model×2 reporting の projection が reporting mode に依存しない。
-- [ ] **T02 — SDP record and continuation**
+- [x] **T02 — SDP record and continuation**
   - 3 model の service record attributes が fixture と一致する。
   - small peer MTU で search/attribute continuation を完走し、channel ごとに state を分離する。
   - malformed/truncated request が panic しない。
@@ -317,7 +317,8 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 | phase | item | evidence |
 |---|---|---|
 | refactor-done | T01 | red: `TransportConfig` に `hid_service` がなく compile error。green: Python `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` の clean tree から、Bumble を import せず descriptor 203 bytes、SHA-256 `25f0b3b7e59bdfec05e8cced16e43a8878509865a0cb223f05025c556f3bedba`、3 model の SDP policy を生成し、fixture audit と 3 model projection test が成功。refactor: descriptor/policy の正本を `src/model/hid.rs`、owned runtime projection を `TransportConfig` に分離。生成器再実行前後の fixture SHA-256 は `2F2376E21498163662EF83506EA1EA37EBDCC5CE34D9F4723396393131B9EC4F` で一致。`cargo test --all-targets --all-features --locked`、default test、all/default clippy、Rust 1.87 all-feature check、fmt、diff check が成功 |
-| pending | T02-T09 | 各 item の red、green、refactor、command/result を実装 commit ごとに追記する |
+| refactor-done | T02 | red: `HidSdpChannel`、service record handle、`bumble` / `bumble-sdp` 依存、`TransportConfig.hid_service` の transport 内可視性がなく compile error。green: fork `48f1bc36169b2692d2a61e87eda4223b126dca2b` の `bumble-sdp::SdpServer` を channel ごとに所有し、3 model の全 service attributes、small MTU continuation、2 channel の continuation 分離、truncated/unknown/length mismatch の `INVALID_REQUEST_SYNTAX` を検査する3 test が成功。refactor: record builder、完全 PDU 長検査、server ownership を private `runtime::transport::sdp` に分離し、Bumble 型を public API へ公開しない。all-feature test 240 passed / 2 ignored、default test 228 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、fmt、diff check が成功 |
+| pending | T03-T09 | 各 item の red、green、refactor、command/result を実装 commit ごとに追記する |
 
 ## 8. 対象ファイル
 
@@ -376,7 +377,7 @@ M5 の実機調整へ先送りしない。
 - [x] Python revision と HID/SDP fixture provenance を記録した
 - [ ] public API に Bumble/L2CAP/HIDP/SDP 型を公開していない
 - [ ] PSM `0x0001` / `0x0011` / `0x0013` を実 packet path で検査した
-- [ ] SDP continuation と malformed request を検査した
+- [x] SDP continuation と malformed request を検査した
 - [ ] HIDP control/interrupt、reverse order、MTU を検査した
 - [ ] pairing window と NoInputNoOutput policy を検査した
 - [ ] stored key の virtual pairing/reconnect を検査し、key bytes を出力していない

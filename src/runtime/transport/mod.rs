@@ -4,6 +4,15 @@ mod bumble;
 mod bumble_tests;
 mod capabilities;
 mod config;
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "T04 wires the SDP channel into accepted Classic L2CAP sessions"
+    )
+)]
+#[cfg(feature = "bumble")]
+mod sdp;
 
 use std::error::Error as StdError;
 use std::fmt;
