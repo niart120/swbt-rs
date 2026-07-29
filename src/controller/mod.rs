@@ -13,6 +13,8 @@ mod config_tests;
 #[cfg(test)]
 mod create_profile_tests;
 #[cfg(test)]
+mod runtime_measurement;
+#[cfg(test)]
 mod runtime_tests;
 
 use std::cell::Cell;

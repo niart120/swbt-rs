@@ -239,6 +239,11 @@ impl PriorityShutdownClient {
         }
         changed
     }
+
+    #[cfg(test)]
+    pub(crate) fn request_for_test(&self, request: ShutdownRequest) -> bool {
+        self.request(request)
+    }
 }
 
 impl PriorityShutdown for PriorityShutdownReceiver {

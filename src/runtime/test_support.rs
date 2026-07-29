@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::runtime::transport::{
     ActivityNotifier, HidChannel, SendAcceptance, TransportEvent, TransportPort, TransportResult,
-    fake::{FakeTransport, FakeTransportControl},
+    fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
 };
 
 const RUNTIME_FIXTURE: &str = include_str!(concat!(
@@ -78,6 +78,11 @@ impl TransportPort for TestTransport {
 }
 
 impl TestTransportControl {
+    pub(crate) fn reject_next_sends(&self, count: usize) {
+        self.inner
+            .script_sends(std::iter::repeat_n(ScriptedSendOutcome::Rejected, count));
+    }
+
     pub(crate) fn inject_connected(&self) -> TransportResult<()> {
         self.inner.inject_connected()
     }

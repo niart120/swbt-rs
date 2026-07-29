@@ -57,6 +57,11 @@ const COMMAND_BATCH: usize = 16;
 const POLL_BATCHES: usize = 4;
 const UNOWNED_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
+#[cfg(test)]
+pub(super) const fn default_runtime_tuning() -> (usize, usize, usize) {
+    (COMMAND_CAPACITY, COMMAND_BATCH, POLL_BATCHES)
+}
+
 #[cfg_attr(
     not(test),
     allow(
