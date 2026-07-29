@@ -94,9 +94,11 @@ resource cleanup である。Switch、pairing、SDP、HID channel、NX handshake
 - device descriptor 自体が `E0/01/01`、または device class `0x00` かついずれかの interface
   が `E0/01/01` の device だけを返す。
 - candidate 順は Bumble の `usb:N` 選択と同じ libusb 列挙順にする。
-- descriptor/config を読めない個別 device は candidate に含めず、secret を含まない trace
-  に件数を残す。libusb context または device list 自体を取得できない場合は
-  `ErrorKind::AdapterDiscovery` を返して typed source を保持する。
+- device-level class が `E0/01/01` の場合は config descriptor を要求しない。device class
+  `0x00` の場合だけ config/interface descriptor を読み、読めない個別 device は candidate
+  に含めず、secret を含まない trace に件数を残す。この規則を Bumble の `usb:N` とそろえ、
+  candidate index のずれを作らない。libusb context または device list 自体を取得できない
+  場合は `ErrorKind::AdapterDiscovery` を返して typed source を保持する。
 - strict no-open では USB serial string と product stringを読まない。serial descriptor の
   index があるかどうかだけを `AdapterInfo::has_serial_number()` で示す。
 
@@ -113,17 +115,17 @@ resource cleanup である。Switch、pairing、SDP、HID channel、NX handshake
 
 ### 5.2 selector
 
-M3 が受け付ける selector は Bumble `UsbSpec` と同じ次の形に限定する。
+M3 が受け付ける selector は Bumble `UsbSpec` のうち次の形に限定する。
 
 ```text
 usb:<HCI candidate index>
-usb:<VID hex4>:<PID hex4>
-usb:<VID hex4>:<PID hex4>/<serial>
-usb:<VID hex4>:<PID hex4>#<zero-based occurrence>
+usb:<VID hex1-4>:<PID hex1-4>
+usb:<VID hex1-4>:<PID hex1-4>/<serial>
+usb:<VID hex1-4>:<PID hex1-4>#<zero-based occurrence>
 usb:<bus decimal>-<port decimal>[.<port decimal>...]
 ```
 
-- hex は大文字小文字を受け付ける。
+- VID/PID は 1〜4 桁の hex とし、大文字小文字を受け付ける。
 - VID/PID だけの場合は Bumble と同じく最初の一致を選ぶ。重複を明示する場合は
   `#occurrence` または serial を使う。
 - serial selector は open 処理の一部として device handle を開いて照合する。discovery が
@@ -157,7 +159,8 @@ open は次の順序を守る。
 2. `open_split_transport`
 3. reader activity/cancellation boundary を組み込んだ `ExternalHost` を生成
 4. `DeviceConfiguration` に Classic enabled、accept-any/connectable/discoverable false、
-   model 由来 name/Class of Device を設定
+   Classic Secure Connections false、LE/simultaneous false、model 由来 name/Class of
+   Device を設定
 5. `Device::from_config(0, config)`
 6. `ExternalHost::initialize_device` で HCI Reset、capability、packet pool を初期化
 7. `ReadBdAddr` で controller public address を取得
@@ -167,6 +170,9 @@ open は次の順序を守る。
 
 `Device::power_on` は呼ばない。`initialize_device` と `power_on` の二重 Reset/capability
 initialization を避け、M3 は external HCI binary と同じ同期 command 経路を使う。
+この経路では `DeviceConfiguration` の identity 値や照会結果が controller と `Device` 内部へ
+自動同期されない。M3 では `TransportCapabilities` だけを local address/version/features の
+正本とし、`Device` 内の未設定 field を診断や protocol address に使わない。
 
 どの step で失敗しても、取得済み resource に対して reader cancellation、sink/source drop、
 USB release、worker 回収を試みる。cleanup failure は primary error を上書きせず related error
@@ -204,8 +210,10 @@ byte order は M1 protocol fixture と照合してから接続し、未検証の
 - open 後の source end/read failure: crate-private `TransportErrorKind::SourceTerminated`
 - close/worker completion/join failure: 既存 cleanup phase と `WorkerFailed`
 
-open/write の `bumble_transport::Error` は source chain に保持する。reader failure も upstream
-境界で文字列だけにせず typed source を保持する。公開 error の `Display` / `Debug` は backend
+open/read/write/flush の `bumble_transport::Error` は source chain に保持する。reader/writer
+failure も upstream 境界で文字列だけにせず typed source を保持する。serial selector の
+VID/PID 一致候補で device open または serial read が失敗した場合も、単なる not-found に
+畳み込まず permission/driver source を保持する。公開 error の `Display` / `Debug` は backend
 message や secret を展開せず、`source()` で原因を追えるようにする。
 
 `TransportEnded` は M3 の内部 terminal observation 名であり、新しい public `ErrorKind` は
@@ -236,6 +244,8 @@ message や secret を展開せず、`source()` で原因を追えるように�
 - reader shutdown API と `JoinHandle`
 - USB `PacketSource::read_packet` の cancellation
 - reader error の typed source 保持
+- sink write/flush error の typed source 保持
+- serial selector の device open/read error 保持
 
 固定 revision は 2026-07-29 時点の upstream `main` であり、別の未取得 upstream commit は
 存在しない。現状の `ExternalHost::new` は reader thread を detach し、USB source は
@@ -311,7 +321,8 @@ probe API の有無を M3 completion blocker にしない。
 現在の optional `bumble` dependency は core-only で I/O API を含まない。M3 は同じ exact
 revision の `bumble-transport`、`bumble-host`、`bumble-hci` を direct optional dependency
 として追加する。no-open discovery には `rusb` を direct optional dependency として追加する。
-`bumble-controller` は M4 の virtual integration まで追加しない。
+`bumble-controller` は transport/host の transitive dependency には含まれるが、M4 の
+virtual integration まで direct dependency に追加しない。
 
 `bumble-transport` は transport ごとの Cargo feature 分割がなく、Tokio、tonic、WebSocket、
 audio 関連も依存 graph に入る。M3 では build time/size/license を測定し、依存削減を
