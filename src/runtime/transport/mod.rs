@@ -31,6 +31,8 @@ mod hidp;
 )]
 #[cfg(feature = "bumble")]
 mod sdp;
+#[cfg(all(test, feature = "bumble"))]
+mod virtual_tests;
 
 use std::error::Error as StdError;
 use std::fmt;
