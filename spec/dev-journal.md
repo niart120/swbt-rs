@@ -362,3 +362,31 @@ Pro/Joy-Con L/Joy-Con R×Periodic/Directは実際のWorkerCore、command channel
 owner、Ready runtime、Controllerを通す。Periodicの300 ms holdoffはwait requestの絶対deadlineを
 観測してmanual clockを進め、実時間timeoutはdeadlock watchdogにだけ使う。public backend不在の
 `UnsupportedCapability`はT34で固定済みである。Bumble concrete factoryはM3で接続する。
+
+## 2026-07-29: Rust 1.97.1/1.99とM3接続前runtimeのdead code
+
+### 現状
+
+PR #4の初回CI run `30448764806`では7 job中6件が成功し、stable 1.97.1のClippyだけが
+M3接続前のruntime chainを18件の`dead_code`として検出した。同じheadはローカルstable
+1.96.1で成功し、nightly 1.99.0では同じ18件を再現した。
+
+同じ18件をWindowsのnightly 1.99.0でも再現したため、OS固有分岐による差ではない。
+
+M2のpublic `open()`、`pair()`、`create_profile()`は、concrete backend不在を
+`UnsupportedCapability`として返す。`ConcreteRuntimeBackend`はcrate-privateで、M2では
+test injectionだけが生成する。そのためproduction buildではfactory、worker owner、
+completion wait、priority shutdown、unowned transport cleanupへ到達するcallerがまだない。
+
+### 方針
+
+test buildを`cfg`で隠さず、公開visibilityを広げず、偽のproduction backendも接続しない。
+CIのstable 1.97.1とローカルnightly 1.99.0が指摘したvariant、field、method、
+function、enumそのものだけに
+`cfg_attr(not(test), allow(dead_code, reason = "...M3..."))`を置く。moduleまたはcrate単位の
+許可は使わない。修正後のPR run `30449412674`は7/7成功した。
+
+M3でproduction factoryを接続した時点でM2が追加した属性をすべて削除し、CI stableと
+ローカル最新nightlyの`cargo clippy --all-targets --all-features --locked -- -D warnings`で
+実参照を確認する。rustc/Clippyの検出差に対応する詳細なリリースノートは未調査であり、
+既知の事実は上記ツールチェーン間の再現差とCI結果に限定する。

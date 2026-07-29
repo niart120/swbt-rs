@@ -534,6 +534,7 @@ item ごとに最小 targeted test を red / green で実行し、結果を本�
 | `cargo +1.87 check --all-targets --all-features --locked` | passed | MSRV 1.87 |
 | `cargo check --all-targets --all-features --locked` | passed | stable 1.96.1 |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | passed | warning 0 |
+| `cargo +nightly clippy --all-targets --all-features --locked -- -D warnings` | passed | nightly 1.99.0でCIと同じ18件の`dead_code`検出を再現して修正 |
 | `cargo test --all-targets --all-features --locked` | passed | lib 215 passed、manual measurement 1 ignored、integration/example全件 |
 | `cargo test --all-targets --locked` | passed | default feature、同件数 |
 | `cargo test --all-targets --no-default-features --locked` | passed | Bumble-free、同件数 |
@@ -548,9 +549,16 @@ item ごとに最小 targeted test を red / green で実行し、結果を本�
 | PowerShell 7 / Windows PowerShell 5.1 parser | passed | `tools/measure_m2_runtime.ps1` |
 | `cargo package --allow-dirty --locked` | expected fail confirmed | git `bumble` にversion requirementがないM9 blocker |
 | `git diff --check` | passed | whitespace errorなし |
-| GitHub required checks | not run | PR 作成後に `$pr-merge-cleanup` で確認する |
+| GitHub required checks | passed | PR #4 code head `2021f62`、run `30449412674`で7/7 |
 
 実 adapter、Switch、network、cross compile、fuzz は M2 の対象外なので実行しない。
+
+PR #4 の初回run `30448764806`は6/7が成功し、stable 1.97.1のClippyだけが、M3で
+production factoryを接続するruntime chainを18件の`dead_code`として検出した。ローカル
+stable 1.96.1では再現せず、nightly 1.99.0では同じ18件を再現した。module全体を許可せず、
+各診断対象だけに`cfg_attr(not(test), allow(dead_code, reason = "...M3..."))`を置いた。
+この変更後、ローカルnightly 1.99.0とPR run `30449412674`のstable 1.97.1 Clippyは成功した。
+公開backend不在の契約とruntime挙動は変更していない。rustc側の検出変更の詳細は未調査である。
 
 Miri の初回実行では、同じ入力から得たwire bytes、timer、timestampは一致したまま、非公開
 quaternion orientation の末尾だけが1 ULP異なり、`InputPreparation`全体のexact equalityが
@@ -584,4 +592,5 @@ quaternion orientation の末尾だけが1 ULP異なり、`InputPreparation`全�
 - [x] M1 の一時 `dead_code` 許可を撤去した
 - [x] public API / error / rustdoc / README を review した
 - [x] 検証結果または未実行理由を記録した
+- [x] GitHub required checks 7件を確認した
 - [x] `spec/complete/unit_003/` へ移動した
