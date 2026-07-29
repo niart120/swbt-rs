@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::error::Error as StdError;
 use std::fmt;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bumble_hci::{Command, ReturnParameters};
 use bumble_host::{Device, DeviceConfiguration};
@@ -13,6 +13,7 @@ use bumble_transport::{
 
 use crate::adapter::AdapterSelector;
 
+use super::classic::ClassicDeviceSession;
 use super::{
     ActivityNotifier, ClassicAclBufferInfo, ControllerVersionInfo, SendAcceptance,
     TransportCapabilities, TransportConfig, TransportError, TransportErrorKind, TransportEvent,
@@ -48,6 +49,7 @@ pub(super) struct BumbleSession {
 struct BumbleRuntime {
     host: ExternalHost,
     device: Device,
+    classic: ClassicDeviceSession,
 }
 
 /// Controller-worker transport that opens and owns one Bumble HCI session.
@@ -88,14 +90,10 @@ impl TransportPort for BumbleTransportPort {
     }
 
     fn start_pairing(&mut self) -> TransportResult<()> {
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
-        match session.terminal_error() {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
+        self.session
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
+            .start_pairing()
     }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
@@ -105,37 +103,25 @@ impl TransportPort for BumbleTransportPort {
             .poll(timeout)
     }
 
-    fn send_interrupt(&mut self, _payload: &[u8]) -> TransportResult<SendAcceptance> {
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
-        if let Some(terminal) = session.terminal_error() {
-            return Err(terminal);
-        }
-        Err(TransportError::new(TransportErrorKind::SendRejected))
+    fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
+        self.session
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
+            .send_interrupt(payload)
     }
 
-    fn drain_interrupt(&mut self, _timeout: Duration) -> TransportResult<()> {
-        if let Some(terminal) = self
-            .session
-            .as_ref()
-            .and_then(BumbleSession::terminal_error)
-        {
-            return Err(terminal);
-        }
-        Ok(())
+    fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+        self.session
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
+            .drain_interrupt(timeout)
     }
 
     fn disconnect(&mut self) -> TransportResult<()> {
-        if let Some(terminal) = self
-            .session
-            .as_ref()
-            .and_then(BumbleSession::terminal_error)
-        {
-            return Err(terminal);
-        }
-        Ok(())
+        self.session
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
+            .disconnect()
     }
 
     fn close(&mut self) -> TransportResult<()> {
@@ -153,6 +139,83 @@ impl BumbleSession {
 
     fn terminal_error(&self) -> Option<TransportError> {
         self.terminal.clone()
+    }
+
+    pub(super) fn start_pairing(&mut self) -> TransportResult<()> {
+        if let Some(terminal) = self.terminal_error() {
+            return Err(terminal);
+        }
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
+        runtime
+            .classic
+            .start_pairing(&mut runtime.device, &mut runtime.host)
+    }
+
+    pub(super) fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
+        if let Some(terminal) = self.terminal_error() {
+            return Err(terminal);
+        }
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
+        runtime
+            .classic
+            .send_interrupt(&mut runtime.device, &mut runtime.host, payload)
+    }
+
+    pub(super) fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+        if let Some(terminal) = self.terminal_error() {
+            return Err(terminal);
+        }
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .unwrap_or_else(Instant::now);
+        loop {
+            let runtime = self
+                .runtime
+                .as_mut()
+                .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
+            drive_runtime(runtime)?;
+            if runtime.classic.interrupt_output_is_drained(&runtime.device) {
+                return Ok(());
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(TransportError::new(TransportErrorKind::DrainTimedOut));
+            }
+            match runtime
+                .host
+                .wait_for_device_activity(&mut runtime.device, remaining)
+            {
+                Ok(ExternalHostActivity::Packet) => {}
+                Ok(ExternalHostActivity::Timeout) => {
+                    return Err(TransportError::new(TransportErrorKind::DrainTimedOut));
+                }
+                Ok(ExternalHostActivity::Ended) => {
+                    return Err(self.record_terminal(None));
+                }
+                Err(error) => {
+                    return Err(self.record_terminal(Some(error)));
+                }
+            }
+        }
+    }
+
+    pub(super) fn disconnect(&mut self) -> TransportResult<()> {
+        if let Some(terminal) = self.terminal_error() {
+            return Err(terminal);
+        }
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
+        runtime
+            .classic
+            .disconnect(&mut runtime.device, &mut runtime.host)
     }
 
     #[cfg(test)]
@@ -173,6 +236,10 @@ impl BumbleSession {
             .runtime
             .as_mut()
             .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
+        let mut events = drive_runtime(runtime)?;
+        if !events.is_empty() {
+            return Ok(events);
+        }
 
         let mut wait = timeout;
         let terminal = loop {
@@ -181,7 +248,10 @@ impl BumbleSession {
                 .wait_for_device_activity(&mut runtime.device, wait)
             {
                 Ok(ExternalHostActivity::Packet) => {
-                    while runtime.device.poll(&mut runtime.host) {}
+                    events.extend(drive_runtime(runtime)?);
+                    if !events.is_empty() {
+                        break None;
+                    }
                     wait = Duration::ZERO;
                 }
                 Ok(ExternalHostActivity::Timeout) => break None,
@@ -191,7 +261,7 @@ impl BumbleSession {
         };
 
         match terminal {
-            None => Ok(Vec::new()),
+            None => Ok(events),
             Some(source) => Err(self.record_terminal(source)),
         }
     }
@@ -220,6 +290,11 @@ impl BumbleSession {
     }
 }
 
+fn drive_runtime(runtime: &mut BumbleRuntime) -> TransportResult<Vec<TransportEvent>> {
+    while runtime.device.poll(&mut runtime.host) {}
+    runtime.classic.poll(&mut runtime.device, &mut runtime.host)
+}
+
 pub(super) fn initialize_bumble_session(
     selector: &AdapterSelector,
     config: &TransportConfig,
@@ -244,6 +319,7 @@ where
         .open_split(selector.as_str())
         .map_err(map_bumble_error)?;
     let usb = parse_usb_metadata(&split.metadata)?;
+    let classic_activity = activity.clone();
     let mut host = ExternalHost::new_with_activity_callback(split, move || activity.notify());
     let mut device = Device::from_config(CONTROLLER_ID, device_configuration(config))
         .map_err(map_open_source)?;
@@ -256,10 +332,16 @@ where
     for command in identity_commands(config) {
         send_successful_command_complete(&mut host, command)?;
     }
+    let mut classic = ClassicDeviceSession::new(config, classic_activity);
+    classic.register_servers(&mut device)?;
     trace_initialized_controller(capabilities);
 
     Ok(BumbleSession {
-        runtime: Some(BumbleRuntime { host, device }),
+        runtime: Some(BumbleRuntime {
+            host,
+            device,
+            classic,
+        }),
         capabilities,
         terminal: None,
     })

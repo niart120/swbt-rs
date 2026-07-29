@@ -142,6 +142,15 @@ impl ClassicDeviceSession {
         device: &mut Device,
         link: &mut (dyn HostTransport + 'static),
     ) -> TransportResult<Vec<TransportEvent>> {
+        self.drive(device, link)?;
+        self.take_events()
+    }
+
+    pub(super) fn drive(
+        &mut self,
+        device: &mut Device,
+        link: &mut (dyn HostTransport + 'static),
+    ) -> TransportResult<()> {
         if let Some(terminal) = &self.terminal {
             return Err(terminal.clone());
         }
@@ -153,7 +162,7 @@ impl ClassicDeviceSession {
             self.process_sdp(device, link)?;
             self.process_hid(device, link)?;
         }
-        self.take_events()
+        Ok(())
     }
 
     pub(super) fn send_interrupt(
@@ -189,6 +198,61 @@ impl ClassicDeviceSession {
                 TransportError::with_source(TransportErrorKind::SendRejected, Arc::new(error))
             })?;
         Ok(SendAcceptance::ACCEPTED)
+    }
+
+    pub(super) fn interrupt_output_is_drained(&self, device: &Device) -> bool {
+        self.current
+            .as_ref()
+            .is_none_or(|current| device.classic_channel_output_is_drained(current.handle))
+    }
+
+    pub(super) fn disconnect(
+        &mut self,
+        device: &mut Device,
+        link: &mut (dyn HostTransport + 'static),
+    ) -> TransportResult<()> {
+        if let Some(terminal) = &self.terminal {
+            return Err(terminal.clone());
+        }
+        let Some(current) = self.current.take() else {
+            return self.end_pairing_window(device, link);
+        };
+
+        let mut first_failure = None;
+        let channels = current.interrupt.into_iter().chain(current.control).chain(
+            current
+                .sdp_channels
+                .keys()
+                .copied()
+                .map(|cid| Channel { cid }),
+        );
+        for channel in channels {
+            let is_open = device
+                .classic_channel(current.handle, channel.cid)
+                .is_some_and(|candidate| candidate.state == ClassicChannelState::Open);
+            if !is_open {
+                continue;
+            }
+            if let Err(error) = device.disconnect_classic_channel(link, current.handle, channel.cid)
+            {
+                if first_failure.is_none() {
+                    first_failure = Some(map_source_terminated(error));
+                }
+            }
+        }
+        let acl_is_open = device.classic_connection(current.handle).is_some();
+        if acl_is_open
+            && !device.disconnect_handle(link, current.handle, 0x13)
+            && first_failure.is_none()
+        {
+            first_failure = Some(TransportError::new(TransportErrorKind::SourceTerminated));
+        }
+        if let Err(error) = self.end_pairing_window(device, link) {
+            if first_failure.is_none() {
+                first_failure = Some(error);
+            }
+        }
+        first_failure.map_or(Ok(()), Err)
     }
 
     fn process_device_events(
@@ -407,7 +471,10 @@ impl ClassicDeviceSession {
         device: &mut Device,
         link: &mut (dyn HostTransport + 'static),
     ) -> TransportResult<()> {
-        self.pairing = None;
+        let was_active = self.pairing.take().is_some();
+        if !was_active && !device.config.discoverable && !device.config.connectable {
+            return Ok(());
+        }
         device
             .set_discoverable(link, false)
             .map_err(map_pairing_source)?;
@@ -606,7 +673,7 @@ impl ClassicDeviceSession {
         self.events.push_back(event);
     }
 
-    fn take_events(&mut self) -> TransportResult<Vec<TransportEvent>> {
+    pub(super) fn take_events(&mut self) -> TransportResult<Vec<TransportEvent>> {
         if let Some(terminal) = &self.terminal {
             return Err(terminal.clone());
         }
@@ -940,6 +1007,38 @@ mod tests {
                 .expect("duplicate old disconnect is harmless")
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn disconnect_skips_a_peer_closed_channel_and_remains_idempotent() {
+        let mut fixture = Fixture::connected();
+        assert_eq!(fixture.poll(), [TransportEvent::Connected]);
+        let peer_interrupt_cid = fixture.connect_channel(HID_INTERRUPT_PSM, 96);
+        assert_eq!(
+            fixture.poll(),
+            [TransportEvent::HidChannelOpened {
+                channel: HidChannel::Interrupt,
+            }]
+        );
+
+        fixture.devices[0]
+            .disconnect_classic_channel(
+                &mut fixture.link,
+                fixture.initiator_handle,
+                peer_interrupt_cid,
+            )
+            .expect("peer closes HID interrupt channel");
+        pump(&mut fixture.link, &mut fixture.devices);
+        assert!(fixture.poll().is_empty());
+
+        fixture
+            .session
+            .disconnect(&mut fixture.devices[1], &mut fixture.link)
+            .expect("missing HID channel does not stop ACL cleanup");
+        fixture
+            .session
+            .disconnect(&mut fixture.devices[1], &mut fixture.link)
+            .expect("repeated disconnect remains successful");
     }
 
     #[test]

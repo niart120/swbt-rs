@@ -299,7 +299,7 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
   - worker Pair command が `start_pairing` を先に呼び、begin failure を typed error にする。
   - NoInputNoOutput command、peer latch、window 外/2 peer目 reject、key redaction を固定する。
   - public `pair()` を open runtime へ接続し、closed/timeout/disconnect/repeated call を検査する。
-- [ ] **T06 — production Bumble port**
+- [x] **T06 — production Bumble port**
   - `BumbleSession` poll が Device、pairing、SDP、HID を駆動して event を返す。
   - interrupt send acceptance、drain timeout、disconnect、close/join の error/cleanup を固定する。
 - [ ] **T07 — Pro Periodic virtual end-to-end**
@@ -321,7 +321,8 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 | refactor-done | T03 | red: `HidpBridge`、typed event/error がなく compile error。green: fork `48f1bc36169b2692d2a61e87eda4223b126dca2b` の `bumble-hid::DeviceRuntime` で control/interrupt `0xA2` を decode し、NX payload から header を除去、unsupported control response `0x03`、unknown event、malformed/trailing bytes、input `0xA1` encode、control/interrupt peer MTU reject を検査する5 test が成功。refactor: codec/dispatch は fork に委譲し、swbt private bridge は header 境界、typed event、MTU だけを所有。all-feature test 245 passed / 2 ignored、default test 228 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、fmt、diff check が成功 |
 | refactor-done | T04 | red: `ClassicDeviceSession`、3 PSM 定数、`bumble-controller` / `bumble-l2cap` 依存がなく compile error。green: actual `Device + LocalLink` path で PSM `0x0001` / `0x0011` / `0x0013` の一度だけの登録、interrupt→control open、CID one-shot、control/interrupt `0xA2`、malformed control `0x04` response、interrupt noise discard、`0xA1` send と peer MTU、1 poll 16 SDP SDU と再通知、disconnect/旧 handle 破棄、64件 queue の65件目 overflow を検査する6 test が成功。refactor: connection handle/peer、SDP channel ごとの continuation、HID CID/MTU、worker event queue を private session に集約。all-feature test 251 passed / 2 ignored、default test 228 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、fmt、diff check が成功 |
 | refactor-done | T05 | red: `TransportPort::start_pairing` がなく worker の開始順 test は trait method 不在の compile error。green: worker が connection session 作成前に transport pairing を開始し、開始失敗を typed `PairingError::Begin` として返す。Classic session は pairing window の冪等開始、最初の peer latch、window 外と2 peer目の reject、IO capability `0x03` / OOB `0x00` / auth requirements `0x02`、confirmation positive、PIN/passkey/OOB negative、認証失敗時の即時終了を検査した。link-key request/notification は Bumble `Device` key-store path に残し、swbt の command/error/debug へ key bytes を渡さない。public `pair()` は open runtime の bounded Pair command へ接続し、closed、timeout、Ready 前 disconnect、disconnect 後の2回目成功を検査した。refactor: pairing policy は private `ClassicDeviceSession`、public command ownership は `ControllerRuntimePort`、test transport の開始観測は fake counter に分離。all-feature test 257 passed / 2 ignored、default test 231 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、all/default build、rustdoc、fmt、diff check が成功 |
-| pending | T06-T09 | 各 item の red、green、refactor、command/result を実装 commit ごとに追記する |
+| refactor-done | T06 | red: production `BumbleTransportPort` の pairing/send/drain/disconnect は Classic session を呼ばず、poll は `Device` だけを駆動して常に空 event を返していた。green: `BumbleRuntime` が `ClassicDeviceSession` を所有し、初期化時に SDP/HID PSM を登録する。controlled external-host packet path で pairing window、incoming Classic ACL、HID interrupt channel の L2CAP signaling、`HidChannelOpened`、`send_interrupt` acceptance、未完了 ACL の `DrainTimedOut`、Number Of Completed Packets 後の drain、disconnect、二重 disconnect、reader close/join を検査した。peer が先に閉じた HID channel は cleanup error にせず ACL 切断を続ける。reader failure は pairing/send/drain/disconnect 間で同じ typed source を保持する。refactor: Device と Classic の駆動を `drive_runtime` に集約し、Classic event の取り出しを駆動処理から分離した。all-feature test 259 passed / 2 ignored、default test 231 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、all/default build、rustdoc、fmt、diff check が成功 |
+| pending | T07-T09 | 各 item の red、green、refactor、command/result を実装 commit ごとに追記する |
 
 ## 8. 対象ファイル
 
@@ -387,7 +388,7 @@ M5 の実機調整へ先送りしない。
 - [ ] Pro Periodic が virtual packet path で NX Ready へ到達した
 - [ ] 6 model×reporting の共通 suite が成功した
 - [x] disconnect cleanup と旧 session event 破棄を検査した
-- [ ] production Bumble send/drain/disconnect/close を検査した
+- [x] production Bumble send/drain/disconnect/close を検査した
 - [ ] Rust 1.87 と通常 quality gate が成功した
 - [ ] upstream PR を作成していない
 - [ ] self-review で未実行 hardware/SSP/profile persistence と residual risk を明記した

@@ -150,6 +150,14 @@ pub(crate) enum TransportErrorKind {
     Closed,
     SendRejected,
     #[cfg_attr(
+        not(feature = "bumble"),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not perform concrete ACL drain waits"
+        )
+    )]
+    DrainTimedOut,
+    #[cfg_attr(
         not(test),
         allow(dead_code, reason = "M4 bounds the connection and HID event queue")
     )]
@@ -227,6 +235,7 @@ impl fmt::Display for TransportError {
             }
             TransportErrorKind::Closed => "transport is closed",
             TransportErrorKind::SendRejected => "transport rejected the send",
+            TransportErrorKind::DrainTimedOut => "transport send drain timed out",
             TransportErrorKind::EventQueueOverflow => "transport event queue overflowed",
             TransportErrorKind::SourceTerminated => "transport source terminated",
             #[cfg(feature = "bumble")]
