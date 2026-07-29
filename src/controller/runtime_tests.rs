@@ -12,6 +12,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "bumble")]
+use bumble_transport::Error as BumbleError;
+
 use crate::{
     CreateProfileOptions, DirectJoyConL, DirectJoyConR, DirectProController, Error, ErrorKind,
     JoyConL, JoyConLButton, JoyConR, JoyConRButton, ProButton, ProController, ProfileIdentity,
@@ -588,6 +591,95 @@ fn non_classic_capabilities_fail_before_worker_spawn_and_clean_up_transport() {
     assert_eq!(control.counters(), (1, 1, 1));
 }
 
+#[cfg(feature = "bumble")]
+#[test]
+fn bumble_usb_open_failures_map_to_sanitized_public_transport_errors() {
+    let cases = [
+        (
+            "not-found",
+            BumbleError::InvalidSpec("secret USB selector was not found".into()),
+        ),
+        ("permission", BumbleError::Usb(rusb::Error::Access)),
+        ("driver", BumbleError::Usb(rusb::Error::NotSupported)),
+        ("claim", BumbleError::Usb(rusb::Error::Busy)),
+    ];
+
+    for (stage, backend_error) in cases {
+        let controller = ProController::builder("usb:0")
+            .build()
+            .expect("build configured Pro controller");
+        let clock = ManualClock::at(Duration::ZERO);
+        let factory = move |_activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+            Ok::<_, Error>(RuntimeComponents::new(
+                Box::new(BumbleOpenErrorTransport {
+                    source: Some(backend_error),
+                }),
+                clock,
+                ChannelWorkerWaiter::new(activity_receiver),
+                UnusedPairDriver,
+            ))
+        };
+
+        let error = match open_controller_runtime(
+            &controller.config,
+            controller.status_publisher.clone(),
+            factory,
+        ) {
+            Ok(_) => panic!("{stage} failure must stop controller open"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind(), ErrorKind::TransportOpen, "{stage}");
+        let transport = error
+            .source()
+            .and_then(|source| source.downcast_ref::<TransportError>())
+            .expect("public error retains the typed transport source");
+        assert_eq!(transport.kind(), TransportErrorKind::OpenFailed, "{stage}");
+        let bumble = transport
+            .source()
+            .and_then(|source| source.downcast_ref::<BumbleError>())
+            .expect("transport error retains the typed Bumble source");
+        assert!(
+            matches!(
+                (stage, bumble),
+                ("not-found", BumbleError::InvalidSpec(_))
+                    | ("permission", BumbleError::Usb(rusb::Error::Access))
+                    | ("driver", BumbleError::Usb(rusb::Error::NotSupported))
+                    | ("claim", BumbleError::Usb(rusb::Error::Busy))
+            ),
+            "unexpected source for {stage}: {bumble}"
+        );
+        assert!(!error.to_string().contains("secret"), "{stage}");
+        assert!(!format!("{error:?}").contains("secret"), "{stage}");
+        assert!(!transport.to_string().contains("secret"), "{stage}");
+        assert!(!format!("{transport:?}").contains("secret"), "{stage}");
+    }
+}
+
+#[cfg(feature = "bumble")]
+#[test]
+fn invalid_usb_selector_maps_through_public_open_without_disclosure() {
+    let mut controller = ProController::builder("usb:0a12:0001/secret-serial[metadata]")
+        .build()
+        .expect("build configured Pro controller");
+
+    let error = controller
+        .open()
+        .expect_err("invalid selector must stop before USB access");
+
+    assert_eq!(error.kind(), ErrorKind::TransportOpen);
+    let transport = error
+        .source()
+        .and_then(|source| source.downcast_ref::<TransportError>())
+        .expect("public error retains the typed transport source");
+    assert_eq!(transport.kind(), TransportErrorKind::OpenFailed);
+    assert!(!error.to_string().contains("secret-serial"));
+    assert!(!format!("{error:?}").contains("secret-serial"));
+    assert!(!transport.to_string().contains("secret-serial"));
+    assert!(!format!("{transport:?}").contains("secret-serial"));
+    assert!(controller._runtime.is_none());
+}
+
 #[test]
 fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
     let (transport, control) = TestTransport::with_limits(8, 3);
@@ -1121,6 +1213,11 @@ struct DropTrackingTransport {
     dropped: Arc<AtomicBool>,
 }
 
+#[cfg(feature = "bumble")]
+struct BumbleOpenErrorTransport {
+    source: Option<BumbleError>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerminalPairTrace {
     PollFailure,
@@ -1220,6 +1317,40 @@ impl TransportPort for PartiallyOpeningTransport {
     fn close(&mut self) -> TransportResult<()> {
         lock(&self.cleanup_trace).push(PartialCleanupTrace::Close);
         self.inner.close()
+    }
+}
+
+#[cfg(feature = "bumble")]
+impl TransportPort for BumbleOpenErrorTransport {
+    fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
+        let source = self
+            .source
+            .take()
+            .expect("Bumble open error transport is opened once");
+        Err(TransportError::with_source(
+            TransportErrorKind::OpenFailed,
+            Arc::new(source),
+        ))
+    }
+
+    fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+        Err(TransportError::new(TransportErrorKind::Closed))
+    }
+
+    fn send_interrupt(&mut self, _payload: &[u8]) -> TransportResult<SendAcceptance> {
+        Err(TransportError::new(TransportErrorKind::Closed))
+    }
+
+    fn drain_interrupt(&mut self, _timeout: Duration) -> TransportResult<()> {
+        Ok(())
+    }
+
+    fn disconnect(&mut self) -> TransportResult<()> {
+        Ok(())
+    }
+
+    fn close(&mut self) -> TransportResult<()> {
+        Ok(())
     }
 }
 

@@ -113,7 +113,47 @@ fn bumble_initialization_rejects_incomplete_identity_response() {
         };
 
         assert_eq!(error.kind(), TransportErrorKind::OpenFailed);
+        assert!(
+            error.source().is_some(),
+            "ReadBdAddr failure retains a typed initialization source"
+        );
+        assert!(!error.to_string().contains("ReadBdAddr"));
+        assert!(!format!("{error:?}").contains("ReadBdAddr"));
     }
+}
+
+#[test]
+fn bumble_initialization_rejects_failed_reset_with_typed_source() {
+    let config = TransportConfig::for_model::<Pro>();
+    let mut responses = controller_initialization_responses();
+    responses[0] = command_complete(Command::Reset, ReturnParameters::Status { status: 1 });
+    let commands = Arc::new(Mutex::new(Vec::new()));
+    let (transport, _drops) = scripted_transport(responses, commands, None);
+    let selectors = Arc::new(Mutex::new(Vec::new()));
+    let mut opener = ScriptedOpener::new(transport, selectors);
+
+    let error = match initialize_bumble_session_with(
+        &mut opener,
+        &AdapterSelector::from("usb:0"),
+        &config,
+        activity_channel().0,
+    ) {
+        Ok(_) => panic!("failed HCI Reset must stop initialization"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.kind(), TransportErrorKind::OpenFailed);
+    assert!(
+        matches!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<BumbleError>()),
+            Some(BumbleError::Remote(_))
+        ),
+        "failed Reset retains the typed Bumble source"
+    );
+    assert!(!error.to_string().contains("Reset"));
+    assert!(!format!("{error:?}").contains("Reset"));
 }
 
 #[test]
