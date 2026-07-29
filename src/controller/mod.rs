@@ -2,30 +2,34 @@
 
 mod build;
 mod config;
+mod create;
 pub(crate) mod input;
 
 #[cfg(test)]
 mod build_tests;
 #[cfg(test)]
 mod config_tests;
+#[cfg(test)]
+mod create_profile_tests;
 
 use std::cell::Cell;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::AdapterSelector;
 use crate::diagnostics::GamepadStatus;
 use crate::input::InputState;
 use crate::model::{self, ControllerModel};
 use crate::profile::ControllerColors;
 use crate::reporting::{self, ReportingMode};
 use crate::runtime::status::{StatusPublisher, StatusReader, status_projection};
+use crate::{AdapterSelector, CreateProfileOptions};
 
 use build::{FileProfileReader, ProfileReadPort, read_typed_profile};
 #[cfg(test)]
 use config::ProfileConfig;
 use config::{BuilderConfig, ControllerConfig};
+use create::CreateProfilePlan;
 
 /// A controller whose model and reporting mode are fixed by its type.
 ///
@@ -129,6 +133,21 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     pub fn controller_colors(mut self, colors: ControllerColors) -> Self {
         self.colors = colors;
         self
+    }
+
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T31 consumes validated create-profile requests in the orchestrator"
+        )
+    )]
+    fn validate_create_profile_target(
+        self,
+        options: CreateProfileOptions,
+        target: &mut impl crate::profile::ProfileCreateTargetPort,
+    ) -> crate::Result<CreateProfilePlan<M, R>> {
+        create::validate_target(self.validate()?, options, target)
     }
 
     /// Builds a configured controller without opening its adapter or starting a worker.

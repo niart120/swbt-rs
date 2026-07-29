@@ -124,6 +124,29 @@ fn raw_and_typed_profile_debug_redact_key_material_and_unknown_fields() {
     assert!(!typed_debug.contains("link_key"));
 }
 
+#[test]
+fn local_address_identity_uses_the_public_semantic_contract() {
+    for address in [
+        "03:12:34:56:78:9A",
+        "00:12:34:56:78:9A",
+        "02:12:34:9E:8B:00",
+        "02:12:34:9E:8B:3F",
+    ] {
+        let mut document = valid_profile("pro");
+        document["identity"] = json!({
+            "kind": "exp-local-address",
+            "address": address
+        });
+
+        let error = ProfileDocument::parse_json(document.to_string().as_bytes())
+            .expect_err("invalid local address identity must fail profile parsing");
+
+        assert_eq!(error.kind(), ErrorKind::InvalidProfile);
+        assert!(!error.to_string().contains(address));
+        assert!(!format!("{error:?}").contains(address));
+    }
+}
+
 fn valid_profile(controller_kind: &str) -> Value {
     json!({
         "format": "swbt.profile",

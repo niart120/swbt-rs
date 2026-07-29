@@ -63,7 +63,6 @@ impl<M: ControllerModel, R: ReportingMode> BuilderConfig<M, R> {
         &self.adapter
     }
 
-    #[cfg(test)]
     pub(super) fn profile_path(&self) -> Option<&Path> {
         self.profile_path.as_deref()
     }

@@ -7,7 +7,7 @@ use crate::{
     model::ControllerModel,
 };
 
-use super::ControllerKind;
+use super::{ControllerKind, LocalAddress};
 
 const PROFILE_FORMAT: &str = "swbt.profile";
 const PROFILE_SCHEMA_VERSION: u64 = 2;
@@ -80,8 +80,25 @@ impl ProfileDocument {
                 })?;
             match identity.get("kind").and_then(Value::as_str) {
                 Some("adapter-default") if !identity.contains_key("address") => {}
-                Some("exp-local-address")
-                    if identity.get("address").is_some_and(Value::is_string) => {}
+                Some("exp-local-address") => {
+                    let address =
+                        identity
+                            .get("address")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| {
+                                Error::new(
+                                    ErrorKind::InvalidProfile,
+                                    "profile identity address must be a string",
+                                )
+                            })?;
+                    LocalAddress::parse(address).map_err(|source| {
+                        Error::with_source(
+                            ErrorKind::InvalidProfile,
+                            "profile identity address is invalid",
+                            source,
+                        )
+                    })?;
+                }
                 _ => {
                     return Err(Error::new(
                         ErrorKind::InvalidProfile,

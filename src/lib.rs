@@ -28,6 +28,7 @@
 //! ```
 
 mod adapter;
+mod connection;
 pub mod controller;
 mod diagnostics;
 pub mod error;
@@ -39,6 +40,7 @@ pub mod reporting;
 mod runtime;
 
 pub use adapter::AdapterSelector;
+pub use connection::CreateProfileOptions;
 pub use controller::{
     Controller, ControllerBuilder, DirectJoyConL, DirectJoyConR, DirectProController, JoyConL,
     JoyConR, ProController,
@@ -50,5 +52,5 @@ pub use input::{
     JoyConRButton, JoyConRInputState, ProButton, ProInputState, Stick,
 };
 pub use model::{ControllerModel, HasDualSticks, HasLeftStick, HasRightStick};
-pub use profile::{ControllerColors, ControllerKind, Rgb24};
+pub use profile::{ControllerColors, ControllerKind, LocalAddress, ProfileIdentity, Rgb24};
 pub use reporting::{ReportingKind, ReportingMode};
