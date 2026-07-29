@@ -7,9 +7,9 @@ Bluetooth stack の実装基盤には
 
 ## 現在の状態
 
-このリポジトリは M2 の controller runtime 基盤を実装中です。Cargo package は library
-target `swbt` を提供し、model-valid input、crate 内部の Switch HID protocol と runtime、
-公開 controller builder を実装しています。
+このリポジトリは M2 の controller runtime と profile frontend まで実装済みです。Cargo
+package は library target `swbt` を提供し、model-valid input、crate 内部の Switch HID
+protocol と runtime、公開 controller builder を実装しています。
 
 - pure protocol は `swbt-python` 0.6.0 の固定 commit
   `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` から生成した 45 fixture を直接検査します。
@@ -17,9 +17,12 @@ target `swbt` を提供し、model-valid input、crate 内部の Switch HID prot
   一時 controller、既存 path なら controller model を検査した Configured controller を返します。
 - `press()`、`release()`、`tap()`、`neutral()`、Periodic `apply()`、Direct `send()` を
   型付き worker command へ接続しています。Ready runtime に対する `close()` と
-  `close_without_neutral()` は priority shutdown、cleanup、worker join を実行します。
-  3 model × 2 reporting の crate 内 fake-runtime test で Pair→Ready→入力→worker join を
-  検査しています。
+  `close_without_neutral()` は cleanup の完了を待って worker を join し、cleanup または
+  join の失敗を返します。`Drop` は neutral report と pending send の drain を省いた
+  bounded best-effort shutdown であり、終了失敗を呼び出し側へ返せません。3 model × 2
+  reporting の crate 内 fake-runtime test で Pair→Ready→入力→worker join を検査しています。
+- 新しい connection session は input snapshot を neutral へ戻して開始し、接続前または
+  前 session の入力状態と stale event を持ち越しません。
 - `build()` 直後の Configured controller には Ready runtime がないため、入力操作は
   `ErrorKind::TransportClosed` を返します。
 - default feature は空です。`bumble` feature を有効にした場合だけ、基準 commit

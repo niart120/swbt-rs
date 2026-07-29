@@ -48,6 +48,12 @@ use create::{CreateProfilePlan, CreateProfileRuntimeBackend, ReadyRuntime};
 /// Input and close operations wait for the owned worker when a runtime is
 /// active. Controllers are transferable between threads but intentionally
 /// cannot be shared between threads.
+///
+/// Explicit close waits for cleanup and worker completion, joins the worker,
+/// and returns cleanup or join failures. Dropping a controller instead requests
+/// bounded best-effort shutdown without a trailing neutral report or pending
+/// send drain. Drop cannot return shutdown failures, and its internal wait
+/// duration is not a public timing guarantee.
 pub struct Controller<M: ControllerModel, R: ReportingMode> {
     _runtime: Option<ReadyRuntime<M, R>>,
     #[allow(
@@ -129,6 +135,12 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     }
 
     /// Returns the latest committed model-valid input without waiting for transport I/O.
+    ///
+    /// Periodic input is committed when its command is processed; the latest
+    /// state before the next report deadline is used. Direct input is committed
+    /// only after transport acceptance. A new connection session resets the
+    /// snapshot to neutral, and stale events from an earlier session cannot
+    /// mutate it.
     #[must_use]
     pub fn snapshot(&self) -> InputState<M> {
         self.status_reader.snapshot()
@@ -297,8 +309,11 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 impl<M: ControllerModel> Controller<M, reporting::Periodic> {
     /// Replaces the committed input used by periodic reporting.
     ///
-    /// The call blocks until the worker has committed the model-valid state.
-    /// Transport delivery is performed later by the periodic scheduler.
+    /// An active runtime is required, but the transport need not be Ready. The
+    /// call returns after the worker commits the model-valid state; transport
+    /// delivery is performed later by the periodic scheduler. If multiple
+    /// states are committed before the next report deadline, only the latest
+    /// state is sent.
     ///
     /// # Errors
     ///

@@ -14,7 +14,13 @@
 //! Bluetooth transport backend. Open and pair return
 //! [`ErrorKind::UnsupportedCapability`]. An otherwise valid profile-creation
 //! request returns the same error after its read-only target preflight and does
-//! not create a file.
+//! not create a file. On a ready runtime, explicit close waits for cleanup
+//! completion, joins the worker, and returns cleanup or join failures. Dropping
+//! a controller instead uses bounded best-effort shutdown: it omits neutral
+//! reporting and pending-send draining and cannot report failures. Its internal
+//! wait duration is not a public timing guarantee. A new connection session
+//! resets the input snapshot to neutral and does not carry pre-connection or
+//! previous-session input state or stale events forward.
 //!
 //! # Model-valid input
 //!
