@@ -7,14 +7,17 @@ Bluetooth stack の実装基盤には
 
 ## 現在の状態
 
-このリポジトリは M1 の pure protocol 実装段階です。Cargo package は library target
-`swbt` を提供し、model-valid input と crate 内部の Switch HID protocol を実装しています。
+このリポジトリは M2 の controller runtime 基盤を実装中です。Cargo package は library
+target `swbt` を提供し、model-valid input、crate 内部の Switch HID protocol と runtime、
+公開 controller builder を実装しています。
 
 - pure protocol は `swbt-python` 0.6.0 の固定 commit
   `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` から生成した 45 fixture を直接検査します。
+- `ControllerBuilder::build()` は adapter や worker を開始せず、profile path 未指定なら
+  一時 controller、既存 path なら controller model を検査した Configured controller を返します。
 - default feature は空です。`bumble` feature を有効にした場合だけ、基準 commit
   `bbac2a6803b8cab0920ab725a23aa408fc4fed85` の依存を組み込みます。
-- Bluetooth transport、Bumble 統合、controller の runtime / lifecycle API は未実装です。
+- Bluetooth transport と Bumble の接続、公開 lifecycle / input 操作は未実装です。
 - Bluetooth adapter や対象機器を使う実機検証は未実施です。
 
 ## 開発

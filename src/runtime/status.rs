@@ -35,10 +35,12 @@ impl<M: ControllerModel> ProjectionState<M> {
     }
 }
 
-/// Worker-owned write handle for the controller status projection.
+/// Write handle for the controller status projection.
 ///
-/// Each method holds the write lock only while replacing projection values.
-/// Callers must invoke it outside transport, response, and join waits.
+/// A configured controller retains this handle so the same projection can be
+/// shared with its worker. Each method holds the write lock only while
+/// replacing projection values. Callers must invoke it outside transport,
+/// response, and join waits.
 pub(crate) struct StatusPublisher<M: ControllerModel> {
     shared: Arc<RwLock<ProjectionState<M>>>,
 }

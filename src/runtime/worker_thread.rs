@@ -526,7 +526,6 @@ mod tests {
             cleanup::CloseMode,
             command::{CommandResponseError, command_channel},
             direct::{DirectTapError, DirectTapInterruption},
-            status::status_projection,
             transport::{
                 ActivityNotifier, HidChannel, SendAcceptance, TransportEvent, TransportPort,
                 TransportResult, activity_channel,
@@ -615,8 +614,10 @@ mod tests {
             .expect("open fake transport");
         let panic_on_poll = Arc::new(AtomicBool::new(false));
         let clock = FakeClock::at(Duration::ZERO);
-        let (status, status_reader) = status_projection();
-        let controller = crate::Controller::<Pro, Direct>::from_status(status_reader);
+        let controller = crate::Controller::<Pro, Direct>::builder("test:worker-thread")
+            .build()
+            .expect("ephemeral test controller");
+        let status = controller.status_publisher();
         let mut worker = WorkerCore::new_direct_with_status(
             protocol(),
             Box::new(PanickingTransport {
@@ -690,8 +691,10 @@ mod tests {
         transport
             .open(activity.clone())
             .expect("open fake transport");
-        let (status, status_reader) = status_projection();
-        let controller = crate::Controller::<Pro, Direct>::from_status(status_reader);
+        let controller = crate::Controller::<Pro, Direct>::builder("test:worker-thread")
+            .build()
+            .expect("ephemeral test controller");
+        let status = controller.status_publisher();
         let worker = WorkerCore::new_direct_with_status(
             protocol(),
             Box::new(CleanupFailureAndPanicOnDropTransport { inner: transport }),

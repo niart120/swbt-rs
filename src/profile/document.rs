@@ -18,13 +18,6 @@ pub(crate) struct ProfileDocument {
 }
 
 impl ProfileDocument {
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T29 parses an existing profile before controller construction"
-        )
-    )]
     pub(crate) fn parse_json(bytes: &[u8]) -> crate::Result<Self> {
         let value = serde_json::from_slice::<Value>(bytes).map_err(|source| {
             Error::with_source(
@@ -146,13 +139,6 @@ impl fmt::Debug for ProfileDocument {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T29 stores a validated pairing profile in ControllerConfig"
-    )
-)]
 pub(crate) struct PairingProfile<M: ControllerModel> {
     document: ProfileDocument,
     _model: PhantomData<fn() -> M>,

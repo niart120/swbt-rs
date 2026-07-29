@@ -214,7 +214,10 @@ fn status_and_snapshot_return_while_transport_poll_is_blocked() {
     let (activity, _wake_receiver) = activity_channel();
     inner.open(activity).expect("open fake transport");
     let (transport, block) = BlockingPollTransport::new(inner);
-    let (publisher, reader) = status_projection::<Pro>();
+    let controller = Controller::<Pro, Direct>::builder("test:status")
+        .build()
+        .expect("ephemeral test controller");
+    let publisher = controller.status_publisher();
     let mut worker = WorkerCore::new_direct_with_status(
         protocol(),
         Box::new(transport),
@@ -224,7 +227,6 @@ fn status_and_snapshot_return_while_transport_poll_is_blocked() {
     );
     let clock = FakeClock::at(Duration::ZERO);
     prime_ready(&mut worker, &control, &clock);
-    let controller = Controller::<Pro, Direct>::from_status(reader);
     let pressed = InputState::<Pro>::neutral().with_buttons([ProButton::A]);
 
     block.arm();
@@ -353,7 +355,10 @@ fn projected_direct_worker() -> (
     let (mut transport, control) = FakeTransport::with_limits(16, 3);
     let (activity, _wake_receiver) = activity_channel();
     transport.open(activity).expect("open fake transport");
-    let (publisher, reader) = status_projection::<Pro>();
+    let controller = Controller::<Pro, Direct>::builder("test:status")
+        .build()
+        .expect("ephemeral test controller");
+    let publisher = controller.status_publisher();
     let worker = WorkerCore::new_direct_with_status(
         protocol(),
         Box::new(transport),
@@ -361,12 +366,7 @@ fn projected_direct_worker() -> (
         Box::new(|_| {}),
         publisher,
     );
-    (
-        worker,
-        control,
-        FakeClock::at(Duration::ZERO),
-        Controller::from_status(reader),
-    )
+    (worker, control, FakeClock::at(Duration::ZERO), controller)
 }
 
 fn prime_ready(

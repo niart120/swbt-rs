@@ -1,8 +1,11 @@
 //! Typed controller and builder identities.
 
+mod build;
 mod config;
 pub(crate) mod input;
 
+#[cfg(test)]
+mod build_tests;
 #[cfg(test)]
 mod config_tests;
 
@@ -17,9 +20,12 @@ use crate::input::InputState;
 use crate::model::{self, ControllerModel};
 use crate::profile::ControllerColors;
 use crate::reporting::{self, ReportingMode};
-use crate::runtime::status::StatusReader;
+use crate::runtime::status::{StatusPublisher, StatusReader, status_projection};
 
-use config::BuilderConfig;
+use build::{FileProfileReader, ProfileReadPort, read_typed_profile};
+#[cfg(test)]
+use config::ProfileConfig;
+use config::{BuilderConfig, ControllerConfig};
 
 /// A controller whose model and reporting mode are fixed by its type.
 ///
@@ -29,6 +35,16 @@ use config::BuilderConfig;
 /// surface. Controllers are transferable between threads but intentionally
 /// cannot be shared between threads.
 pub struct Controller<M: ControllerModel, R: ReportingMode> {
+    #[allow(
+        dead_code,
+        reason = "T31 consumes the validated configuration when opening the runtime"
+    )]
+    config: ControllerConfig<M, R>,
+    #[allow(
+        dead_code,
+        reason = "T31 shares the configured projection writer with the worker"
+    )]
+    status_publisher: StatusPublisher<M>,
     status_reader: StatusReader<M>,
     _types: PhantomData<fn() -> (M, R)>,
     _not_sync: PhantomData<Cell<()>>,
@@ -50,19 +66,26 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T31 controller orchestration constructs the public controller"
-        )
-    )]
-    pub(crate) fn from_status(status_reader: StatusReader<M>) -> Self {
+    fn from_config(config: ControllerConfig<M, R>) -> Self {
+        let (status_publisher, status_reader) = status_projection();
+
         Self {
+            config,
+            status_publisher,
             status_reader,
             _types: PhantomData,
             _not_sync: PhantomData,
         }
+    }
+
+    #[cfg(test)]
+    fn config(&self) -> &ControllerConfig<M, R> {
+        &self.config
+    }
+
+    #[cfg(test)]
+    pub(crate) fn status_publisher(&self) -> StatusPublisher<M> {
+        self.status_publisher.clone()
     }
 
     /// Returns the latest runtime diagnostics without waiting for transport I/O.
@@ -108,13 +131,36 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
         self
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T29 build validates settings before reading a profile"
-        )
-    )]
+    /// Builds a configured controller without opening its adapter or starting a worker.
+    ///
+    /// With no profile path, the controller is ephemeral and this method
+    /// performs no profile I/O. With a profile path, the file is read once and
+    /// validated for the selected controller model.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::ErrorKind::InvalidInput`] for invalid builder settings,
+    /// [`crate::ErrorKind::ProfileNotFound`] when the selected profile does not
+    /// exist, [`crate::ErrorKind::InvalidProfile`] for an invalid profile
+    /// document, [`crate::ErrorKind::ProfileControllerMismatch`] for a profile
+    /// belonging to another model, or [`crate::ErrorKind::Internal`] when the
+    /// profile cannot be read for another filesystem reason.
+    pub fn build(self) -> crate::Result<Controller<M, R>> {
+        let mut reader = FileProfileReader;
+        self.build_with_profile_reader(&mut reader)
+    }
+
+    fn build_with_profile_reader(
+        self,
+        reader: &mut impl ProfileReadPort,
+    ) -> crate::Result<Controller<M, R>> {
+        let config = self
+            .validate()?
+            .finalize_with_profile(|path| read_typed_profile(reader, path))?;
+
+        Ok(Controller::from_config(config))
+    }
+
     fn validate(self) -> crate::Result<BuilderConfig<M, R>> {
         let mode = <R as reporting::sealed::Sealed>::validate(self.mode)?;
         Ok(BuilderConfig::new(

@@ -3,10 +3,11 @@
 //! Rust library for NX-compatible virtual Bluetooth HID input devices.
 //!
 //! The current package surface provides typed controller identities,
-//! model-valid input values, and read-only status and input snapshots.
-//! Typed controller builders retain construction settings without opening an
-//! adapter. Controller construction, Bluetooth transport access, and
-//! lifecycle-changing runtime operations are not exposed yet.
+//! model-valid input values, configured controller construction, and read-only
+//! status and input snapshots. Building a controller without a profile is
+//! ephemeral; selecting an existing profile reads and validates that document.
+//! Construction does not open an adapter or start a worker. Bluetooth transport
+//! access and lifecycle-changing runtime operations are not exposed yet.
 //!
 //! # Model-valid input
 //!
