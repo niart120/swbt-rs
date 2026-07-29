@@ -208,7 +208,7 @@ where
         not(test),
         allow(
             dead_code,
-            reason = "T33 test injection pairs through the worker before T34 public entrypoints"
+            reason = "T33 test injection pairs through the worker before M3 supplies a concrete backend"
         )
     )]
     Pair {

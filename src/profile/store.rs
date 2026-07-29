@@ -1,4 +1,18 @@
-use std::{io, path::Path};
+use std::{fs, io, path::Path};
+
+pub(crate) struct FileProfileCreateTarget;
+
+impl ProfileCreateTargetPort for FileProfileCreateTarget {
+    fn inspect(&mut self, path: &Path) -> io::Result<ProfileCreateTargetState> {
+        match fs::symlink_metadata(path) {
+            Ok(_) => Ok(ProfileCreateTargetState::Existing),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                Ok(ProfileCreateTargetState::Absent)
+            }
+            Err(source) => Err(source),
+        }
+    }
+}
 
 pub(crate) trait ProfileReadPort {
     fn read(&mut self, path: &Path) -> io::Result<Vec<u8>>;

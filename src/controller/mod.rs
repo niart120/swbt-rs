@@ -24,7 +24,7 @@ use crate::diagnostics::GamepadStatus;
 use crate::error::{Error, ErrorKind};
 use crate::input::{Button, InputState};
 use crate::model::{self, ControllerModel};
-use crate::profile::ControllerColors;
+use crate::profile::{ControllerColors, FileProfileCreateTarget};
 use crate::reporting::{self, ReportingMode};
 use crate::runtime::{
     cleanup::CloseMode,
@@ -130,6 +130,38 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     #[must_use]
     pub fn snapshot(&self) -> InputState<M> {
         self.status_reader.snapshot()
+    }
+
+    /// Opens the configured controller transport.
+    ///
+    /// The current package has no concrete Bluetooth transport backend, so
+    /// this operation leaves the configured controller and its diagnostics
+    /// unchanged without starting a worker or opening an adapter.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::UnsupportedCapability`] while the concrete
+    /// Bluetooth transport is unavailable.
+    pub fn open(&mut self) -> crate::Result<()> {
+        Err(crate::runtime::error_map::unsupported_capability(
+            "Bluetooth transport",
+        ))
+    }
+
+    /// Pairs the configured controller within `timeout`.
+    ///
+    /// The current package has no concrete Bluetooth transport backend, so
+    /// this operation leaves the configured controller and its diagnostics
+    /// unchanged without starting a worker or opening an adapter.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::UnsupportedCapability`] while the concrete
+    /// Bluetooth transport is unavailable.
+    pub fn pair(&mut self, _timeout: Duration) -> crate::Result<()> {
+        Err(crate::runtime::error_map::unsupported_capability(
+            "Bluetooth transport",
+        ))
     }
 
     /// Presses one or more model-valid buttons.
@@ -339,7 +371,7 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
         not(test),
         allow(
             dead_code,
-            reason = "T34 routes the public create-profile method through this private seam"
+            reason = "crate-private tests exercise successful profile creation before M5 supplies production persistence"
         )
     )]
     fn create_profile_with(
@@ -350,6 +382,29 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     ) -> crate::Result<Controller<M, R>> {
         let plan = self.validate_create_profile_target(options, store)?;
         create::create_profile(plan, store, backend)
+    }
+
+    /// Attempts to create a new pairing profile and return a paired controller.
+    ///
+    /// Builder settings, the required profile path, the requested identity,
+    /// and target existence are checked in that order. An existing target is
+    /// never replaced. The current package has no concrete Bluetooth
+    /// transport backend, so an otherwise valid request stops before creating
+    /// the profile file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::ErrorKind::InvalidInput`] for invalid builder settings,
+    /// [`crate::ErrorKind::ProfilePathRequired`] when no target path was
+    /// selected, [`crate::ErrorKind::UnsupportedCapability`] for an unsupported
+    /// identity or unavailable Bluetooth transport,
+    /// [`crate::ErrorKind::ProfileAlreadyExists`] when the target already
+    /// exists, or [`crate::ErrorKind::Internal`] when the target cannot be
+    /// inspected.
+    pub fn create_profile(self, options: CreateProfileOptions) -> crate::Result<Controller<M, R>> {
+        let mut target = FileProfileCreateTarget;
+        let plan = self.validate_create_profile_target(options, &mut target)?;
+        create::reject_unavailable_backend(plan)
     }
 
     /// Builds a configured controller without opening its adapter or starting a worker.

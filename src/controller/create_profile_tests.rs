@@ -247,6 +247,7 @@ impl ProfileCreatePort for FakeProfileStore {
 
 #[derive(Clone, Copy)]
 enum RuntimeFailureStage {
+    Capability,
     Open,
     Pair,
 }
@@ -292,6 +293,11 @@ impl CreateProfileRuntimeBackend<Pro, Periodic> for FakeRuntimeBackend {
 
     fn ensure_supported(&mut self, _config: &BuilderConfig<Pro, Periodic>) -> crate::Result<()> {
         lock(&self.events).push(CreateEvent::CheckBackendCapability);
+        if matches!(self.failure, Some(RuntimeFailureStage::Capability)) {
+            return Err(crate::runtime::error_map::unsupported_capability(
+                "Bluetooth transport",
+            ));
+        }
         Ok(())
     }
 
@@ -493,6 +499,45 @@ fn create_profile_persists_and_reopens_before_open_then_returns_ready_controller
     assert_eq!(probe.explicit_cleanup_count.load(Ordering::SeqCst), 0);
     assert_eq!(probe.fallback_cleanup_count.load(Ordering::SeqCst), 0);
     assert_eq!(probe.resource_drop_count.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn backend_capability_failure_stops_before_profile_creation_or_runtime_attempt() {
+    let path = PathBuf::from("profiles/backend-unavailable.json");
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let probe = RuntimeProbe::new();
+    let mut store = FakeProfileStore::empty(Arc::clone(&events));
+    let mut backend = FakeRuntimeBackend::failing(
+        Arc::clone(&events),
+        probe.clone(),
+        RuntimeFailureStage::Capability,
+    );
+
+    let result = ProController::builder("unavailable:fake")
+        .profile_path(path.clone())
+        .create_profile_with(
+            adapter_default_options(Duration::from_secs(60)),
+            &mut store,
+            &mut backend,
+        );
+    let error = match result {
+        Ok(_) => panic!("unsupported backend must not return a controller"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.kind(), ErrorKind::UnsupportedCapability);
+    assert_eq!(
+        lock(&events).as_slice(),
+        &[
+            CreateEvent::InspectTarget(path),
+            CreateEvent::CheckBackendCapability,
+        ]
+    );
+    assert!(store.bytes.is_none());
+    assert!(!probe.is_active());
+    assert_eq!(probe.explicit_cleanup_count.load(Ordering::SeqCst), 0);
+    assert_eq!(probe.fallback_cleanup_count.load(Ordering::SeqCst), 0);
+    assert_eq!(probe.resource_drop_count.load(Ordering::SeqCst), 0);
 }
 
 #[test]

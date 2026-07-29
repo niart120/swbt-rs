@@ -9,8 +9,12 @@
 //! an existing profile reads and validates that document. Construction does not
 //! open an adapter or start a worker. A configured controller therefore returns
 //! [`ErrorKind::TransportClosed`] from input operations until a later lifecycle
-//! entrypoint installs a ready runtime. Concrete Bluetooth transport access and
-//! public open/pair/profile-creation entrypoints are not exposed yet.
+//! entrypoint installs a ready runtime. Public open, pair, and profile-creation
+//! entrypoints are available, but the current package has no concrete
+//! Bluetooth transport backend. Open and pair return
+//! [`ErrorKind::UnsupportedCapability`]. An otherwise valid profile-creation
+//! request returns the same error after its read-only target preflight and does
+//! not create a file.
 //!
 //! # Model-valid input
 //!

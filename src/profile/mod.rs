@@ -15,5 +15,6 @@ pub use colors::{ControllerColors, Rgb24};
 pub(crate) use document::{PairingProfile, ProfileDocument};
 pub use identity::{LocalAddress, ProfileIdentity};
 pub(crate) use store::{
-    ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState, ProfileReadPort,
+    FileProfileCreateTarget, ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState,
+    ProfileReadPort,
 };

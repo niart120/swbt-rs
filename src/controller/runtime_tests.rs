@@ -55,6 +55,32 @@ const DEADLOCK_WATCHDOG: Duration = Duration::from_secs(2);
 const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
 
 #[test]
+fn unavailable_public_lifecycle_keeps_the_runtime_owner_uninstalled() {
+    let mut controller = ProController::builder("unavailable:unit")
+        .build()
+        .expect("build configured controller");
+
+    assert!(controller._runtime.is_none());
+    assert_eq!(
+        controller
+            .open()
+            .expect_err("open must be unavailable")
+            .kind(),
+        ErrorKind::UnsupportedCapability
+    );
+    assert!(controller._runtime.is_none());
+    assert_eq!(
+        controller
+            .pair(PAIR_TIMEOUT)
+            .expect_err("pair must be unavailable")
+            .kind(),
+        ErrorKind::UnsupportedCapability
+    );
+    assert!(controller._runtime.is_none());
+    assert_eq!(controller.status().lifecycle, LifecycleState::Configured);
+}
+
+#[test]
 fn worker_spawn_error_maps_cleanup_as_related_without_leaking_details() {
     let spawn_error = WorkerSpawnError::new(
         io::Error::other("secret spawn backend detail"),

@@ -24,8 +24,11 @@ target `swbt` を提供し、model-valid input、crate 内部の Switch HID prot
   `ErrorKind::TransportClosed` を返します。
 - default feature は空です。`bumble` feature を有効にした場合だけ、基準 commit
   `bbac2a6803b8cab0920ab725a23aa408fc4fed85` の依存を組み込みます。
-- Bluetooth transport と Bumble の接続、公開 `open()` / `pair()` / `create_profile()` は
-  未実装です。
+- 公開 `open()` / `pair()` / `create_profile()` は、concrete Bluetooth transport がない
+  現在の build では `ErrorKind::UnsupportedCapability` を返します。`create_profile()` は
+  builder、path、identity、target の存在を検査した後、file を作る前に停止します。
+  既存 target は上書きしません。
+- Bluetooth transport と Bumble の接続は未実装です。
 - Bluetooth adapter や対象機器を使う実機検証は未実施です。
 
 ## 開発

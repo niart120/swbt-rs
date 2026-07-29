@@ -268,13 +268,6 @@ fn map_worker_core_error(error: WorkerCoreError) -> Error {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T34 reports concrete backend absence through the public error boundary"
-    )
-)]
 pub(crate) fn unsupported_capability(capability: &str) -> Error {
     Error::new(
         ErrorKind::UnsupportedCapability,

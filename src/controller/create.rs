@@ -40,13 +40,32 @@ impl<M: ControllerModel, R: ReportingMode> CreateProfilePlan<M, R> {
         self.pair_timeout
     }
 
+    fn require_supported_backend(
+        self,
+        ensure_supported: impl FnOnce(&BuilderConfig<M, R>) -> crate::Result<()>,
+    ) -> crate::Result<BackendSupportedCreateProfilePlan<M, R>> {
+        ensure_supported(&self.config)?;
+        Ok(BackendSupportedCreateProfilePlan { plan: self })
+    }
+}
+
+struct BackendSupportedCreateProfilePlan<M: ControllerModel, R: ReportingMode> {
+    plan: CreateProfilePlan<M, R>,
+}
+
+impl<M: ControllerModel, R: ReportingMode> BackendSupportedCreateProfilePlan<M, R> {
     fn persist_and_reopen(
         self,
         store: &mut impl ProfileCreatePort,
     ) -> crate::Result<ReopenedCreateProfilePlan<M, R>> {
+        let CreateProfilePlan {
+            config,
+            path,
+            pair_timeout,
+        } = self.plan;
         let document = ProfileDocument::empty_adapter_default::<M>();
         let bytes = document.to_json_bytes()?;
-        store.create_new(&self.path, &bytes).map_err(|source| {
+        store.create_new(&path, &bytes).map_err(|source| {
             let (kind, message) = if source.kind() == std::io::ErrorKind::AlreadyExists {
                 (
                     ErrorKind::ProfileAlreadyExists,
@@ -58,9 +77,8 @@ impl<M: ControllerModel, R: ReportingMode> CreateProfilePlan<M, R> {
             Error::with_source(kind, message, source)
         })?;
 
-        let profile = read_typed_profile::<M>(store, &self.path)?;
-        let path = self.path;
-        let config = self.config.finalize_with_profile(|configured_path| {
+        let profile = read_typed_profile::<M>(store, &path)?;
+        let config = config.finalize_with_profile(|configured_path| {
             debug_assert!(
                 configured_path == path,
                 "validated profile path changed before typed reopen"
@@ -70,7 +88,7 @@ impl<M: ControllerModel, R: ReportingMode> CreateProfilePlan<M, R> {
 
         Ok(ReopenedCreateProfilePlan {
             config,
-            pair_timeout: self.pair_timeout,
+            pair_timeout,
         })
     }
 }
@@ -106,7 +124,7 @@ impl<M: ControllerModel, R: ReportingMode> ReadyRuntime<M, R> {
         not(test),
         allow(
             dead_code,
-            reason = "T33 fake-runtime tests construct this port before T34 exposes lifecycle entrypoints"
+            reason = "T33 runtime tests construct this port before M3 supplies a concrete backend"
         )
     )]
     pub(super) fn from_port(port: impl ReadyRuntimePort<M, R> + 'static) -> Self {
@@ -212,7 +230,7 @@ where
     M: ControllerModel,
     R: ReportingMode,
 {
-    backend.ensure_supported(&plan.config)?;
+    let plan = plan.require_supported_backend(|config| backend.ensure_supported(config))?;
     let reopened = plan.persist_and_reopen(store)?;
     let (status_publisher, status_reader) = status_projection();
     let mut attempt = backend.begin_attempt(status_publisher.clone());
@@ -235,6 +253,25 @@ where
         status_publisher,
         status_reader,
         runtime,
+    ))
+}
+
+pub(super) fn reject_unavailable_backend<M, R>(
+    plan: CreateProfilePlan<M, R>,
+) -> crate::Result<Controller<M, R>>
+where
+    M: ControllerModel,
+    R: ReportingMode,
+{
+    let _supported = plan.require_supported_backend(|_| {
+        Err(crate::runtime::error_map::unsupported_capability(
+            "Bluetooth transport",
+        ))
+    })?;
+
+    Err(Error::new(
+        ErrorKind::Internal,
+        "unavailable backend passed its capability gate",
     ))
 }
 

@@ -112,7 +112,7 @@ impl<C, W, D> RuntimeComponents<C, W, D> {
     not(test),
     allow(
         dead_code,
-        reason = "T33 tests inject the concrete backend while public access waits for T34"
+        reason = "T33 tests inject the concrete backend before M3 supplies its factory"
     )
 )]
 pub(super) struct ConcreteRuntimeBackend<F> {
@@ -123,7 +123,7 @@ pub(super) struct ConcreteRuntimeBackend<F> {
     not(test),
     allow(
         dead_code,
-        reason = "T33 tests inject the concrete backend while public access waits for T34"
+        reason = "T33 tests inject the concrete backend before M3 supplies its factory"
     )
 )]
 impl<F> ConcreteRuntimeBackend<F> {

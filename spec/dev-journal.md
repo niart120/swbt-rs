@@ -280,8 +280,8 @@ T33 で実 worker と pair 完了通知を attempt へ接続する。cleanup 自
 primary と cleanup の両 source を利用者が辿れる構造化 error 境界を決める。標準の
 `Error::source()` は単線なので、cleanup error を非公開 field に置くだけでは完了としない。
 
-T34 の public backend 不在、T35 の worker Drop timeout/detach、M6 の atomic create/replace、
-lock、key preservation は、それぞれの既存 item へ残す。
+T32 時点では、T34 の public backend 不在、T35 の worker Drop timeout/detach、M6 の
+atomic replace、lock、key preservation を、それぞれの既存 item へ残した。
 
 ## 2026-07-29: T33 typed Pair と concrete runtime の所有権
 
@@ -335,4 +335,4 @@ fakeにするのはtransport、event注入、manual clock、waiter、backend fac
 Pro/Joy-Con L/Joy-Con R×Periodic/Directは実際のWorkerCore、command channel、worker thread、
 owner、Ready runtime、Controllerを通す。Periodicの300 ms holdoffはwait requestの絶対deadlineを
 観測してmanual clockを進め、実時間timeoutはdeadlock watchdogにだけ使う。public backend不在の
-`UnsupportedCapability`はT34、Bumble concrete factoryはM3で接続する。
+`UnsupportedCapability`はT34で固定済みである。Bumble concrete factoryはM3で接続する。
