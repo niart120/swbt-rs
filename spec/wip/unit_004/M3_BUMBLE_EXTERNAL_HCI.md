@@ -133,7 +133,9 @@ usb:<bus decimal>-<port decimal>[.<port decimal>...]
   serial string を先読みしたとは扱わない。
 - empty serial、invalid hex/decimal、存在しない candidate、USB 以外の scheme は
   `ErrorKind::TransportOpen`。
-- class 判定を迂回する `!` と M3 対象外の `+sco=` は拒否する。
+- class 判定を迂回する `!`、M3 対象外の `+sco=`、Bumble transport dispatch が
+  metadata と解釈する `[` / `]` は selector 全体で拒否する。これらは serial にも
+  許可せず、照合対象 serial が暗黙に切り詰められないようにする。
 - `AdapterSelector` は利用者の入力を保持し、Bumble `UsbSelector` を公開しない。
 
 ### 5.3 TransportConfig
@@ -283,7 +285,7 @@ probe API の有無を M3 completion blocker にしない。
   - descriptor probe の capability に open/claim 操作を含めず、production path に
     `Device::open`、detach、claim がないことを確認する。
   - public `list_adapters()` の feature-disabled error も固定する。
-- [ ] **T02 — USB selector grammar**
+- [x] **T02 — USB selector grammar**
   - index、VID/PID、serial、occurrence、port path、case variationを受け付ける。
   - invalid/unsupported/forced/SCO selector を typed open error にする。
 - [ ] **T03 — model-independent config projection**
@@ -321,6 +323,7 @@ probe API の有無を M3 completion blocker にしない。
 | state | item | evidence |
 |---|---|---|
 | refactor-done | T01: no-open adapter discovery | red: `cargo test descriptor_discovery_returns_only_bluetooth_hci_without_opening_or_claiming` は `AdapterInfo`、descriptor probe、classification 未定義の compile error。green: descriptor success/source-failure の unit test 2件と feature-disabled public integration test が成功し、device-level または interface-level `E0/01/01` だけを stable `usb:N` candidate にした。inventory failure は `AdapterDiscovery` と typed source を保持し、公開 message へ source text を出さない。refactor: discovery に渡す capability を descriptor record の取得だけに限定し、USB open/claim method を境界から除外。production `rusb` path にも open/detach/claim はなく、device/config/interface descriptor、bus、取得できた port path、serial index だけを読む。取得不能な port path は実際の空 path と区別して `None` にする。device-level HCI class では config descriptor を要求しない。個別 device の descriptor 読み取り失敗は candidate から除外し、件数だけを `tracing` event に残す。`cargo test --all-targets --all-features --locked` と default は lib 217 passed / 1 ignored と integration/example 全件、clippy `-D warnings`、rustdoc `-D warnings` が成功 |
+| refactor-done | T02: USB selector grammar | red: `cargo test usb_selector_accepts_the_supported_bumble_subset --all-features --locked` は `UsbSelector`、`AdapterSelector::as_str` / `parse_usb`、`ErrorKind::TransportOpen` 未定義の compile error。green: supported subset、invalid/unsupported syntax、serial redaction の unit test 3件が成功。index、hex 1〜4桁の VID/PID、serial、occurrence、bus/port path を owned internal typeへ変換し、ASCII 数字、`u8` / `u16` / `usize` overflow、empty segment、非 USB scheme、`pyusb:`、force、SCO、dispatch metadata を `TransportOpen` にした。refactor: VID/PID の選択方法を `First` / `Serial` / `Occurrence` に分けて不可能状態を除き、raw/parsed selector と error の `Debug` / `Display` から serial を除外。`cargo test --all-targets --all-features --locked` と default は lib 220 passed / 1 ignored と integration/example 全件、clippy `-D warnings`、rustdoc `-D warnings` が成功 |
 
 ## 7. 設計メモ
 

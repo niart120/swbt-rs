@@ -8,6 +8,8 @@ use std::{error::Error as StdError, fmt};
 pub enum ErrorKind {
     /// USB adapter discovery could not read the descriptor inventory.
     AdapterDiscovery,
+    /// Opening the selected Bluetooth transport failed or its selector is invalid.
+    TransportOpen,
     /// Creating a profile requires a destination path.
     ProfilePathRequired,
     /// The requested profile does not exist.

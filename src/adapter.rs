@@ -2,10 +2,99 @@ use crate::error::{Error, ErrorKind};
 
 /// Opaque selector passed to the Bluetooth adapter backend.
 ///
-/// The selector syntax is interpreted by the concrete backend. This type keeps
-/// backend-specific selector types out of the public controller API.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// The selector input is stored verbatim until the concrete backend opens the
+/// transport. This type keeps backend-specific selector types out of the
+/// public controller API. Its [`Debug`](std::fmt::Debug) output is redacted
+/// because a selector can contain a USB serial number.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct AdapterSelector(Box<str>);
+
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "T04 transport opening consumes parsed selectors")
+)]
+impl AdapterSelector {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub(crate) fn parse_usb(&self) -> crate::Result<UsbSelector> {
+        let invalid = || {
+            Error::new(
+                ErrorKind::TransportOpen,
+                "USB adapter selector is invalid or unsupported",
+            )
+        };
+        let Some(spec) = self.as_str().strip_prefix("usb:") else {
+            return Err(invalid());
+        };
+        if spec.is_empty()
+            || spec.contains('!')
+            || spec.contains("+sco=")
+            || spec.contains(['[', ']'])
+        {
+            return Err(invalid());
+        }
+
+        if let Some((vendor_id, product)) = spec.split_once(':') {
+            let vendor_id = parse_hex_u16(vendor_id).ok_or_else(&invalid)?;
+            let (product_id, selection) = if let Some((product_id, serial_number)) =
+                product.split_once('/')
+            {
+                if serial_number.is_empty() {
+                    return Err(invalid());
+                }
+                (
+                    parse_hex_u16(product_id).ok_or_else(&invalid)?,
+                    VidPidSelection::Serial(serial_number.into()),
+                )
+            } else if let Some((product_id, occurrence)) = product.split_once('#') {
+                (
+                    parse_hex_u16(product_id).ok_or_else(&invalid)?,
+                    VidPidSelection::Occurrence(parse_decimal(occurrence).ok_or_else(&invalid)?),
+                )
+            } else {
+                (
+                    parse_hex_u16(product).ok_or_else(&invalid)?,
+                    VidPidSelection::First,
+                )
+            };
+
+            Ok(UsbSelector::VidPid {
+                vendor_id,
+                product_id,
+                selection,
+            })
+        } else if let Some((bus, ports)) = spec.split_once('-') {
+            let bus = parse_decimal::<u8>(bus).ok_or_else(&invalid)?;
+            let ports = ports
+                .split('.')
+                .map(|port| parse_decimal::<u8>(port).ok_or_else(&invalid))
+                .collect::<crate::Result<Vec<_>>>()?;
+            if ports.is_empty() {
+                return Err(invalid());
+            }
+
+            Ok(UsbSelector::Path {
+                bus,
+                ports: ports.into_boxed_slice(),
+            })
+        } else {
+            Ok(UsbSelector::Index(
+                parse_decimal(spec).ok_or_else(&invalid)?,
+            ))
+        }
+    }
+}
+
+impl std::fmt::Debug for AdapterSelector {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("AdapterSelector")
+            .field(&"<redacted>")
+            .finish()
+    }
+}
 
 impl From<String> for AdapterSelector {
     fn from(value: String) -> Self {
@@ -17,6 +106,92 @@ impl From<&str> for AdapterSelector {
     fn from(value: &str) -> Self {
         Self(value.into())
     }
+}
+
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "T04 transport opening consumes parsed selectors")
+)]
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) enum UsbSelector {
+    Index(usize),
+    VidPid {
+        vendor_id: u16,
+        product_id: u16,
+        selection: VidPidSelection,
+    },
+    Path {
+        bus: u8,
+        ports: Box<[u8]>,
+    },
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) enum VidPidSelection {
+    First,
+    Serial(Box<str>),
+    Occurrence(usize),
+}
+
+impl std::fmt::Debug for VidPidSelection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::First => formatter.write_str("First"),
+            Self::Serial(_) => formatter
+                .debug_tuple("Serial")
+                .field(&"<redacted>")
+                .finish(),
+            Self::Occurrence(occurrence) => formatter
+                .debug_tuple("Occurrence")
+                .field(occurrence)
+                .finish(),
+        }
+    }
+}
+
+impl std::fmt::Debug for UsbSelector {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Index(index) => formatter.debug_tuple("Index").field(index).finish(),
+            Self::VidPid {
+                vendor_id,
+                product_id,
+                selection,
+            } => formatter
+                .debug_struct("VidPid")
+                .field("vendor_id", vendor_id)
+                .field("product_id", product_id)
+                .field("selection", selection)
+                .finish(),
+            Self::Path { bus, ports } => formatter
+                .debug_struct("Path")
+                .field("bus", bus)
+                .field("ports", ports)
+                .finish(),
+        }
+    }
+}
+
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "T04 transport opening consumes parsed selectors")
+)]
+fn parse_hex_u16(value: &str) -> Option<u16> {
+    if !(1..=4).contains(&value.len()) || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    u16::from_str_radix(value, 16).ok()
+}
+
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "T04 transport opening consumes parsed selectors")
+)]
+fn parse_decimal<T: std::str::FromStr>(value: &str) -> Option<T> {
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
 }
 
 /// A Bluetooth HCI USB adapter found without opening or claiming the device.
@@ -294,7 +469,10 @@ fn descriptor_record(device: rusb::Device<rusb::Context>) -> Option<UsbDescripto
 mod tests {
     use std::{error::Error as StdError, fmt};
 
-    use super::{AdapterInfo, DescriptorProbe, UsbClass, UsbDescriptorRecord, discover_with_probe};
+    use super::{
+        AdapterInfo, AdapterSelector, DescriptorProbe, UsbClass, UsbDescriptorRecord, UsbSelector,
+        VidPidSelection, discover_with_probe,
+    };
 
     const BLUETOOTH_HCI: UsbClass = UsbClass::new(0xe0, 0x01, 0x01);
 
@@ -364,6 +542,138 @@ mod tests {
         );
         assert!(!error.to_string().contains("fake"));
         assert!(!format!("{error:?}").contains("fake"));
+    }
+
+    #[test]
+    fn usb_selector_accepts_the_supported_bumble_subset() {
+        let cases = [
+            ("usb:0", UsbSelector::Index(0)),
+            ("usb:0002", UsbSelector::Index(2)),
+            ("usb:42", UsbSelector::Index(42)),
+            (
+                "usb:A:0b",
+                UsbSelector::VidPid {
+                    vendor_id: 0x000a,
+                    product_id: 0x000b,
+                    selection: VidPidSelection::First,
+                },
+            ),
+            (
+                "usb:0:ffff",
+                UsbSelector::VidPid {
+                    vendor_id: 0,
+                    product_id: u16::MAX,
+                    selection: VidPidSelection::First,
+                },
+            ),
+            (
+                "usb:0A12:0001/Serial-42",
+                UsbSelector::VidPid {
+                    vendor_id: 0x0a12,
+                    product_id: 0x0001,
+                    selection: VidPidSelection::Serial("Serial-42".into()),
+                },
+            ),
+            (
+                "usb:0489:E13A#2",
+                UsbSelector::VidPid {
+                    vendor_id: 0x0489,
+                    product_id: 0xe13a,
+                    selection: VidPidSelection::Occurrence(2),
+                },
+            ),
+            (
+                "usb:FFFF:0#00",
+                UsbSelector::VidPid {
+                    vendor_id: u16::MAX,
+                    product_id: 0,
+                    selection: VidPidSelection::Occurrence(0),
+                },
+            ),
+            (
+                "usb:3-1.4.2",
+                UsbSelector::Path {
+                    bus: 3,
+                    ports: vec![1, 4, 2].into_boxed_slice(),
+                },
+            ),
+            (
+                "usb:0-0.255",
+                UsbSelector::Path {
+                    bus: 0,
+                    ports: vec![0, u8::MAX].into_boxed_slice(),
+                },
+            ),
+        ];
+
+        for (input, expected) in cases {
+            let selector = AdapterSelector::from(input);
+
+            assert_eq!(selector.as_str(), input);
+            assert_eq!(selector.parse_usb().expect("supported selector"), expected);
+        }
+    }
+
+    #[test]
+    fn usb_selector_rejects_invalid_and_unsupported_syntax_as_transport_open() {
+        let invalid = [
+            "",
+            "usb:",
+            "serial:0",
+            "pyusb:0",
+            "USB:0",
+            "usb:not-an-index",
+            "usb:+1",
+            "usb: 1",
+            "usb:18446744073709551616",
+            "usb:00000:1",
+            "usb:1:00000",
+            "usb:gg:1",
+            "usb:1:zz",
+            "usb:1:2/",
+            "usb:1:2#",
+            "usb:1:2#-1",
+            "usb:1:2#18446744073709551616",
+            "usb:3-",
+            "usb:3-.1",
+            "usb:3-1.",
+            "usb:3-1..2",
+            "usb:3-a",
+            "usb:256-1",
+            "usb:1-256",
+            "usb:0!",
+            "usb:0+sco=1",
+            "usb:0+sco=5!",
+            "usb:[dispatch=value]0",
+            "usb:0A12:0001/Serial[dispatch=value]",
+        ];
+
+        for input in invalid {
+            let error = AdapterSelector::from(input)
+                .parse_usb()
+                .expect_err("invalid selector must fail");
+
+            assert_eq!(error.kind(), crate::ErrorKind::TransportOpen);
+            if !input.is_empty() {
+                assert!(!error.to_string().contains(input));
+                assert!(!format!("{error:?}").contains(input));
+            }
+        }
+    }
+
+    #[test]
+    fn adapter_selector_debug_redacts_serial_number() {
+        let selector = AdapterSelector::from("usb:0A12:0001/private-serial");
+        let parsed = selector.parse_usb().expect("serial selector");
+        let error = AdapterSelector::from("usb:0A12:0001/private-serial!")
+            .parse_usb()
+            .expect_err("reserved serial character");
+
+        assert_eq!(selector.as_str(), "usb:0A12:0001/private-serial");
+        assert!(!format!("{selector:?}").contains("private-serial"));
+        assert!(!format!("{parsed:?}").contains("private-serial"));
+        assert!(!error.to_string().contains("private-serial"));
+        assert!(!format!("{error:?}").contains("private-serial"));
     }
 
     struct FakeDescriptorProbe {
