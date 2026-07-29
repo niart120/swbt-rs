@@ -1,20 +1,21 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::error::Error as _;
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
 use bumble_hci::{Address, AddressType, Command, Event, HciPacket, ReturnParameters};
 use bumble_host::{HOST_EVENT_MASK, HOST_LE_EVENT_MASK};
 use bumble_transport::{
-    Error as BumbleError, PacketSink, PacketSource, Result as BumbleResult, SplitOpenedTransport,
+    Error as BumbleError, PacketSink, PacketSource, PacketSourceShutdown, Result as BumbleResult,
+    SplitOpenedTransport,
 };
 
 use crate::adapter::AdapterSelector;
 use crate::model::Pro;
 
-use super::bumble::{SplitTransportOpener, initialize_bumble_session_with};
-use super::{TransportConfig, TransportErrorKind};
+use super::bumble::{BumbleSession, SplitTransportOpener, initialize_bumble_session_with};
+use super::{TransportConfig, TransportErrorKind, activity_channel};
 
 const DISPLAY_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
 const HCI_ADDRESS: [u8; 6] = [0x7d, 0x9f, 0xf9, 0xdc, 0x1b, 0x00];
@@ -35,6 +36,7 @@ fn bumble_initialization_uses_configured_device_and_exact_hci_order() {
         &mut opener,
         &AdapterSelector::from("usb:0A12:0001"),
         &config,
+        activity_channel().0,
     )
     .expect("scripted Bumble initialization");
 
@@ -102,6 +104,7 @@ fn bumble_initialization_rejects_incomplete_identity_response() {
             &mut opener,
             &AdapterSelector::from("usb:0"),
             &config,
+            activity_channel().0,
         ) {
             Ok(_) => panic!("ReadBdAddr requires exact successful Command Complete"),
             Err(error) => error,
@@ -134,6 +137,7 @@ fn bumble_initialization_requires_successful_complete_identity_writes() {
             &mut opener,
             &AdapterSelector::from("usb:0"),
             &config,
+            activity_channel().0,
         ) {
             Ok(_) => panic!("identity writes require successful Command Complete"),
             Err(error) => error,
@@ -160,12 +164,15 @@ fn bumble_initialization_failure_preserves_source_and_releases_scripted_resource
     let selectors = Arc::new(Mutex::new(Vec::new()));
     let mut opener = ScriptedOpener::new(transport, selectors);
 
-    let error =
-        match initialize_bumble_session_with(&mut opener, &AdapterSelector::from("usb:0"), &config)
-        {
-            Ok(_) => panic!("scripted identity write failure"),
-            Err(error) => error,
-        };
+    let error = match initialize_bumble_session_with(
+        &mut opener,
+        &AdapterSelector::from("usb:0"),
+        &config,
+        activity_channel().0,
+    ) {
+        Ok(_) => panic!("scripted identity write failure"),
+        Err(error) => error,
+    };
 
     assert_eq!(error.kind(), TransportErrorKind::OpenFailed);
     assert!(
@@ -186,6 +193,138 @@ fn bumble_initialization_failure_preserves_source_and_releases_scripted_resource
     ];
     released.sort_unstable();
     assert_eq!(released, ["sink", "source"]);
+}
+
+#[test]
+fn bumble_reader_enqueues_before_wake_and_coalesces_activity() {
+    let (mut session, source, wakes, _drops) = controlled_session();
+
+    wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("initialization activity");
+    assert_eq!(wakes.try_recv(), Err(TryRecvError::Empty));
+
+    source.push(Ok(Some(command_complete(
+        Command::Reset,
+        ReturnParameters::Status { status: 0 },
+    ))));
+    wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("reader activity after enqueue");
+    session
+        .poll(Duration::ZERO)
+        .expect("zero-time poll observes enqueued packet");
+    assert_eq!(wakes.try_recv(), Err(TryRecvError::Empty));
+
+    session.close().expect("reader cleanup");
+}
+
+#[test]
+fn bumble_reader_end_and_failure_are_single_wake_and_sticky() {
+    let (mut ended, end_source, end_wakes, _drops) = controlled_session();
+    end_wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("initialization activity");
+    end_source.finish();
+    end_wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("clean end activity");
+    assert!(matches!(
+        end_wakes.try_recv(),
+        Err(TryRecvError::Empty | TryRecvError::Disconnected)
+    ));
+
+    let first = ended
+        .poll(Duration::ZERO)
+        .expect_err("clean end is terminal");
+    assert_eq!(first.kind(), TransportErrorKind::SourceTerminated);
+    let repeated = ended
+        .poll(Duration::ZERO)
+        .expect_err("clean end remains terminal");
+    assert_eq!(repeated.kind(), TransportErrorKind::SourceTerminated);
+    ended.close().expect("clean end remains closable");
+
+    let (mut failed, fail_source, fail_wakes, _drops) = controlled_session();
+    fail_wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("initialization activity");
+    fail_source.push(Err(std::io::Error::other(
+        "PAIRING-KEY reader failure sentinel",
+    )
+    .into()));
+    fail_wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("failure activity");
+    assert!(matches!(
+        fail_wakes.try_recv(),
+        Err(TryRecvError::Empty | TryRecvError::Disconnected)
+    ));
+
+    let first = failed
+        .poll(Duration::ZERO)
+        .expect_err("reader failure is terminal");
+    assert_eq!(first.kind(), TransportErrorKind::SourceTerminated);
+    let source = first.source().expect("typed Bumble source");
+    let bumble = source
+        .downcast_ref::<BumbleError>()
+        .expect("Bumble error remains in the source chain");
+    assert!(matches!(
+        bumble,
+        BumbleError::ExternalHostFailure(error)
+            if matches!(error.as_ref(), BumbleError::Io(_))
+    ));
+    assert!(!first.to_string().contains("PAIRING-KEY"));
+    assert!(!format!("{first:?}").contains("PAIRING-KEY"));
+
+    let repeated = failed
+        .poll(Duration::ZERO)
+        .expect_err("reader failure remains terminal");
+    assert_eq!(repeated.kind(), TransportErrorKind::SourceTerminated);
+    assert!(std::ptr::eq(
+        first.source().expect("first source"),
+        repeated.source().expect("sticky source"),
+    ));
+    failed.close().expect("failed reader remains closable");
+}
+
+#[test]
+fn bumble_close_cancels_reader_waits_for_completion_and_joins_once() {
+    let (mut session, _source, wakes, drops) = controlled_session();
+    wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("initialization activity");
+
+    session.close().expect("first close");
+    wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("shutdown terminal activity");
+    assert!(matches!(
+        wakes.try_recv(),
+        Err(TryRecvError::Empty | TryRecvError::Disconnected)
+    ));
+    let mut released = [
+        drops
+            .recv_timeout(Duration::from_secs(1))
+            .expect("source released after reader join"),
+        drops
+            .recv_timeout(Duration::from_secs(1))
+            .expect("sink released after reader join"),
+    ];
+    released.sort_unstable();
+    assert_eq!(released, ["sink", "source"]);
+    assert_eq!(
+        session
+            .poll(Duration::ZERO)
+            .expect_err("closed session rejects poll")
+            .kind(),
+        TransportErrorKind::Closed
+    );
+
+    session.close().expect("repeated close");
+    assert!(matches!(
+        drops.try_recv(),
+        Err(TryRecvError::Empty | TryRecvError::Disconnected)
+    ));
 }
 
 struct ScriptedOpener {
@@ -223,6 +362,74 @@ impl PacketSource for ScriptedSource {
 }
 
 impl Drop for ScriptedSource {
+    fn drop(&mut self) {
+        let _ = self.dropped.send("source");
+    }
+}
+
+#[derive(Clone)]
+struct ControlledSourceControl {
+    shared: Arc<ControlledSourceShared>,
+}
+
+struct ControlledSourceShared {
+    state: Mutex<ControlledSourceState>,
+    wake: Condvar,
+}
+
+struct ControlledSourceState {
+    queued: VecDeque<BumbleResult<Option<HciPacket>>>,
+    shutdown_requested: bool,
+}
+
+impl ControlledSourceControl {
+    fn push(&self, result: BumbleResult<Option<HciPacket>>) {
+        lock(&self.shared.state).queued.push_back(result);
+        self.shared.wake.notify_all();
+    }
+
+    fn finish(&self) {
+        self.push(Ok(None));
+    }
+}
+
+impl PacketSourceShutdown for ControlledSourceControl {
+    fn request_shutdown(&self) {
+        lock(&self.shared.state).shutdown_requested = true;
+        self.shared.wake.notify_all();
+    }
+}
+
+struct ControlledSource {
+    control: ControlledSourceControl,
+    dropped: Sender<&'static str>,
+}
+
+impl PacketSource for ControlledSource {
+    fn read_packet(&mut self) -> BumbleResult<Option<HciPacket>> {
+        let mut state = lock(&self.control.shared.state);
+        loop {
+            if let Some(result) = state.queued.pop_front() {
+                return result;
+            }
+            if state.shutdown_requested {
+                return Ok(None);
+            }
+            state = self
+                .control
+                .shared
+                .wake
+                .wait(state)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+
+    fn shutdown_handle(&self) -> Option<Arc<dyn PacketSourceShutdown>> {
+        Some(Arc::new(self.control.clone()))
+    }
+}
+
+impl Drop for ControlledSource {
     fn drop(&mut self) {
         let _ = self.dropped.send("source");
     }
@@ -287,6 +494,73 @@ fn scripted_transport(
             }),
             metadata,
         },
+        drops,
+    )
+}
+
+fn controlled_session() -> (
+    BumbleSession,
+    ControlledSourceControl,
+    Receiver<()>,
+    Receiver<&'static str>,
+) {
+    let config = TransportConfig::for_model::<Pro>();
+    let commands = Arc::new(Mutex::new(Vec::new()));
+    let (transport, source, drops) =
+        controlled_transport(successful_initialization_responses(&config), commands);
+    let selectors = Arc::new(Mutex::new(Vec::new()));
+    let mut opener = ScriptedOpener::new(transport, selectors);
+    let (activity, wakes) = activity_channel();
+    let session = initialize_bumble_session_with(
+        &mut opener,
+        &AdapterSelector::from("usb:0A12:0001"),
+        &config,
+        activity,
+    )
+    .expect("controlled Bumble initialization");
+    (session, source, wakes, drops)
+}
+
+fn controlled_transport(
+    responses: Vec<HciPacket>,
+    commands: Arc<Mutex<Vec<Command>>>,
+) -> (
+    SplitOpenedTransport,
+    ControlledSourceControl,
+    Receiver<&'static str>,
+) {
+    let (dropped, drops) = channel();
+    let shared = Arc::new(ControlledSourceShared {
+        state: Mutex::new(ControlledSourceState {
+            queued: responses
+                .into_iter()
+                .map(|packet| Ok(Some(packet)))
+                .collect(),
+            shutdown_requested: false,
+        }),
+        wake: Condvar::new(),
+    });
+    let control = ControlledSourceControl { shared };
+    let metadata = BTreeMap::from([
+        ("vendor_id".into(), "0a12".into()),
+        ("product_id".into(), "0001".into()),
+        ("bus".into(), "1".into()),
+        ("address".into(), "7".into()),
+    ]);
+    (
+        SplitOpenedTransport {
+            source: Box::new(ControlledSource {
+                control: control.clone(),
+                dropped: dropped.clone(),
+            }),
+            sink: Box::new(RecordingSink {
+                commands,
+                fail_opcode: None,
+                dropped,
+            }),
+            metadata,
+        },
+        control,
         drops,
     )
 }

@@ -142,6 +142,8 @@ pub(crate) enum TransportErrorKind {
         )
     )]
     SourceTerminated,
+    #[cfg(feature = "bumble")]
+    CloseFailed,
 }
 
 #[derive(Clone)]
@@ -204,6 +206,8 @@ impl fmt::Display for TransportError {
             TransportErrorKind::SendRejected => "transport rejected the send",
             TransportErrorKind::EventQueueOverflow => "transport event queue overflowed",
             TransportErrorKind::SourceTerminated => "transport source terminated",
+            #[cfg(feature = "bumble")]
+            TransportErrorKind::CloseFailed => "transport could not be closed cleanly",
         };
         formatter.write_str(message)
     }

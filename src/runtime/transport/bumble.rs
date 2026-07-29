@@ -8,14 +8,15 @@ use bumble_hci::{Command, ReturnParameters};
 use bumble_host::{Device, DeviceConfiguration};
 use bumble_transport::{
     CommandResponse, Error as BumbleError, ExternalControllerInfo, ExternalHost,
-    SplitOpenedTransport, open_split_transport,
+    ExternalHostActivity, SplitOpenedTransport, open_split_transport,
 };
 
 use crate::adapter::AdapterSelector;
 
 use super::{
-    ClassicAclBufferInfo, ControllerVersionInfo, TransportCapabilities, TransportConfig,
-    TransportError, TransportErrorKind, TransportResult, UsbTransportMetadata,
+    ActivityNotifier, ClassicAclBufferInfo, ControllerVersionInfo, TransportCapabilities,
+    TransportConfig, TransportError, TransportErrorKind, TransportEvent, TransportResult,
+    UsbTransportMetadata,
 };
 
 const CONTROLLER_ID: usize = 0;
@@ -34,24 +35,28 @@ impl SplitTransportOpener for SystemSplitTransportOpener {
     }
 }
 
-/// A synchronously initialized Bumble host/device pair.
+/// A synchronously initialized Bumble host/device pair with an owned reader.
 ///
-/// The pinned upstream revision detaches its reader thread and has no
-/// cancellation or join API. This session therefore remains disconnected from
-/// the public controller lifecycle until T06 supplies that ownership boundary.
+/// T06 owns reader notification, terminal state, shutdown, and join here. T07
+/// installs this session in the public controller lifecycle.
 #[allow(
     dead_code,
     reason = "T06 adds reader cancellation/join before T07 installs this session in a port"
 )]
 pub(super) struct BumbleSession {
+    runtime: Option<BumbleRuntime>,
+    capabilities: TransportCapabilities,
+    terminal: Option<TransportError>,
+}
+
+struct BumbleRuntime {
     host: ExternalHost,
     device: Device,
-    capabilities: TransportCapabilities,
 }
 
 #[allow(
     dead_code,
-    reason = "T06 drives the retained host/device and T07 consumes its capabilities"
+    reason = "T07 installs the T06 session lifecycle in a concrete TransportPort"
 )]
 impl BumbleSession {
     pub(super) const fn capabilities(&self) -> TransportCapabilities {
@@ -60,7 +65,66 @@ impl BumbleSession {
 
     #[cfg(test)]
     pub(super) const fn device_configuration(&self) -> &DeviceConfiguration {
-        &self.device.config
+        &self
+            .runtime
+            .as_ref()
+            .expect("open Bumble session owns its runtime")
+            .device
+            .config
+    }
+
+    pub(super) fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+        if let Some(terminal) = self.terminal.as_ref() {
+            return Err(terminal.clone());
+        }
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
+
+        let mut wait = timeout;
+        let terminal = loop {
+            match runtime
+                .host
+                .wait_for_device_activity(&mut runtime.device, wait)
+            {
+                Ok(ExternalHostActivity::Packet) => {
+                    while runtime.device.poll(&mut runtime.host) {}
+                    wait = Duration::ZERO;
+                }
+                Ok(ExternalHostActivity::Timeout) => break None,
+                Ok(ExternalHostActivity::Ended) => break Some(None),
+                Err(error) => break Some(Some(error)),
+            }
+        };
+
+        match terminal {
+            None => Ok(Vec::new()),
+            Some(source) => Err(self.record_terminal(source)),
+        }
+    }
+
+    pub(super) fn close(&mut self) -> TransportResult<()> {
+        let Some(mut runtime) = self.runtime.take() else {
+            return Ok(());
+        };
+        let result = runtime
+            .host
+            .shutdown_reader(HCI_COMMAND_TIMEOUT)
+            .map_err(map_close_source);
+        drop(runtime);
+        result
+    }
+
+    fn record_terminal(&mut self, source: Option<BumbleError>) -> TransportError {
+        let terminal = match source {
+            Some(source) => {
+                TransportError::with_source(TransportErrorKind::SourceTerminated, Arc::new(source))
+            }
+            None => TransportError::new(TransportErrorKind::SourceTerminated),
+        };
+        self.terminal = Some(terminal.clone());
+        terminal
     }
 }
 
@@ -71,14 +135,16 @@ impl BumbleSession {
 pub(super) fn initialize_bumble_session(
     selector: &AdapterSelector,
     config: &TransportConfig,
+    activity: ActivityNotifier,
 ) -> TransportResult<BumbleSession> {
-    initialize_bumble_session_with(&mut SystemSplitTransportOpener, selector, config)
+    initialize_bumble_session_with(&mut SystemSplitTransportOpener, selector, config, activity)
 }
 
 pub(super) fn initialize_bumble_session_with<O>(
     opener: &mut O,
     selector: &AdapterSelector,
     config: &TransportConfig,
+    activity: ActivityNotifier,
 ) -> TransportResult<BumbleSession>
 where
     O: SplitTransportOpener,
@@ -90,7 +156,7 @@ where
         .open_split(selector.as_str())
         .map_err(map_bumble_error)?;
     let usb = parse_usb_metadata(&split.metadata)?;
-    let mut host = ExternalHost::new(split);
+    let mut host = ExternalHost::new_with_activity_callback(split, move || activity.notify());
     let mut device = Device::from_config(CONTROLLER_ID, device_configuration(config))
         .map_err(map_open_source)?;
     let controller = host
@@ -104,9 +170,9 @@ where
     }
 
     Ok(BumbleSession {
-        host,
-        device,
+        runtime: Some(BumbleRuntime { host, device }),
         capabilities,
+        terminal: None,
     })
 }
 
@@ -243,6 +309,10 @@ fn parse_decimal_u8(metadata: &BTreeMap<String, String>, key: &'static str) -> T
 
 fn map_bumble_error(error: BumbleError) -> TransportError {
     map_open_source(error)
+}
+
+fn map_close_source(error: BumbleError) -> TransportError {
+    TransportError::with_source(TransportErrorKind::CloseFailed, Arc::new(error))
 }
 
 fn map_open_source(error: impl StdError + Send + Sync + 'static) -> TransportError {
