@@ -22,6 +22,30 @@ use super::{TransportConfig, TransportErrorKind, TransportPort, activity_channel
 const DISPLAY_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
 const HCI_ADDRESS: [u8; 6] = [0x7d, 0x9f, 0xf9, 0xdc, 0x1b, 0x00];
 
+#[cfg(feature = "adapter-tests")]
+#[test]
+#[ignore = "claims and initializes the CSR8510 A10 target adapter"]
+fn target_adapter_reports_initialized_identity_version_and_classic_capability() {
+    let config = TransportConfig::for_model::<Pro>();
+    let mut transport = BumbleTransportPort::new(AdapterSelector::from("usb:0a12:0001"), config);
+
+    let capabilities = transport
+        .open(activity_channel().0)
+        .expect("open and initialize target adapter");
+
+    assert_ne!(capabilities.local_address(), [0; 6]);
+    assert!(
+        capabilities.local_version().is_some(),
+        "target adapter reports HCI/LMP version metadata"
+    );
+    assert!(capabilities.classic_capable());
+    assert_eq!(capabilities.usb().vendor_id(), 0x0a12);
+    assert_eq!(capabilities.usb().product_id(), 0x0001);
+    transport
+        .close()
+        .expect("stop reader and release target adapter");
+}
+
 #[test]
 fn bumble_initialization_uses_configured_device_and_exact_hci_order() {
     let config = TransportConfig::for_model::<Pro>();

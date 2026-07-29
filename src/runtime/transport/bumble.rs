@@ -245,12 +245,42 @@ where
     for command in identity_commands(config) {
         send_successful_command_complete(&mut host, command)?;
     }
+    trace_initialized_controller(capabilities);
 
     Ok(BumbleSession {
         runtime: Some(BumbleRuntime { host, device }),
         capabilities,
         terminal: None,
     })
+}
+
+fn trace_initialized_controller(capabilities: TransportCapabilities) {
+    let local_address = capabilities.local_address();
+    let version = capabilities.local_version();
+    let usb = capabilities.usb();
+    tracing::debug!(
+        target: "swbt::transport::bumble",
+        local_address = %format_args!(
+            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            local_address[0],
+            local_address[1],
+            local_address[2],
+            local_address[3],
+            local_address[4],
+            local_address[5],
+        ),
+        hci_version = ?version.map(ControllerVersionInfo::hci_version),
+        hci_subversion = ?version.map(ControllerVersionInfo::hci_subversion),
+        lmp_version = ?version.map(ControllerVersionInfo::lmp_version),
+        company_identifier = ?version.map(ControllerVersionInfo::company_identifier),
+        lmp_subversion = ?version.map(ControllerVersionInfo::lmp_subversion),
+        classic_capable = capabilities.classic_capable(),
+        usb_vendor_id = usb.vendor_id(),
+        usb_product_id = usb.product_id(),
+        usb_bus = usb.bus_number(),
+        usb_address = usb.device_address(),
+        "initialized Bumble HCI controller",
+    );
 }
 
 fn device_configuration(config: &TransportConfig) -> DeviceConfiguration {
