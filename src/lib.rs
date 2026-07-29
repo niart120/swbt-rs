@@ -4,8 +4,9 @@
 //!
 //! The current package surface provides typed controller identities,
 //! model-valid input values, and read-only status and input snapshots.
-//! Controller construction, Bluetooth transport access, and lifecycle-changing
-//! runtime operations are not exposed yet.
+//! Typed controller builders retain construction settings without opening an
+//! adapter. Controller construction, Bluetooth transport access, and
+//! lifecycle-changing runtime operations are not exposed yet.
 //!
 //! # Model-valid input
 //!
@@ -25,6 +26,7 @@
 //! # }
 //! ```
 
+mod adapter;
 pub mod controller;
 mod diagnostics;
 pub mod error;
@@ -35,6 +37,7 @@ mod protocol;
 pub mod reporting;
 mod runtime;
 
+pub use adapter::AdapterSelector;
 pub use controller::{
     Controller, ControllerBuilder, DirectJoyConL, DirectJoyConR, DirectProController, JoyConL,
     JoyConR, ProController,
