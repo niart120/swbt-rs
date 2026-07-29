@@ -9,8 +9,8 @@ Bluetooth stack の実装基盤には
 
 ## 現在の状態
 
-このリポジトリは M3 の external HCI bring-up を完了し、M4 の仮想 Classic HID 経路を
-実装中です。Cargo package は library target `swbt` を提供し、
+このリポジトリは M4 の仮想 Classic HID 経路まで実装済みです。Cargo package は
+library target `swbt` を提供し、
 model-valid input、crate 内部の Switch HID protocol と runtime、公開 controller builder、
 descriptor-only adapter discovery を実装しています。
 
@@ -43,8 +43,8 @@ descriptor-only adapter discovery を実装しています。
   timeout と Ready 前の disconnect は成功に変換しません。
 - model 固有 HID descriptor と SDP record、Classic pairing window、NoInputNoOutput SSP
   policy、SDP/HID control/interrupt session は crate 内の Bumble `LocalLink` packet path
-  で検査しています。これらを実 USB runtime の poll/send/cleanup へ接続する production
-  統合と実 adapter 上の pairing は未完了です。
+  で検査しています。production USB runtime の poll/send/cleanup に同じ Classic session
+  を接続していますが、実 adapter と Switch を使う pairing は未検証です。
 - `create_profile()` は builder、path、identity、target の存在を検査した後、file を作る
   前に `ErrorKind::UnsupportedCapability` で停止し、既存 target を上書きしません。
 - Bluetooth adapter の claim/reset と対象機器を使う実機検証は未実施です。

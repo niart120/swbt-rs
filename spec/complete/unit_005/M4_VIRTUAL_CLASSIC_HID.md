@@ -1,6 +1,6 @@
 # M4 virtual Classic SDP/HID
 
-- 状態: **着手中**
+- 状態: **完了**
 - milestone: M4
 - branch: `feat/unit-005-m4-virtual-classic-hid`
 - 正本:
@@ -308,7 +308,7 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 - [x] **T08 — virtual matrix and resilience**
   - Pro/Joy-Con L/Joy-Con R×Periodic/Direct の6組を共通 suite で通す。
   - reverse channel order、malformed SDP/HIDP、disconnect/reconnect、旧 session event を検査する。
-- [ ] **T09 — completion gate**
+- [x] **T09 — completion gate**
   - Rust 1.87、all/default/no-default、clippy、test、build、rustdoc、fmt、diff check を通す。
   - fork revision、未実行 hardware/SSP/profile persistence、residual risk を self-review に残す。
 
@@ -324,7 +324,7 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 | refactor-done | T06 | red: production `BumbleTransportPort` の pairing/send/drain/disconnect は Classic session を呼ばず、poll は `Device` だけを駆動して常に空 event を返していた。green: `BumbleRuntime` が `ClassicDeviceSession` を所有し、初期化時に SDP/HID PSM を登録する。controlled external-host packet path で pairing window、incoming Classic ACL、HID interrupt channel の L2CAP signaling、`HidChannelOpened`、`send_interrupt` acceptance、未完了 ACL の `DrainTimedOut`、Number Of Completed Packets 後の drain、disconnect、二重 disconnect、reader close/join を検査した。peer が先に閉じた HID channel は cleanup error にせず ACL 切断を続ける。reader failure は pairing/send/drain/disconnect 間で同じ typed source を保持する。refactor: Device と Classic の駆動を `drive_runtime` に集約し、Classic event の取り出しを駆動処理から分離した。all-feature test 259 passed / 2 ignored、default test 231 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、all/default build、rustdoc、fmt、diff check が成功 |
 | refactor-done | T07 | red: `runtime::transport::virtual_tests` が存在せず、Pro Periodic の packet-level test target は module-not-found で compile failure。green: test-only `VirtualClassicTransport` が Bumble `Device + LocalLink` を所有し、両 peer の in-memory stored link key から Classic encryption と BR/EDR SMP/CTKD bond を完了した。peer MTU 48 の SDP service-search-attribute を複数 continuation で再構成後、control/interrupt L2CAP を開き、HIDP `0xA1` bootstrap、peer の `0xA2` subcommand `0x03` / `0x30`、swbt の `0x21` reply を実 SDU path で交換して NX Ready へ到達した。Ready 後の typed A を Periodic `0x30` で受信し、explicit close の最終 `0x30` が neutral へ戻ること、drain/disconnect/close を確認した。refactor: USB や public transport injection を追加せず、仮想 peer と決定的 clock/command/shutdown harness を `src/runtime/transport/virtual_tests.rs` に閉じた。all-feature test 260 passed / 2 ignored、default test 231 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、all/default build、rustdoc、fmt、diff check が成功 |
 | refactor-done | T08 | red: 6組 matrix runner、resilience scenario、再接続 runner が存在せず compile failure。green: Pro/Joy-Con L/Joy-Con R×Periodic/Direct の全6組が、それぞれの `TransportConfig` から stored-key CTKD、SDP continuation、HIDP handshake を実 packet path で通して Ready へ到達した。resilience scenario は interrupt→control の逆順、length mismatch SDP request の ErrorResponse、malformed HIDP control の `0x04`、peer 切断、同じ in-memory stored key で2回目の encryption/CTKD、SDP、HID、Ready を検査した。旧 session 隔離は `events_tagged_by_an_old_session_are_discarded` と packet-level の旧 handle/CID 破棄 test を再実行した。refactor: model/reporting 共通の Ready/close assertion、virtual scenario、session reset を test harness に分離し、再接続でも current handle の pairing keys と bond の両方を確認する。all-feature test 262 passed / 2 ignored、default test 231 passed / 1 ignored、all/default clippy、Rust 1.87 all-feature check、all/default build、rustdoc、fmt、diff check が成功 |
-| pending | T09 | completion gate と self-review を実行して追記する |
+| refactor-done | T09 | Rust 1.87 の all-target/all-feature check、test、build、rustdoc、default/no-default の test/build、all/default clippy、fmt、diff check が成功。最終 test 件数は all-feature 262 passed / 2 ignored、default/no-default 231 passed / 1 ignored。無視した7件は runtime measurement 1件、接続済み adapter identity 1件、CSR8510 実機統合5件であり、M4 の仮想 packet path とは分離されている。自己レビューで T04/T06 以前の module 全体の `dead_code` 許可3件を削除し、all-feature clippy を再実行して成功。fork branch head は依存 revision `48f1bc36169b2692d2a61e87eda4223b126dca2b` と一致し、親 repository `chaitanyarahalkar/bumble-rs` に `niart120:fix/external-host-reader-lifecycle` を head とする PR が存在しないことを確認。refactor: 不要な警告抑制を除去し、README と crate-level rustdoc の production 統合状態を実装と一致させた。追加の構造変更は不要と判断した |
 
 ## 8. 対象ファイル
 
@@ -337,7 +337,7 @@ test peer は report bytes を直接 `TransportEvent` に注入しない。L2CAP
 - `src/controller/runtime.rs`
 - `tests/fixtures/`
 - `src/runtime/transport/virtual_tests.rs`
-- `spec/wip/unit_005/`
+- `spec/complete/unit_005/`
 
 必要性を TDD cycle で確認したファイルだけを追加する。公開 `transport` module、public custom
 transport trait、Bumble 型を含む public API は追加しない。
@@ -365,6 +365,23 @@ git diff --check
 virtual test は wall-clock sleep、USB、network、Switch 実機を成功条件に使わない。timeout は
 deadlock watchdog としてだけ使い、packet/event/barrier の観測順で成功を判定する。
 
+### 9.1 Self-review
+
+完了範囲に未解決の指摘はない。公開 API に Bumble、L2CAP、HIDP、SDP の型を追加せず、
+Classic 実装は private transport module に閉じている。追加した `unsafe` はない。広い
+lint 抑制として残っていた `classic`、`hidp`、`sdp` module の `dead_code` 許可は削除し、
+`cargo clippy --all-targets --all-features --locked -- -D warnings` が成功した。
+
+未実行と残存リスク:
+
+- CSR8510 と Switch 2 を使う fresh SSP、20 run、入力の画面反映は未実行。M5 の実機証拠とする。
+- 仮想 pairing は事前共有した link key からの暗号化と BR/EDR SMP/CTKD を検査した。
+  外部 controller が生成する Secure Simple Pairing の全 HCI event sequence は再現していない。
+- filesystem profile persistence、schema v2、production reconnect、Direct profile reuse は未実装。
+  M6 の対象であり、M4 の成功範囲には含めない。
+- `LocalLink` は controller firmware の timing と HCI/USB 固有挙動を再現しない。
+  production Bumble 経路は controlled HCI/L2CAP test までで、実機動作は未確認。
+
 ## 10. 先送り事項
 
 - Switch 2 fresh pairing、20 run、semantic input reflection: M5
@@ -379,7 +396,7 @@ M5 の実機調整へ先送りしない。
 
 ## 11. 完了チェックリスト
 
-- [ ] T01-T09 がすべて完了している
+- [x] T01-T09 がすべて完了している
 - [x] Python revision と HID/SDP fixture provenance を記録した
 - [x] public API に Bumble/L2CAP/HIDP/SDP 型を公開していない
 - [x] PSM `0x0001` / `0x0011` / `0x0013` を実 packet path で検査した
@@ -391,8 +408,8 @@ M5 の実機調整へ先送りしない。
 - [x] 6 model×reporting の共通 suite が成功した
 - [x] disconnect cleanup と旧 session event 破棄を検査した
 - [x] production Bumble send/drain/disconnect/close を検査した
-- [ ] Rust 1.87 と通常 quality gate が成功した
-- [ ] upstream PR を作成していない
-- [ ] self-review で未実行 hardware/SSP/profile persistence と residual risk を明記した
-- [ ] placeholder、未根拠の完了表現、secret を含む evidence が残っていない
-- [ ] `spec/complete/unit_005/` へ移動した
+- [x] Rust 1.87 と通常 quality gate が成功した
+- [x] upstream PR を作成していない
+- [x] self-review で未実行 hardware/SSP/profile persistence と residual risk を明記した
+- [x] placeholder、未根拠の完了表現、secret を含む evidence が残っていない
+- [x] `spec/complete/unit_005/` へ移動した

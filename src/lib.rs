@@ -16,11 +16,12 @@
 //! [`ErrorKind::UnsupportedCapability`] before transport side effects.
 //! [`Controller::pair`] requires an open runtime and waits for one connection
 //! session to complete NX readiness; timeout and pre-readiness disconnect are
-//! returned as failures. Production USB integration of the Classic pairing,
-//! SDP, and HID session remains in progress. Profile creation remains
-//! unavailable: an otherwise valid request stops after its read-only target
-//! preflight without creating a file. Explicit close waits for cleanup
-//! completion, joins the worker, and returns cleanup or join failures.
+//! returned as failures. The production USB runtime owns the same Classic
+//! pairing, SDP, and HID session exercised by the virtual packet-path tests;
+//! pairing with a physical adapter and Switch remains unverified. Profile
+//! creation remains unavailable: an otherwise valid request stops after its
+//! read-only target preflight without creating a file. Explicit close waits for
+//! cleanup completion, joins the worker, and returns cleanup or join failures.
 //! Dropping a controller instead uses bounded best-effort shutdown: it omits
 //! neutral reporting and pending-send draining and cannot report failures. Its
 //! internal wait duration is not a public timing guarantee. A new connection

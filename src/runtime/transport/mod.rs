@@ -3,32 +3,11 @@ mod bumble;
 #[cfg(all(test, feature = "bumble"))]
 mod bumble_tests;
 mod capabilities;
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T06 installs the Classic session in the production Bumble runtime"
-    )
-)]
 #[cfg(feature = "bumble")]
 mod classic;
 mod config;
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T04 wires the HIDP bridge into accepted Classic L2CAP sessions"
-    )
-)]
 #[cfg(feature = "bumble")]
 mod hidp;
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T04 wires the SDP channel into accepted Classic L2CAP sessions"
-    )
-)]
 #[cfg(feature = "bumble")]
 mod sdp;
 #[cfg(all(test, feature = "bumble"))]
