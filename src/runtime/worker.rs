@@ -35,6 +35,7 @@ use crate::{
         sender::ReportSender,
         session::{ConnectionSessionId, ConnectionSessions, SessionError, SessionEvent},
         state::InputStateStore,
+        status::{StatusPublisher, status_projection},
         transport::{TransportError, TransportErrorKind, TransportEvent, TransportPort},
     },
 };
@@ -240,6 +241,18 @@ pub(crate) enum WorkerCoreError {
     Transport(TransportError),
 }
 
+impl WorkerCoreError {
+    pub(crate) const fn status_message(&self) -> &'static str {
+        match self {
+            Self::DeadlineOverflow => "worker deadline overflowed",
+            Self::InvalidLifecycle => "worker lifecycle invariant failed",
+            Self::Session(_) => "worker session failed",
+            Self::Handshake(_) => "worker handshake failed",
+            Self::Transport(_) => "worker transport failed",
+        }
+    }
+}
+
 pub(crate) struct StepProgress {
     commands: usize,
     hci_events: usize,
@@ -414,6 +427,7 @@ pub(crate) struct ReportingEventContext<'a, M: ControllerModel> {
     input: &'a mut InputStateStore<M>,
     observed: &'a mut ObservedSubcommands,
     sender: &'a mut ReportSender<M>,
+    status: Option<&'a StatusPublisher<M>>,
     transport: &'a mut dyn TransportPort,
 }
 
@@ -472,6 +486,7 @@ where
     sessions: ConnectionSessions,
     connection: Option<ConnectionWork>,
     connected: bool,
+    status: StatusPublisher<M>,
     transport: Box<dyn TransportPort>,
     budget: WorkerBudget,
     observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
@@ -493,6 +508,18 @@ impl<M: ControllerModel> WorkerCore<M, Periodic> {
         budget: WorkerBudget,
         observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
     ) -> Result<Self, SchedulerError> {
+        let (status, _reader) = status_projection();
+        Self::new_periodic_with_status(protocol, transport, period, budget, observe_output, status)
+    }
+
+    pub(crate) fn new_periodic_with_status(
+        protocol: SwitchHidProtocol<M>,
+        transport: Box<dyn TransportPort>,
+        period: Duration,
+        budget: WorkerBudget,
+        observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
+        status: StatusPublisher<M>,
+    ) -> Result<Self, SchedulerError> {
         let reporting = PeriodicRuntime {
             policy: PeriodicPolicy::new(period)?,
             pending_tap: None,
@@ -503,6 +530,7 @@ impl<M: ControllerModel> WorkerCore<M, Periodic> {
             reporting,
             budget,
             observe_output,
+            status,
         ))
     }
 }
@@ -521,12 +549,24 @@ impl<M: ControllerModel> WorkerCore<M, Direct> {
         budget: WorkerBudget,
         observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
     ) -> Self {
+        let (status, _reader) = status_projection();
+        Self::new_direct_with_status(protocol, transport, budget, observe_output, status)
+    }
+
+    pub(crate) fn new_direct_with_status(
+        protocol: SwitchHidProtocol<M>,
+        transport: Box<dyn TransportPort>,
+        budget: WorkerBudget,
+        observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
+        status: StatusPublisher<M>,
+    ) -> Self {
         Self::from_open_transport(
             protocol,
             transport,
             DirectRuntime { pending_tap: None },
             budget,
             observe_output,
+            status,
         )
     }
 }
@@ -542,22 +582,25 @@ where
         reporting: R::RuntimeState,
         budget: WorkerBudget,
         observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
+        status: StatusPublisher<M>,
     ) -> Self {
         let mut lifecycle = LifecycleStateMachine::new();
         let open = lifecycle.request_open();
         debug_assert_eq!(open, Ok(LifecycleAction::OpenTransport));
         let opened = lifecycle.complete_open();
         debug_assert_eq!(opened, LifecycleAction::Opened);
+        status.set_lifecycle(LifecycleState::Open);
         Self {
             lifecycle,
-            input: InputStateStore::new(),
+            input: InputStateStore::with_status(status.clone()),
             reporting,
-            sender: ReportSender::new(),
+            sender: ReportSender::with_status(status.clone()),
             protocol,
             observed: ObservedSubcommands::default(),
             sessions: ConnectionSessions::new(),
             connection: None,
             connected: false,
+            status,
             transport,
             budget,
             observe_output,
@@ -602,6 +645,8 @@ where
             readiness: ReadinessGate::new(session_id, operation_deadline),
         });
         self.connected = false;
+        let snapshot = self.input.snapshot();
+        self.status.begin_session(self.lifecycle.state(), &snapshot);
         Ok(session_id)
     }
 
@@ -796,12 +841,14 @@ where
                 input: &mut self.input,
                 observed: &mut self.observed,
                 sender: &mut self.sender,
+                status: Some(&self.status),
                 transport: self.transport.as_mut(),
             },
         );
         match event {
             ReportingEvent::Passthrough(TransportEvent::Connected) => {
                 self.connected = true;
+                self.status.set_connected(true);
                 if let Some(connection) = self.connection.as_mut()
                     && let Some(handshake) = connection.handshake.as_mut()
                 {
@@ -856,6 +903,7 @@ where
                 current: &current,
                 observed: &mut self.observed,
                 sender: &mut self.sender,
+                status: Some(&self.status),
                 transport: self.transport.as_mut(),
             },
         )
@@ -903,6 +951,7 @@ where
         self.connected = false;
         R::stop_session(&mut self.reporting);
         self.lifecycle.mark_connection_ended();
+        self.status.end_session(self.lifecycle.state(), reason);
     }
 
     fn drive_connection(
@@ -975,6 +1024,7 @@ where
                     self.connection = Some(connection);
                     return Err(WorkerCoreError::InvalidLifecycle);
                 }
+                self.status.set_lifecycle(self.lifecycle.state());
                 actions += 1;
             }
             Err(error) => {
@@ -1000,6 +1050,7 @@ where
         self.connected = false;
         R::stop_session(&mut self.reporting);
         self.lifecycle.mark_connection_ended();
+        self.status.end_session(self.lifecycle.state(), None);
     }
 
     fn close(
@@ -1016,6 +1067,7 @@ where
                 input: &mut self.input,
                 observed: &mut self.observed,
                 sender: &mut self.sender,
+                status: Some(&self.status),
                 transport: self.transport.as_mut(),
             },
         );
@@ -1033,10 +1085,15 @@ where
             lifecycle: &mut self.lifecycle,
             protocol: &self.protocol,
             sender: &mut self.sender,
+            status: Some(&self.status),
             transport: self.transport.as_mut(),
         });
         self.connected = false;
         self.connection = None;
+        if let Some(session_id) = self.sessions.current() {
+            self.sessions.end_current(session_id);
+        }
+        self.status.close(self.lifecycle.state());
         WorkerStep::Closed {
             completion,
             interrupted,
@@ -1046,7 +1103,13 @@ where
 
     fn fail(&mut self, error: WorkerCoreError, progress: StepProgress) -> WorkerStep {
         self.lifecycle.mark_failed();
+        self.connected = false;
+        self.status.fail(error.status_message());
         WorkerStep::Failed { error, progress }
+    }
+
+    pub(crate) fn status_publisher(&self) -> StatusPublisher<M> {
+        self.status.clone()
     }
 
     #[must_use]
@@ -1392,6 +1455,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Direct {
                         state: context.input,
                         observed: context.observed,
                         sender: context.sender,
+                        status: context.status,
                         transport: context.transport,
                     },
                 ) {
@@ -1415,6 +1479,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Direct {
                         state: context.input,
                         observed: context.observed,
                         sender: context.sender,
+                        status: context.status,
                         transport: context.transport,
                     },
                 ) {
@@ -1500,6 +1565,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Direct {
                 state: context.input,
                 observed: context.observed,
                 sender: context.sender,
+                status: context.status,
                 transport: context.transport,
             },
         ) {

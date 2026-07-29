@@ -1,13 +1,23 @@
-use crate::{input::InputState, model::ControllerModel};
+use crate::{input::InputState, model::ControllerModel, runtime::status::StatusPublisher};
 
 pub(crate) struct InputStateStore<M: ControllerModel> {
     committed: InputState<M>,
+    status: Option<StatusPublisher<M>>,
 }
 
 impl<M: ControllerModel> InputStateStore<M> {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self {
             committed: InputState::neutral(),
+            status: None,
+        }
+    }
+
+    pub(crate) fn with_status(status: StatusPublisher<M>) -> Self {
+        Self {
+            committed: InputState::neutral(),
+            status: Some(status),
         }
     }
 
@@ -18,10 +28,16 @@ impl<M: ControllerModel> InputStateStore<M> {
 
     pub(crate) fn commit(&mut self, next: InputState<M>) {
         self.committed = next;
+        if let Some(status) = self.status.as_ref() {
+            status.set_snapshot(&self.committed);
+        }
     }
 
     pub(crate) fn reset_to_neutral(&mut self) {
         self.committed = InputState::neutral();
+        if let Some(status) = self.status.as_ref() {
+            status.set_snapshot(&self.committed);
+        }
     }
 }
 

@@ -95,6 +95,7 @@ pub(crate) struct DirectTapContext<'a, M: ControllerModel> {
     pub(crate) state: &'a mut InputStateStore<M>,
     pub(crate) observed: &'a mut ObservedSubcommands,
     pub(crate) sender: &'a mut ReportSender<M>,
+    pub(crate) status: Option<&'a crate::runtime::status::StatusPublisher<M>>,
     pub(crate) transport: &'a mut dyn TransportPort,
 }
 
@@ -142,6 +143,7 @@ impl<M: ControllerModel> PendingDirectTap<M> {
             state,
             observed,
             sender,
+            status,
             transport,
         } = context;
 
@@ -166,6 +168,7 @@ impl<M: ControllerModel> PendingDirectTap<M> {
                         current: &current,
                         observed,
                         sender,
+                        status,
                         transport,
                     },
                 );
@@ -558,6 +561,7 @@ mod tests {
                     current: &current,
                     observed: &mut self.observed,
                     sender: &mut self.sender,
+                    status: None,
                     transport: &mut self.transport,
                 },
             )
@@ -594,6 +598,7 @@ mod tests {
                     state: &mut self.store,
                     observed: &mut self.observed,
                     sender: &mut self.sender,
+                    status: None,
                     transport: &mut self.transport,
                 },
             )

@@ -2,9 +2,10 @@
 #![warn(missing_docs)]
 //! Rust library for NX-compatible virtual Bluetooth HID input devices.
 //!
-//! The current package surface provides typed controller identities and
-//! model-valid input values. Bluetooth transport and runtime operations are not
-//! exposed yet.
+//! The current package surface provides typed controller identities,
+//! model-valid input values, and read-only status and input snapshots.
+//! Controller construction, Bluetooth transport access, and lifecycle-changing
+//! runtime operations are not exposed yet.
 //!
 //! # Model-valid input
 //!
@@ -25,6 +26,7 @@
 //! ```
 
 pub mod controller;
+mod diagnostics;
 pub mod error;
 pub mod input;
 pub mod model;
@@ -37,6 +39,7 @@ pub use controller::{
     Controller, ControllerBuilder, DirectJoyConL, DirectJoyConR, DirectProController, JoyConL,
     JoyConR, ProController,
 };
+pub use diagnostics::{GamepadStatus, LifecycleState};
 pub use error::{Error, ErrorKind, Result};
 pub use input::{
     Button, ButtonKind, ImuFrame, ImuSamples, InputState, JoyConLButton, JoyConLInputState,

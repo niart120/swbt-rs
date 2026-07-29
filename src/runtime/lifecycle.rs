@@ -1,15 +1,6 @@
 use crate::runtime::readiness::ReadySession;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LifecycleState {
-    Configured,
-    Open,
-    Connecting,
-    Ready,
-    Closing,
-    Closed,
-    Failed,
-}
+pub(crate) use crate::diagnostics::LifecycleState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LifecycleAction {

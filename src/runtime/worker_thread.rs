@@ -375,6 +375,7 @@ where
     W: WorkerWaiter + 'static,
 {
     let (completion_sender, completion) = sync_channel(1);
+    let status = worker.status_publisher();
     let join = thread::Builder::new()
         .name("swbt-worker".to_owned())
         .spawn(move || {
@@ -388,7 +389,7 @@ where
                 )
             }));
 
-            let (completion, panic_payload) = match caught {
+            let (completion, mut panic_payload) = match caught {
                 Ok(completion) => (completion, None),
                 Err(payload) => (
                     WorkerCompletion {
@@ -398,11 +399,24 @@ where
                     Some(payload),
                 ),
             };
+            let teardown = catch_unwind(AssertUnwindSafe(move || {
+                drop(waiter);
+                drop(shutdown);
+                drop(clock);
+                drop(worker);
+            }));
+            let teardown_panicked = teardown.is_err();
+            if let Err(payload) = teardown {
+                if panic_payload.is_none() {
+                    panic_payload = Some(payload);
+                }
+            }
+            if teardown_panicked {
+                status.fail("worker panicked");
+            } else if let WorkerTerminal::Failed(cause) = &completion.terminal {
+                status.fail(worker_failure_status(cause));
+            }
 
-            drop(waiter);
-            drop(shutdown);
-            drop(clock);
-            drop(worker);
             publish_completion(&completion_sender, completion);
             drop(commands);
 
@@ -411,6 +425,16 @@ where
             }
         })?;
     Ok(WorkerThread { completion, join })
+}
+
+fn worker_failure_status(cause: &WorkerFailureCause) -> &'static str {
+    match cause {
+        WorkerFailureCause::Core(error) => error.status_message(),
+        WorkerFailureCause::Wait(_) => "worker wait failed",
+        WorkerFailureCause::CommandDelivery(_) => "worker command delivery failed",
+        WorkerFailureCause::Panicked => "worker panicked",
+        WorkerFailureCause::CompletionDisconnected => "worker completion disconnected",
+    }
 }
 
 fn run_worker_loop<M, R, C, S, W>(
@@ -502,6 +526,7 @@ mod tests {
             cleanup::CloseMode,
             command::{CommandResponseError, command_channel},
             direct::{DirectTapError, DirectTapInterruption},
+            status::status_projection,
             transport::{
                 ActivityNotifier, HidChannel, SendAcceptance, TransportEvent, TransportPort,
                 TransportResult, activity_channel,
@@ -590,7 +615,9 @@ mod tests {
             .expect("open fake transport");
         let panic_on_poll = Arc::new(AtomicBool::new(false));
         let clock = FakeClock::at(Duration::ZERO);
-        let mut worker = WorkerCore::new_direct(
+        let (status, status_reader) = status_projection();
+        let controller = crate::Controller::<Pro, Direct>::from_status(status_reader);
+        let mut worker = WorkerCore::new_direct_with_status(
             protocol(),
             Box::new(PanickingTransport {
                 inner: transport,
@@ -598,6 +625,7 @@ mod tests {
             }),
             WorkerBudget::new(2, 1),
             Box::new(|_| {}),
+            status,
         );
         prime_ready(&mut worker, &control, &clock);
         panic_on_poll.store(true, Ordering::Release);
@@ -641,6 +669,68 @@ mod tests {
             }
         ));
         assert!(!format!("{outcome:?}").contains("secret panic payload"));
+        let status = controller.status();
+        assert_eq!(status.lifecycle, crate::LifecycleState::Failed);
+        assert!(!status.connected);
+        assert_eq!(status.report_mode, None);
+        assert_eq!(status.worker_failure.as_deref(), Some("worker panicked"));
+        assert!(
+            !status
+                .worker_failure
+                .as_deref()
+                .unwrap_or_default()
+                .contains("secret panic payload")
+        );
+    }
+
+    #[test]
+    fn teardown_panic_preserves_cleanup_failure_and_replaces_closed_status() {
+        let (activity, activity_receiver) = activity_channel();
+        let (mut transport, _control) = FakeTransport::with_limits(8, 3);
+        transport
+            .open(activity.clone())
+            .expect("open fake transport");
+        let (status, status_reader) = status_projection();
+        let controller = crate::Controller::<Pro, Direct>::from_status(status_reader);
+        let worker = WorkerCore::new_direct_with_status(
+            protocol(),
+            Box::new(CleanupFailureAndPanicOnDropTransport { inner: transport }),
+            WorkerBudget::new(1, 1),
+            Box::new(|_| {}),
+            status,
+        );
+        let (_client, commands) = command_channel(1, activity);
+        let shutdown =
+            ShutdownScript::after_checks(ShutdownRequest::explicit(CloseMode::WithoutNeutral), 0);
+
+        let worker_thread = spawn_worker_thread(
+            worker,
+            FakeClock::at(Duration::ZERO),
+            shutdown,
+            commands,
+            ChannelWorkerWaiter::new(activity_receiver),
+        )
+        .expect("spawn worker thread");
+
+        let outcome = worker_thread.finish();
+        assert!(matches!(
+            outcome,
+            WorkerThreadOutcome::Closed {
+                result: Err(
+                    crate::runtime::cleanup::ExplicitCloseError::CleanupAndJoin {
+                        join: WorkerJoinError::Panicked,
+                        ..
+                    }
+                ),
+                delivery_error: None,
+            }
+        ));
+        assert!(!format!("{outcome:?}").contains("secret teardown panic"));
+        let status = controller.status();
+        assert_eq!(status.lifecycle, crate::LifecycleState::Failed);
+        assert!(!status.connected);
+        assert_eq!(status.report_mode, None);
+        assert_eq!(status.worker_failure.as_deref(), Some("worker panicked"));
     }
 
     #[test]
@@ -976,6 +1066,44 @@ mod tests {
 
         fn close(&mut self) -> TransportResult<()> {
             self.inner.close()
+        }
+    }
+
+    struct CleanupFailureAndPanicOnDropTransport {
+        inner: FakeTransport,
+    }
+
+    impl TransportPort for CleanupFailureAndPanicOnDropTransport {
+        fn open(&mut self, activity: ActivityNotifier) -> TransportResult<()> {
+            self.inner.open(activity)
+        }
+
+        fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+            self.inner.poll(timeout)
+        }
+
+        fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
+            self.inner.send_interrupt(payload)
+        }
+
+        fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+            self.inner.drain_interrupt(timeout)
+        }
+
+        fn disconnect(&mut self) -> TransportResult<()> {
+            Err(crate::runtime::transport::TransportError::new(
+                crate::runtime::transport::TransportErrorKind::SourceTerminated,
+            ))
+        }
+
+        fn close(&mut self) -> TransportResult<()> {
+            self.inner.close()
+        }
+    }
+
+    impl Drop for CleanupFailureAndPanicOnDropTransport {
+        fn drop(&mut self) {
+            panic!("secret teardown panic");
         }
     }
 

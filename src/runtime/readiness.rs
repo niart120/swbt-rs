@@ -863,6 +863,7 @@ mod tests {
                     current: &current,
                     observed: &mut self.observed,
                     sender: &mut self.sender,
+                    status: None,
                     transport: &mut self.transport,
                 },
             )

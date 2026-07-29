@@ -199,3 +199,24 @@ T05 から T21 までは sender module に理由付き
 `cfg_attr(not(test), allow(dead_code))` を置く。test build では抑制しない。T07 以降は各機能を
 仕様どおり接続し、T21 の worker caller を追加する commit で transport、sender、残る M1
 protocol の module-wide 許可を削除する。通常 build と clippy で実参照を確認する。
+
+## 2026-07-29: T31 の worker 再生成と status counter の寿命
+
+### 現状
+
+T26 の `input_reports_accepted` と `replies_accepted` は `ReportSender` を正本とし、接続 session
+の開始ではリセットしない。T26 の test は同じ worker 内で session 1 から session 2 へ移っても
+累積値を保持する。
+
+### 観察
+
+`GamepadStatus` の counter は controller lifetime の累積値である。T31 で public `close()` 後の
+`open()` を、同じ controller に新しい `WorkerCore` と `ReportSender` を作る方式で実装すると、
+sender の初期値 0 が既存 projection を上書きし、公開済みの累積値が後退する。
+
+### 方針
+
+T31 で worker の再生成が必要になった場合は、既存 projection の counter を新しい sender へ
+seed するか、counter の正本を controller lifetime の所有物へ移す。reopen 前後で値が単調非減少
+であることを public orchestration test に含める。T26 の範囲では worker を作り直さず、接続
+session 間の保持だけを完了条件とする。

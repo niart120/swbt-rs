@@ -7,6 +7,7 @@ use crate::{
     runtime::{
         lifecycle::{LifecycleAction, LifecycleStateMachine},
         sender::ReportSender,
+        status::StatusPublisher,
         transport::{TransportError, TransportPort, TransportResult},
     },
 };
@@ -76,6 +77,7 @@ pub(crate) struct CleanupContext<'a, M: ControllerModel> {
     pub(crate) lifecycle: &'a mut LifecycleStateMachine,
     pub(crate) protocol: &'a SwitchHidProtocol<M>,
     pub(crate) sender: &'a mut ReportSender<M>,
+    pub(crate) status: Option<&'a StatusPublisher<M>>,
     pub(crate) transport: &'a mut dyn TransportPort,
 }
 
@@ -109,11 +111,15 @@ impl CleanupSequence {
             lifecycle,
             protocol,
             sender,
+            status,
             transport,
         } = context;
 
         if lifecycle.request_close() != LifecycleAction::BeginCleanup {
             return CloseCompletion::not_performed();
+        }
+        if let Some(status) = status {
+            status.set_lifecycle(lifecycle.state());
         }
 
         let mut first_failure = None;
@@ -146,6 +152,9 @@ impl CleanupSequence {
 
         let completed = lifecycle.complete_close();
         debug_assert_eq!(completed, LifecycleAction::Closed);
+        if let Some(status) = status {
+            status.close(lifecycle.state());
+        }
         CloseCompletion {
             performed: true,
             first_failure,
@@ -254,6 +263,7 @@ mod tests {
                 lifecycle: &mut lifecycle,
                 protocol: &protocol,
                 sender: &mut sender,
+                status: None,
                 transport: &mut transport,
             });
 
@@ -288,6 +298,7 @@ mod tests {
                 lifecycle: &mut lifecycle,
                 protocol: &protocol,
                 sender: &mut sender,
+                status: None,
                 transport: &mut transport,
             });
         assert!(!repeated.performed());
@@ -316,6 +327,7 @@ mod tests {
                 lifecycle: &mut lifecycle,
                 protocol: &protocol,
                 sender: &mut sender,
+                status: None,
                 transport: &mut transport,
             });
         transport.trace.push(Trace::CompletionObserved);
@@ -355,6 +367,7 @@ mod tests {
                 lifecycle: &mut lifecycle,
                 protocol: &protocol,
                 sender: &mut sender,
+                status: None,
                 transport: &mut transport,
             });
         transport.trace.push(Trace::CompletionObserved);
@@ -446,6 +459,7 @@ mod tests {
                     lifecycle: &mut lifecycle,
                     protocol: &protocol,
                     sender: &mut sender,
+                    status: None,
                     transport: &mut transport,
                 });
             transport.trace.push(Trace::CompletionObserved);
@@ -497,6 +511,7 @@ mod tests {
                 lifecycle: &mut lifecycle,
                 protocol: &protocol,
                 sender: &mut sender,
+                status: None,
                 transport: &mut transport,
             });
         transport.trace.push(Trace::CompletionObserved);

@@ -7,6 +7,7 @@ use crate::{
     runtime::{
         connection::ObservedSubcommands,
         sender::ReportSender,
+        status::StatusPublisher,
         transport::{HidChannel, SendAcceptance, TransportError, TransportPort},
     },
 };
@@ -31,6 +32,7 @@ pub(crate) struct OutputHandlingContext<'a, M: ControllerModel> {
     pub(crate) current: &'a InputState<M>,
     pub(crate) observed: &'a mut ObservedSubcommands,
     pub(crate) sender: &'a mut ReportSender<M>,
+    pub(crate) status: Option<&'a StatusPublisher<M>>,
     pub(crate) transport: &'a mut dyn TransportPort,
 }
 
@@ -81,6 +83,7 @@ pub(crate) fn handle_output<M: ControllerModel>(
         current,
         observed,
         sender,
+        status,
         transport,
     } = context;
     let output = parse_output_report(raw)?;
@@ -94,6 +97,11 @@ pub(crate) fn handle_output<M: ControllerModel>(
         OutputReport::Rumble { .. } => Ok(OutputHandling::RumbleOnly),
         OutputReport::Subcommand { request, .. } => {
             observed.observe(request.id());
+            if let Some(status) = status
+                && let Some(id) = observed.last()
+            {
+                status.record_subcommand(id);
+            }
             let prepared = sender.prepare_reply(protocol, request, current)?;
             let accepted = sender.send_reply(prepared, transport)?;
             Ok(OutputHandling::ReplyAccepted(accepted))
@@ -328,6 +336,7 @@ mod tests {
                     current: &self.state,
                     observed: &mut self.observed,
                     sender: &mut self.sender,
+                    status: None,
                     transport: &mut self.transport,
                 },
             )

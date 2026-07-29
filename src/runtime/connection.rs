@@ -4,10 +4,12 @@ const WORD_COUNT: usize = 256 / BITS_PER_WORD;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ObservedSubcommands {
     words: [u64; WORD_COUNT],
+    last: Option<u8>,
 }
 
 impl ObservedSubcommands {
     pub(crate) fn observe(&mut self, id: u8) -> bool {
+        self.last = Some(id);
         let (word, mask) = bit_slot(id);
         let first_observation = self.words[word] & mask == 0;
         self.words[word] |= mask;
@@ -17,6 +19,11 @@ impl ObservedSubcommands {
     #[must_use]
     pub(crate) fn is_empty(&self) -> bool {
         self.words.iter().all(|word| *word == 0)
+    }
+
+    #[must_use]
+    pub(crate) const fn last(&self) -> Option<u8> {
+        self.last
     }
 
     pub(crate) fn reset(&mut self) {
@@ -56,7 +63,9 @@ mod tests {
         observed.reset();
 
         assert!(observed.is_empty());
+        assert_eq!(observed.last(), None);
         assert!(observed.observe(0x40));
         assert!(observed.observe(0x03));
+        assert_eq!(observed.last(), Some(0x03));
     }
 }

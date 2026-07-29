@@ -8,7 +8,10 @@ use crate::{
         PreparedSubcommandReply, ProtocolError, ProtocolSession, SubcommandRequest,
         SwitchHidProtocol,
     },
-    runtime::transport::{SendAcceptance, TransportPort, TransportResult},
+    runtime::{
+        status::StatusPublisher,
+        transport::{SendAcceptance, TransportPort, TransportResult},
+    },
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -19,6 +22,9 @@ struct SenderCommit {
 
 pub(crate) struct ReportSender<M: ControllerModel> {
     committed: SenderCommit,
+    input_reports_accepted: u64,
+    replies_accepted: u64,
+    status: Option<StatusPublisher<M>>,
     model: PhantomData<fn() -> M>,
 }
 
@@ -26,6 +32,19 @@ impl<M: ControllerModel> ReportSender<M> {
     pub(crate) fn new() -> Self {
         Self {
             committed: SenderCommit::default(),
+            input_reports_accepted: 0,
+            replies_accepted: 0,
+            status: None,
+            model: PhantomData,
+        }
+    }
+
+    pub(crate) fn with_status(status: StatusPublisher<M>) -> Self {
+        Self {
+            committed: SenderCommit::default(),
+            input_reports_accepted: 0,
+            replies_accepted: 0,
+            status: Some(status),
             model: PhantomData,
         }
     }
@@ -43,6 +62,7 @@ impl<M: ControllerModel> ReportSender<M> {
 
     pub(crate) fn reset_for_new_session(&mut self) {
         self.committed = SenderCommit::default();
+        self.publish_status();
     }
 
     pub(crate) fn prepare_reply(
@@ -135,7 +155,27 @@ impl<M: ControllerModel> ReportSender<M> {
     ) -> TransportResult<SendAcceptance> {
         let acceptance = transport.send_interrupt(bytes)?;
         self.committed = candidate;
+        match bytes.first() {
+            Some(0x30) => {
+                self.input_reports_accepted = self.input_reports_accepted.saturating_add(1);
+            }
+            Some(0x21) => {
+                self.replies_accepted = self.replies_accepted.saturating_add(1);
+            }
+            _ => {}
+        }
+        self.publish_status();
         Ok(acceptance)
+    }
+
+    fn publish_status(&self) {
+        if let Some(status) = self.status.as_ref() {
+            status.set_sender_state(
+                self.committed.session.report_mode(),
+                self.input_reports_accepted,
+                self.replies_accepted,
+            );
+        }
     }
 }
 
