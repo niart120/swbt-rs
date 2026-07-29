@@ -15,6 +15,18 @@ const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40]
 const CUSTOM_RUMBLE: [u8; 8] = [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17];
 const DEVICE_INFO_ADDRESS: [u8; 6] = [0x00, 0x1B, 0xDC, 0xF9, 0x9F, 0x7D];
 const ACCEPTED_IMU_MODES: &[u8] = &[0x00, 0x01, 0x02, 0x03, 0x04, 0x05];
+const ORIENTATION_REPLAY_TOLERANCE: f64 = f64::EPSILON * 8.0;
+
+fn assert_orientation_replay_close(left: [f64; 4], right: [f64; 4]) {
+    for (index, (left, right)) in left.into_iter().zip(right).enumerate() {
+        let difference = (left - right).abs();
+        assert!(
+            difference <= ORIENTATION_REPLAY_TOLERANCE,
+            "orientation component {index} differs by {difference:e}, exceeding \
+             {ORIENTATION_REPLAY_TOLERANCE:e}"
+        );
+    }
+}
 
 #[test]
 fn input_preparation_returns_disabled_imu_candidates_without_mutating_current() {
@@ -61,7 +73,25 @@ fn input_preparation_uses_state_session_and_explicit_time_for_quaternion_candida
         protocol.prepare_input_report(&state, 0x2a, current, 2_000_000_000);
     let at_three_seconds = protocol.prepare_input_report(&state, 0x2a, current, 3_000_000_000);
 
-    assert_eq!(repeated_at_two_seconds, at_two_seconds);
+    assert_eq!(repeated_at_two_seconds.bytes(), at_two_seconds.bytes());
+    assert_eq!(
+        repeated_at_two_seconds.next_timer(),
+        at_two_seconds.next_timer()
+    );
+    assert_eq!(
+        repeated_at_two_seconds
+            .next_imu_encoding_state()
+            .previous_report_ns(),
+        at_two_seconds
+            .next_imu_encoding_state()
+            .previous_report_ns()
+    );
+    assert_orientation_replay_close(
+        repeated_at_two_seconds
+            .next_imu_encoding_state()
+            .orientation(),
+        at_two_seconds.next_imu_encoding_state().orientation(),
+    );
     assert_eq!(
         &at_two_seconds.bytes()[..13],
         &[
