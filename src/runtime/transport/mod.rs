@@ -8,6 +8,15 @@ mod config;
     not(test),
     allow(
         dead_code,
+        reason = "T04 wires the HIDP bridge into accepted Classic L2CAP sessions"
+    )
+)]
+#[cfg(feature = "bumble")]
+mod hidp;
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
         reason = "T04 wires the SDP channel into accepted Classic L2CAP sessions"
     )
 )]

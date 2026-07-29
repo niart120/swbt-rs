@@ -280,6 +280,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bumble-hid"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=48f1bc36169b2692d2a61e87eda4223b126dca2b#48f1bc36169b2692d2a61e87eda4223b126dca2b"
+dependencies = [
+ "bumble-l2cap",
+]
+
+[[package]]
 name = "bumble-host"
 version = "0.1.0"
 source = "git+https://github.com/niart120/bumble-rs?rev=48f1bc36169b2692d2a61e87eda4223b126dca2b#48f1bc36169b2692d2a61e87eda4223b126dca2b"
@@ -1758,6 +1766,7 @@ version = "0.1.0"
 dependencies = [
  "bumble",
  "bumble-hci",
+ "bumble-hid",
  "bumble-host",
  "bumble-sdp",
  "bumble-transport",
