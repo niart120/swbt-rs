@@ -240,6 +240,7 @@ mod tests {
             sender::ReportSender,
             session::{ConnectionSessionId, ConnectionSessions},
             state::InputStateStore,
+            test_support::runtime_baseline_checkpoint,
             transport::{
                 ActivityNotifier, HidChannel, SendAcceptance, TransportErrorKind, TransportEvent,
                 TransportPort, TransportResult, activity_channel,
@@ -468,7 +469,20 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_retry_keeps_absolute_phase_and_stops_after_first_subcommand() {
+    fn rust_spec_delta_bootstrap_retry_uses_absolute_start_phase() {
+        let python = runtime_baseline_checkpoint(
+            "handshake.retry_after_send_latency",
+            "python_relative_retry",
+        );
+        assert_eq!(
+            python["second_start_minus_first_start_ns"],
+            1_250_000_000_u64
+        );
+        assert_eq!(
+            python["second_start_minus_first_completion_ns"],
+            1_000_000_000_u64
+        );
+
         let protocol = protocol();
         let clock = FakeClock::at(Duration::from_millis(100));
         let (mut transport, control) =
@@ -476,6 +490,7 @@ mod tests {
         let mut sender = ReportSender::<Pro>::new();
         let mut observed = ObservedSubcommands::default();
         let (mut handshake, session_id) = ready_handshake(&mut sender, &mut observed);
+        let first_start = clock.now();
 
         assert_bootstrap_accepted(
             handshake
@@ -490,10 +505,18 @@ mod tests {
                 .expect("initial bootstrap"),
             0,
         );
+        let first_completion = clock.now();
         assert_eq!(clock.now(), Duration::from_millis(350));
         assert_eq!(
             handshake.next_deadline(),
             Some(Duration::from_millis(1_100))
+        );
+        let retry_start = handshake.next_deadline().expect("absolute retry deadline");
+        assert_eq!(retry_start - first_start, Duration::from_secs(1));
+        assert_eq!(
+            retry_start - first_completion,
+            Duration::from_millis(750),
+            "Rust does not restart the retry interval after send completion"
         );
         assert_waiting_until(
             handshake

@@ -147,6 +147,7 @@ mod tests {
             periodic::PeriodicPolicy,
             sender::ReportSender,
             state::InputStateStore,
+            test_support::runtime_baseline_checkpoint,
             transport::{
                 TransportEvent, TransportPort, activity_channel,
                 fake::{FakeTransport, FakeTransportControl},
@@ -161,7 +162,15 @@ mod tests {
     const REPORT_PERIOD: Duration = Duration::from_millis(8);
 
     #[test]
-    fn new_periodic_session_resets_every_connection_scoped_state() {
+    fn rust_spec_delta_new_periodic_session_resets_preconnection_input() {
+        let python =
+            runtime_baseline_checkpoint("periodic.pre_connection_update", "python_carries_state");
+        assert_eq!(python["preconnection_input"]["buttons"][0], "A");
+        assert_eq!(
+            python["first_current_report_attempts"][0]["button_hex"],
+            "080000"
+        );
+
         let protocol = protocol();
         let (mut transport, _control) = open_transport();
         let mut sessions = ConnectionSessions::new();
@@ -169,10 +178,17 @@ mod tests {
         let mut reporting = PeriodicPolicy::new(REPORT_PERIOD).expect("valid policy");
         let mut observed = ObservedSubcommands::default();
         let mut input = InputStateStore::<Pro>::new();
+        input.commit(pressed_state(ButtonKind::A));
+        assert_ne!(input.snapshot(), InputState::<Pro>::neutral());
 
         let first = sessions
             .begin_periodic(&mut sender, &mut reporting, &mut observed, &mut input)
             .expect("first session");
+        assert_eq!(
+            input.snapshot(),
+            InputState::<Pro>::neutral(),
+            "Rust resets pre-connection input when the first session begins"
+        );
         input.commit(pressed_state(ButtonKind::A));
         for id in [0x03, 0x30, 0x40, 0x48] {
             assert!(observed.observe(id));

@@ -190,11 +190,12 @@ mod tests {
     use std::time::Duration;
 
     use crate::{
-        input::{ImuFrame, InputState, Stick},
+        input::{ImuFrame, InputState, ProButton, Stick},
         model::Pro,
         protocol::{OutputReport, PreparedOutputAction, SwitchHidProtocol, parse_output_report},
         runtime::{
             sender::ReportSender,
+            test_support::runtime_baseline_checkpoint,
             transport::{
                 TransportErrorKind, TransportEvent, TransportPort, activity_channel,
                 fake::{FakeTransport, ScriptedSendOutcome},
@@ -396,8 +397,102 @@ mod tests {
         assert_eq!(sender.session(), committed_before_disconnect);
     }
 
+    #[test]
+    fn rust_spec_delta_rejected_quaternion_input_commits_only_after_acceptance() {
+        let python = runtime_baseline_checkpoint(
+            "imu.rejected_quaternion_input",
+            "python_advances_before_acceptance",
+        );
+        assert_eq!(
+            python["protocol_session"]["imu_previous_report_ns"],
+            2_000_000_000_u64
+        );
+        assert_eq!(python["committed_input"]["buttons"][0], "A");
+
+        let protocol = protocol();
+        let (mut transport, control) = open_transport();
+        control.script_sends([
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Rejected,
+            ScriptedSendOutcome::Accepted,
+        ]);
+        let mut sender = ReportSender::<Pro>::new();
+        let enable_quaternion = output_action(
+            &protocol,
+            &sender,
+            &InputState::<Pro>::neutral(),
+            0x40,
+            &[0x02],
+        );
+        sender
+            .send_reply(enable_quaternion, &mut transport)
+            .expect("quaternion mode accepted");
+
+        let accepted_state = quaternion_state(ProButton::A, 1000);
+        sender
+            .send_input(&protocol, &accepted_state, 1_000_000_000, &mut transport)
+            .expect("accepted seed input");
+        assert_eq!(
+            sender.session().imu_encoding_state().previous_report_ns(),
+            Some(1_000_000_000)
+        );
+
+        let rejected_state = quaternion_state(ProButton::X, 2000);
+        let committed_before_rejection = sender.session();
+        let rejected_candidate = protocol.prepare_input_report(
+            &rejected_state,
+            sender.timer(),
+            sender.session(),
+            2_000_000_000,
+        );
+        let error = sender
+            .send_input(&protocol, &rejected_state, 2_000_000_000, &mut transport)
+            .expect_err("same scenario input is rejected");
+        assert_eq!(error.kind(), TransportErrorKind::SendRejected);
+        assert_eq!(sender.session(), committed_before_rejection);
+        assert_eq!(
+            sender.session().imu_encoding_state().previous_report_ns(),
+            Some(1_000_000_000),
+            "Rust keeps the last accepted IMU encoding epoch after rejection"
+        );
+
+        let retry_candidate = protocol.prepare_input_report(
+            &rejected_state,
+            sender.timer(),
+            sender.session(),
+            2_000_000_000,
+        );
+        assert_eq!(
+            retry_candidate, rejected_candidate,
+            "same-time retry is reproduced from the unmodified committed session"
+        );
+        sender
+            .send_input(&protocol, &rejected_state, 2_000_000_000, &mut transport)
+            .expect("same-time retry accepted");
+        assert_eq!(
+            sender.session().imu_encoding_state().previous_report_ns(),
+            Some(2_000_000_000)
+        );
+        assert_eq!(
+            control
+                .accepted_interrupts()
+                .iter()
+                .map(|report| (report[0], report[1]))
+                .collect::<Vec<_>>(),
+            [(0x21, 0), (0x30, 1), (0x30, 2)]
+        );
+    }
+
     fn protocol() -> SwitchHidProtocol<Pro> {
         SwitchHidProtocol::new(None, DEVICE_INFO_ADDRESS)
+    }
+
+    fn quaternion_state(button: ProButton, gyro_z: i16) -> InputState<Pro> {
+        let frame = ImuFrame::raw([0, 0, 0], [0, 0, gyro_z]);
+        InputState::neutral()
+            .with_buttons([button])
+            .with_imu([frame; 3])
     }
 
     fn open_transport() -> (

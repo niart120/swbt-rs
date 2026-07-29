@@ -5,6 +5,33 @@ use crate::runtime::transport::{
     fake::{FakeTransport, FakeTransportControl},
 };
 
+const RUNTIME_FIXTURE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/python-v0.6.0/runtime/runtime-semantics.json"
+));
+
+pub(crate) fn runtime_baseline_checkpoint(case_id: &str, checkpoint_id: &str) -> serde_json::Value {
+    let fixture: serde_json::Value =
+        serde_json::from_str(RUNTIME_FIXTURE).expect("valid committed runtime fixture");
+    let case = fixture["cases"]
+        .as_array()
+        .expect("runtime fixture cases")
+        .iter()
+        .find(|case| case["id"] == case_id)
+        .unwrap_or_else(|| panic!("missing runtime fixture case {case_id}"));
+    assert_eq!(
+        case["classification"], "baseline_observation",
+        "{case_id}: Rust spec deltas must reference a Python baseline observation"
+    );
+    case["expected"]["checkpoints"]
+        .as_array()
+        .expect("runtime fixture checkpoints")
+        .iter()
+        .find(|checkpoint| checkpoint["id"] == checkpoint_id)
+        .unwrap_or_else(|| panic!("missing checkpoint {checkpoint_id} in {case_id}"))
+        .clone()
+}
+
 pub(crate) struct TestTransport {
     inner: FakeTransport,
 }
