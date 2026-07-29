@@ -175,7 +175,7 @@ accepted counter に限定する。
 
 ## 7. TDD Test List
 
-- [ ] **T01 — production profile create-new**
+- [x] **T01 — production profile create-new**
   - real filesystem で parent create、exact bytes、typed reopen を検査する。
   - existing file/directory/symlink と create-new race を置換しない。
   - temporary file が成功後と既知 failure 後に残らない。
@@ -209,7 +209,7 @@ accepted counter に限定する。
 
 | phase | item | evidence |
 |---|---|---|
-| pending | T01 | red/green/refactor 後に追記する |
+| refactor-done | T01 | red: `cargo test profile::store::tests --all-features --locked` は production `FileProfileStore` が存在せず compile error。green: real filesystem で nested parent 作成、complete JSON の exact read、typed Pro reopen、racing file、existing directory、dangling symlink の no-replace、一時 file cleanup を検査する3 test が成功。refactor: target inspection と create/read を同じ `FileProfileStore` に統合し、same-directory temporary file の write/flush/`sync_all` 後に hard link で target を no-replace 公開する。Unix rename の既存 target 置換差異を避け、成功時と既知 conflict 時に temporary file を削除する。all-feature test 265 passed / 2 ignored、default test 234 passed / 1 ignored、Rust 1.87 all-feature check、all/default clippy、fmt、diff check が成功 |
 | pending | T02 | red/green/refactor 後に追記する |
 | pending | T03 | red/green/refactor 後に追記する |
 | pending | T04 | red/green/refactor 後に追記する |

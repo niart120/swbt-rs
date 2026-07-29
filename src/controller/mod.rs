@@ -26,7 +26,7 @@ use crate::diagnostics::GamepadStatus;
 use crate::error::{Error, ErrorKind};
 use crate::input::{Button, InputState};
 use crate::model::{self, ControllerModel};
-use crate::profile::{ControllerColors, FileProfileCreateTarget};
+use crate::profile::{ControllerColors, FileProfileStore};
 use crate::reporting::{self, ReportingMode};
 use crate::runtime::{
     cleanup::CloseMode,
@@ -439,7 +439,7 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     /// exists, or [`crate::ErrorKind::Internal`] when the target cannot be
     /// inspected.
     pub fn create_profile(self, options: CreateProfileOptions) -> crate::Result<Controller<M, R>> {
-        let mut target = FileProfileCreateTarget;
+        let mut target = FileProfileStore;
         let plan = self.validate_create_profile_target(options, &mut target)?;
         create::reject_unavailable_backend(plan)
     }
