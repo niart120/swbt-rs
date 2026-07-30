@@ -22,6 +22,8 @@ pub enum ErrorKind {
     ProfileControllerMismatch,
     /// The configured pairing key store could not be read or updated.
     InvalidKeyStore,
+    /// The profile has no usable Classic bond.
+    NoBond,
     /// The transport is not ready to accept the requested operation.
     TransportClosed,
     /// Establishing the controller connection timed out.

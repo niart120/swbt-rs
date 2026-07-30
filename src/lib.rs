@@ -16,18 +16,23 @@
 //! [`ErrorKind::UnsupportedCapability`] before transport side effects.
 //! [`Controller::pair`] requires an open runtime and waits for one connection
 //! session to complete NX readiness; timeout and pre-readiness disconnect are
-//! returned as failures. The production USB runtime owns the same Classic
-//! pairing, SDP, and HID session exercised by the virtual packet-path tests;
+//! returned as failures. [`Controller::reconnect`] uses the profile's stored
+//! Classic bond without deleting it or falling back to pairing, while
+//! [`Controller::connect`] permits pairing only after `NoBond` when explicitly
+//! configured. The production USB runtime owns the same Classic pairing,
+//! reconnect, SDP, and HID session exercised by the virtual packet-path tests;
 //! pairing and input have been exercised on Windows 11 with a CSR8510 A10 and
 //! Switch 2 system version 22.5.0 (user-reported). Other operating systems,
 //! adapters, system versions, and long-run reliability remain unverified. With
 //! the `bumble` feature, profile creation publishes a valid empty envelope
 //! without replacing an existing target before it opens the adapter and waits
 //! for pairing readiness. Feature-disabled profile creation stops before
-//! creating a file. Pairing-key persistence and reconnect from an existing
-//! profile remain unavailable. [`PairingProfile`] parses and writes complete
-//! schema v2 JSON without discarding unknown extension fields; filesystem
-//! update is not part of that value API. Explicit close waits for cleanup
+//! creating a file. Pairing-key updates atomically preserve the complete
+//! profile, and stored-key active/incoming reconnect reaches same-session Ready
+//! in virtual Classic tests. Power-cycle reconnect on hardware remains
+//! unverified. [`PairingProfile`] parses and writes complete schema v2 JSON
+//! without discarding unknown extension fields; filesystem update is not part
+//! of that value API. Explicit close waits for cleanup
 //! completion, joins the worker, and returns cleanup or join failures. Pending
 //! interrupt sends are drained until they enter the controller's flow-control
 //! window; close does not wait for the controller to return completion credit
@@ -69,7 +74,9 @@ pub mod reporting;
 mod runtime;
 
 pub use adapter::{AdapterInfo, AdapterSelector, list_adapters};
-pub use connection::CreateProfileOptions;
+pub use connection::{
+    ConnectOptions, ConnectionPath, ConnectionResult, ConnectionStatus, CreateProfileOptions,
+};
 pub use controller::{
     Controller, ControllerBuilder, DirectJoyConL, DirectJoyConR, DirectProController, JoyConL,
     JoyConR, ProController,

@@ -266,6 +266,7 @@ pub(crate) enum WorkerCommandError {
     Input(Error),
     Lifecycle(LifecycleCommandError),
     Pair(PairingError),
+    Reconnect(ReconnectError),
     Periodic(PeriodicError),
     Direct(DirectTapError),
     ClockOverflow,
@@ -307,6 +308,27 @@ pub(crate) enum WorkerCoreError {
 #[derive(Debug)]
 pub(crate) enum PairingError {
     Begin(WorkerCoreError),
+    Readiness(ReadinessError),
+    InvalidKeyStore,
+    WorkerFailed,
+}
+
+#[derive(Debug)]
+pub(crate) enum ReconnectError {
+    Begin(WorkerCoreError),
+    Readiness(ReadinessError),
+    InvalidKeyStore,
+    WorkerFailed,
+}
+
+#[derive(Clone, Copy)]
+enum ConnectionCommandKind {
+    Pair,
+    Reconnect,
+}
+
+#[derive(Clone, Copy)]
+enum ConnectionAttemptFailure {
     Readiness(ReadinessError),
     InvalidKeyStore,
     WorkerFailed,
@@ -575,7 +597,7 @@ where
     observed: ObservedSubcommands,
     sessions: ConnectionSessions,
     connection: Option<ConnectionWork>,
-    connection_command_pending: bool,
+    connection_command_pending: Option<ConnectionCommandKind>,
     connected: bool,
     status: StatusPublisher<M>,
     transport: Box<dyn TransportPort>,
@@ -690,7 +712,7 @@ where
             observed: ObservedSubcommands::default(),
             sessions: ConnectionSessions::new(),
             connection: None,
-            connection_command_pending: false,
+            connection_command_pending: None,
             connected: false,
             status,
             transport,
@@ -773,7 +795,7 @@ where
             return self.close(request, clock.now(), progress);
         }
 
-        if !self.connection_command_pending && !R::has_pending(&self.reporting) {
+        if self.connection_command_pending.is_none() && !R::has_pending(&self.reporting) {
             for _ in 0..self.budget.command_batch {
                 let Some(command) = commands.try_next() else {
                     break;
@@ -788,7 +810,7 @@ where
                             .and_then(|()| self.begin_connection(clock.now(), timeout))
                         {
                             Ok(_) => {
-                                self.connection_command_pending = true;
+                                self.connection_command_pending = Some(ConnectionCommandKind::Pair);
                                 WorkerCommandProgress::Pending
                             }
                             Err(error) => WorkerCommandProgress::Complete(Err(
@@ -804,11 +826,12 @@ where
                             .and_then(|()| self.begin_connection(clock.now(), timeout))
                         {
                             Ok(_) => {
-                                self.connection_command_pending = true;
+                                self.connection_command_pending =
+                                    Some(ConnectionCommandKind::Reconnect);
                                 WorkerCommandProgress::Pending
                             }
                             Err(error) => WorkerCommandProgress::Complete(Err(
-                                WorkerCommandError::Pair(PairingError::Begin(error)),
+                                WorkerCommandError::Reconnect(ReconnectError::Begin(error)),
                             )),
                         }
                     }
@@ -848,7 +871,7 @@ where
             }
         }
         if progress.commands == self.budget.command_batch
-            && !self.connection_command_pending
+            && self.connection_command_pending.is_none()
             && !R::has_pending(&self.reporting)
         {
             progress.immediate = true;
@@ -1086,10 +1109,7 @@ where
                 &mut connection.handshake,
                 ReadinessError::Disconnected { reason },
             );
-            self.complete_connection_command(
-                Err(WorkerCommandError::Pair(PairingError::Readiness(error))),
-                progress,
-            );
+            self.complete_connection_failure(ConnectionAttemptFailure::Readiness(error), progress);
             progress
                 .operation_errors
                 .push(WorkerOperationError::Readiness(error));
@@ -1191,10 +1211,7 @@ where
         progress: &mut StepProgress,
     ) {
         let error = connection.readiness.abort(&mut connection.handshake, error);
-        self.complete_connection_command(
-            Err(WorkerCommandError::Pair(PairingError::Readiness(error))),
-            progress,
-        );
+        self.complete_connection_failure(ConnectionAttemptFailure::Readiness(error), progress);
         progress
             .operation_errors
             .push(WorkerOperationError::Readiness(error));
@@ -1298,18 +1315,15 @@ where
     }
 
     fn fail(&mut self, error: WorkerCoreError, mut progress: StepProgress) -> WorkerStep {
-        let pairing_error = match &error {
+        let failure = match &error {
             WorkerCoreError::Transport(source)
                 if source.kind() == TransportErrorKind::InvalidKeyStore =>
             {
-                PairingError::InvalidKeyStore
+                ConnectionAttemptFailure::InvalidKeyStore
             }
-            _ => PairingError::WorkerFailed,
+            _ => ConnectionAttemptFailure::WorkerFailed,
         };
-        self.complete_connection_command(
-            Err(WorkerCommandError::Pair(pairing_error)),
-            &mut progress,
-        );
+        self.complete_connection_failure(failure, &mut progress);
         self.lifecycle.mark_failed();
         self.connected = false;
         self.status.fail(error.status_message());
@@ -1321,13 +1335,35 @@ where
         result: Result<(), WorkerCommandError>,
         progress: &mut StepProgress,
     ) {
-        if self.connection_command_pending {
-            self.connection_command_pending = false;
+        if self.connection_command_pending.take().is_some() {
             progress
                 .command_results
                 .push(WorkerCommandProgress::Complete(result));
             progress.immediate = true;
         }
+    }
+
+    fn complete_connection_failure(
+        &mut self,
+        failure: ConnectionAttemptFailure,
+        progress: &mut StepProgress,
+    ) {
+        let error = match self.connection_command_pending {
+            Some(ConnectionCommandKind::Pair) => WorkerCommandError::Pair(match failure {
+                ConnectionAttemptFailure::Readiness(error) => PairingError::Readiness(error),
+                ConnectionAttemptFailure::InvalidKeyStore => PairingError::InvalidKeyStore,
+                ConnectionAttemptFailure::WorkerFailed => PairingError::WorkerFailed,
+            }),
+            Some(ConnectionCommandKind::Reconnect) => {
+                WorkerCommandError::Reconnect(match failure {
+                    ConnectionAttemptFailure::Readiness(error) => ReconnectError::Readiness(error),
+                    ConnectionAttemptFailure::InvalidKeyStore => ReconnectError::InvalidKeyStore,
+                    ConnectionAttemptFailure::WorkerFailed => ReconnectError::WorkerFailed,
+                })
+            }
+            None => return,
+        };
+        self.complete_connection_command(Err(error), progress);
     }
 
     pub(crate) fn status_publisher(&self) -> StatusPublisher<M> {

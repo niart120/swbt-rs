@@ -9,7 +9,7 @@ Bluetooth stack の実装基盤には
 
 ## 現在の状態
 
-このリポジトリは M4 の仮想 Classic HID 経路まで実装済みです。Cargo package は
+このリポジトリは M6 の公開 reconnect API まで実装済みです。Cargo package は
 library target `swbt` を提供し、
 model-valid input、crate 内部の Switch HID protocol と runtime、公開 controller builder、
 descriptor-only adapter discovery を実装しています。
@@ -41,6 +41,11 @@ descriptor-only adapter discovery を実装しています。
   `pair()` は open runtime がなければ `ErrorKind::TransportClosed`、open runtime では
   bounded worker command として pairing window の開始から NX readiness まで待ちます。
   timeout と Ready 前の disconnect は成功に変換しません。
+- `reconnect()` は profile の保存済み Classic bond 1件を使い、失敗時に bond を削除したり
+  fresh pairing へ切り替えたりしません。`connect()` は `NoBond` かつ
+  `allow_pairing = true` の場合だけ `pair()` へ進みます。`try_reconnect()` と
+  `try_connect()` は no-bond、timeout、Ready 前 disconnect を値として返し、profile、
+  protocol、worker の失敗は error のまま返します。
 - model 固有 HID descriptor と SDP record、Classic pairing window、NoInputNoOutput SSP
   policy、SDP/HID control/interrupt session は crate 内の Bumble `LocalLink` packet path
   で検査しています。production USB runtime の poll/send/cleanup に同じ Classic session
@@ -49,8 +54,10 @@ descriptor-only adapter discovery を実装しています。
   version と長時間の信頼性は未検証です。
 - `bumble` feature の `create_profile()` は既存 target を置換せず、valid empty envelope を
   USB open より先に保存してから pairing と NX readiness を待ちます。feature 無効時は file を
-  作らず `ErrorKind::UnsupportedCapability` を返します。pairing key の file 更新と既存
-  profile からの reconnect は未実装です。
+  作らず `ErrorKind::UnsupportedCapability` を返します。pairing key は profile 全体を
+  atomic update して保存します。保存鍵を使う active/incoming reconnect は virtual Classic
+  packet path で同一 session の Ready まで検査済みです。Switch 2 power-cycle 後の実機
+  reconnect は未検証です。
 - CSR8510 A10 の claim/reset、100回の open/init/close、unplug/reopen は確認済みです。
   M5 の fresh pairing 20回中8回が same-session Ready に到達し、人手観測を行った5回では
   A、L+R、左右スティックが Switch UI に反映され、neutral 後の入力残りはありませんでした。
