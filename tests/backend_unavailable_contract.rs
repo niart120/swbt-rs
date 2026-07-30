@@ -7,6 +7,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(feature = "bumble")]
+use std::error::Error as StdError;
+
 use swbt::{CreateProfileOptions, ErrorKind, ProController, ProfileIdentity};
 #[cfg(not(feature = "bumble"))]
 use swbt::{DirectJoyConL, DirectJoyConR, DirectProController, JoyConL, JoyConR, LifecycleState};
@@ -75,6 +78,7 @@ fn public_open_reports_missing_backend_and_pair_requires_an_open_runtime() {
     );
 }
 
+#[cfg(not(feature = "bumble"))]
 #[test]
 fn public_create_profile_reports_missing_backend_without_creating_the_target() {
     let temp = TempDir::new("create-profile");
@@ -87,6 +91,53 @@ fn public_create_profile_reports_missing_backend_without_creating_the_target() {
 
     assert_controller_error_kind(result, ErrorKind::UnsupportedCapability);
     assert_path_absent(&target);
+}
+
+#[cfg(feature = "bumble")]
+#[test]
+fn public_create_profile_reaches_the_production_backend_after_persisting() {
+    let temp = TempDir::new("production-create-profile");
+    let target = temp.path().join("new-profile.json");
+    assert_path_absent(&target);
+
+    let result = ProController::builder("usb:0a12:0001/secret-serial[metadata]")
+        .profile_path(&target)
+        .create_profile(adapter_default_options());
+    let error = match result {
+        Ok(_) => panic!("invalid selector must not return a controller"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.kind(), ErrorKind::TransportOpen);
+    let source = error
+        .source()
+        .expect("transport-open error must retain its typed source");
+    assert!(!error.to_string().contains("secret-serial"));
+    assert!(!format!("{error:?}").contains("secret-serial"));
+    assert!(!source.to_string().contains("secret-serial"));
+    assert!(!format!("{source:?}").contains("secret-serial"));
+    assert!(
+        error.related_error().is_none(),
+        "clean selector rejection must not fabricate a cleanup failure"
+    );
+    let value: serde_json::Value = serde_json::from_slice(
+        &fs::read(&target).expect("production create-profile must persist before transport open"),
+    )
+    .expect("persisted profile must be valid JSON");
+    assert_eq!(value["format"], "swbt.profile");
+    assert_eq!(value["schema_version"], 2);
+    assert_eq!(value["controller_kind"], "pro");
+    assert_eq!(value["identity"]["kind"], "adapter-default");
+    assert_eq!(value["key_store"]["namespaces"], serde_json::json!({}));
+    let remaining_paths = fs::read_dir(temp.path())
+        .expect("inspect profile directory after failed open")
+        .map(|entry| entry.expect("read profile directory entry").path())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        remaining_paths,
+        [target],
+        "failed open must not leave a profile temporary file"
+    );
 }
 
 #[test]

@@ -23,6 +23,8 @@ use super::{
 const CONTROLLER_ID: usize = 0;
 const HCI_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCAL_NAME_LENGTH: usize = 248;
+// Preserve the reference host's role-switch and sniff-mode policy.
+const DEFAULT_CLASSIC_LINK_POLICY_SETTINGS: u16 = 0x0005;
 
 pub(super) trait SplitTransportOpener {
     fn open_split(&mut self, selector: &str) -> bumble_transport::Result<SplitOpenedTransport>;
@@ -103,6 +105,12 @@ impl TransportPort for BumbleTransportPort {
             .poll(timeout)
     }
 
+    fn interrupt_send_capacity_available(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(BumbleSession::interrupt_send_capacity_available)
+    }
+
     fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
         self.session
             .as_mut()
@@ -111,17 +119,17 @@ impl TransportPort for BumbleTransportPort {
     }
 
     fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
-        self.session
-            .as_mut()
-            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
-            .drain_interrupt(timeout)
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        session.drain_interrupt(timeout)
     }
 
     fn disconnect(&mut self) -> TransportResult<()> {
-        self.session
-            .as_mut()
-            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
-            .disconnect()
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        session.disconnect()
     }
 
     fn close(&mut self) -> TransportResult<()> {
@@ -167,6 +175,17 @@ impl BumbleSession {
             .send_interrupt(&mut runtime.device, &mut runtime.host, payload)
     }
 
+    pub(super) fn interrupt_send_capacity_available(&self) -> bool {
+        if self.terminal.is_some() {
+            return false;
+        }
+        self.runtime.as_ref().is_some_and(|runtime| {
+            runtime
+                .classic
+                .interrupt_send_capacity_available(&runtime.device)
+        })
+    }
+
     pub(super) fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
         if let Some(terminal) = self.terminal_error() {
             return Err(terminal);
@@ -180,7 +199,7 @@ impl BumbleSession {
                 .as_mut()
                 .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
             drive_runtime(runtime)?;
-            if runtime.classic.interrupt_output_is_drained(&runtime.device) {
+            if runtime.classic.interrupt_output_is_flushed(&runtime.device) {
                 return Ok(());
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -440,7 +459,7 @@ fn read_local_address(host: &mut ExternalHost) -> TransportResult<[u8; 6]> {
     Ok(local_address)
 }
 
-fn identity_commands(config: &TransportConfig) -> [Command; 5] {
+fn identity_commands(config: &TransportConfig) -> [Command; 6] {
     let mut local_name = [0; LOCAL_NAME_LENGTH];
     let local_name_bytes = config.local_name().as_bytes();
     local_name[..local_name_bytes.len()].copy_from_slice(local_name_bytes);
@@ -457,6 +476,9 @@ fn identity_commands(config: &TransportConfig) -> [Command; 5] {
         Command::WriteExtendedInquiryResponse {
             fec_required: 0,
             extended_inquiry_response: *config.extended_inquiry_response(),
+        },
+        Command::WriteDefaultLinkPolicySettings {
+            default_link_policy_settings: DEFAULT_CLASSIC_LINK_POLICY_SETTINGS,
         },
         Command::WriteScanEnable { scan_enable },
     ]

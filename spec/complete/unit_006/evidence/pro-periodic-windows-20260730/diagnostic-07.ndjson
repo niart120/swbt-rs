@@ -1,0 +1,8 @@
+{"elapsed_ms":0,"event":"runner_start","pair_timeout_ms":60000,"run_index":7,"schema":"swbt.m5.pro-periodic","schema_version":1,"unix_time_ms":1785374925012}
+{"elapsed_ms":0,"event":"pair_start","run_index":7,"schema":"swbt.m5.pro-periodic","schema_version":1,"unix_time_ms":1785374925013}
+{"elapsed_ms":2936,"error_kind":"connection_failed","event":"operation_failure","operation":"create_profile","related_failure_present":false,"run_index":7,"schema":"swbt.m5.pro-periodic","schema_version":1,"unix_time_ms":1785374927949}
+{"controller_kind":"pro","elapsed_ms":2936,"event":"profile_validation","key_material_emitted":false,"raw_profile_emitted":false,"run_index":7,"schema":"swbt.m5.pro-periodic","schema_version":1,"unix_time_ms":1785374927949,"valid":true}
+{"elapsed_ms":2936,"event":"adapter_reopen_start","run_index":7,"schema":"swbt.m5.pro-periodic","schema_version":1,"unix_time_ms":1785374927949}
+{"connected":false,"controller_kind":"pro","elapsed_ms":3260,"event":"adapter_reopen_complete","input_reports_accepted":0,"last_disconnect_reason":null,"last_subcommand":null,"lifecycle":"closed","replies_accepted":0,"report_mode":null,"reporting_kind":"periodic","run_index":7,"schema":"swbt.m5.pro-periodic","schema_version":1,"snapshot_neutral":true,"unix_time_ms":1785374928273,"worker_failure_present":false}
+{"elapsed_ms":3260,"event":"failed_run_cleanup_verified","run_index":7,"schema":"swbt.m5.pro-periodic","schema_version":1,"unix_time_ms":1785374928273}
+{"elapsed_ms":3260,"event":"runner_complete","run_index":7,"schema":"swbt.m5.pro-periodic","schema_version":1,"success":false,"unix_time_ms":1785374928273}

@@ -268,6 +268,7 @@ fn map_worker_core_error(error: WorkerCoreError) -> Error {
     }
 }
 
+#[cfg(any(test, not(feature = "bumble")))]
 pub(crate) fn unsupported_capability(capability: &str) -> Error {
     Error::new(
         ErrorKind::UnsupportedCapability,

@@ -46,6 +46,7 @@ struct Shared {
     events: SyncSender<QueuedEvent>,
     lifecycle: Mutex<FakeLifecycle>,
     send_script: Mutex<VecDeque<ScriptedSendOutcome>>,
+    interrupt_send_capacity: Mutex<bool>,
     accepted_interrupts: Mutex<Vec<Box<[u8]>>>,
     counters: Mutex<FakeTransportCounters>,
     terminal: Mutex<Option<Terminal>>,
@@ -95,6 +96,7 @@ impl FakeTransport {
                 activity: None,
             }),
             send_script: Mutex::new(VecDeque::new()),
+            interrupt_send_capacity: Mutex::new(true),
             accepted_interrupts: Mutex::new(Vec::new()),
             counters: Mutex::new(FakeTransportCounters::default()),
             terminal: Mutex::new(None),
@@ -249,6 +251,10 @@ impl TransportPort for FakeTransport {
         self.shared.send_interrupt_if_active(payload)
     }
 
+    fn interrupt_send_capacity_available(&self) -> bool {
+        self.is_open && *lock(&self.shared.interrupt_send_capacity)
+    }
+
     fn drain_interrupt(&mut self, _timeout: Duration) -> TransportResult<()> {
         if !self.is_open {
             return Err(TransportError::new(TransportErrorKind::Closed));
@@ -279,6 +285,10 @@ impl TransportPort for FakeTransport {
 }
 
 impl FakeTransportControl {
+    pub(in crate::runtime) fn set_interrupt_send_capacity(&self, available: bool) {
+        *lock(&self.shared.interrupt_send_capacity) = available;
+    }
+
     pub(in crate::runtime) fn script_sends(
         &self,
         outcomes: impl IntoIterator<Item = ScriptedSendOutcome>,

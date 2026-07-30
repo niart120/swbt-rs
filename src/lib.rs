@@ -18,10 +18,18 @@
 //! session to complete NX readiness; timeout and pre-readiness disconnect are
 //! returned as failures. The production USB runtime owns the same Classic
 //! pairing, SDP, and HID session exercised by the virtual packet-path tests;
-//! pairing with a physical adapter and Switch remains unverified. Profile
-//! creation remains unavailable: an otherwise valid request stops after its
-//! read-only target preflight without creating a file. Explicit close waits for
-//! cleanup completion, joins the worker, and returns cleanup or join failures.
+//! pairing and input have been exercised on Windows 11 with a CSR8510 A10 and
+//! Switch 2 system version 22.5.0 (user-reported). Other operating systems,
+//! adapters, system versions, and long-run reliability remain unverified. With
+//! the `bumble` feature, profile creation publishes a valid empty envelope
+//! without replacing an existing target before it opens the adapter and waits
+//! for pairing readiness. Feature-disabled profile creation stops before
+//! creating a file. Pairing-key persistence and reconnect from an existing
+//! profile remain unavailable. Explicit close waits for cleanup completion,
+//! joins the worker, and returns cleanup or join failures. Pending interrupt
+//! sends are drained until they enter the controller's flow-control window;
+//! close does not wait for the controller to return completion credit for every
+//! in-flight packet.
 //! Dropping a controller instead uses bounded best-effort shutdown: it omits
 //! neutral reporting and pending-send draining and cannot report failures. Its
 //! internal wait duration is not a public timing guarantee. A new connection

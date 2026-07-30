@@ -876,7 +876,7 @@ impl TransportPort for VirtualClassicTransport {
             return Err(TransportError::new(TransportErrorKind::Closed));
         }
         pump(&mut self.link, &mut self.devices);
-        if self.session.interrupt_output_is_drained(&self.devices[1]) {
+        if self.session.interrupt_output_is_flushed(&self.devices[1]) {
             Ok(())
         } else {
             Err(TransportError::new(TransportErrorKind::DrainTimedOut))

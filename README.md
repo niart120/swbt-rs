@@ -29,8 +29,8 @@ descriptor-only adapter discovery を実装しています。
 - `build()` 直後の Configured controller には open runtime がないため、入力操作は
   `ErrorKind::TransportClosed` を返します。
 - default feature は空です。`bumble` feature を有効にした場合だけ、reader shutdown と
-  join を追加した一時 fork の commit
-  `48f1bc36169b2692d2a61e87eda4223b126dca2b` と `rusb` を組み込みます。
+  join、および ACL パケットがホスト側の待ち行列を離れた状態の判定を追加した一時 fork の commit
+  `b8c7cd625bc2ac2f58a4beb4ade1264426969819` と `rusb` を組み込みます。
 - `list_adapters()` は `bumble` feature で USB device/config/interface descriptor を読み、
   Bluetooth HCI class の candidate を返します。device open、driver detach、interface claim、
   HCI command は行いません。feature 無効時は `ErrorKind::UnsupportedCapability` を返します。
@@ -44,10 +44,43 @@ descriptor-only adapter discovery を実装しています。
 - model 固有 HID descriptor と SDP record、Classic pairing window、NoInputNoOutput SSP
   policy、SDP/HID control/interrupt session は crate 内の Bumble `LocalLink` packet path
   で検査しています。production USB runtime の poll/send/cleanup に同じ Classic session
-  を接続していますが、実 adapter と Switch を使う pairing は未検証です。
-- `create_profile()` は builder、path、identity、target の存在を検査した後、file を作る
-  前に `ErrorKind::UnsupportedCapability` で停止し、既存 target を上書きしません。
-- Bluetooth adapter の claim/reset と対象機器を使う実機検証は未実施です。
+  を接続し、Windows 11 25H2、CSR8510 A10、Switch 2 system version 22.5.0
+  （ユーザ報告）で実機 pairing と入力を確認しています。他の OS、adapter、system
+  version と長時間の信頼性は未検証です。
+- `bumble` feature の `create_profile()` は既存 target を置換せず、valid empty envelope を
+  USB open より先に保存してから pairing と NX readiness を待ちます。feature 無効時は file を
+  作らず `ErrorKind::UnsupportedCapability` を返します。pairing key の file 更新と既存
+  profile からの reconnect は未実装です。
+- CSR8510 A10 の claim/reset、100回の open/init/close、unplug/reopen は確認済みです。
+  M5 の fresh pairing 20回中8回が same-session Ready に到達し、人手観測を行った5回では
+  A、L+R、左右スティックが Switch UI に反映され、neutral 後の入力残りはありませんでした。
+  20回は修正途中の失敗も含む履歴であり、成功率を製品の信頼性としては扱いません。
+
+## Pro Periodic 実機 runner
+
+M5 の実機確認には
+[`examples/pro_periodic_hardware.rs`](examples/pro_periodic_hardware.rs) を使います。Switch の
+「持ちかた／順番を変える」画面を開き、WinUSB driver を割り当てた CSR8510 A10 を接続してから
+実行します。次の例は run 1、pair timeout 60 秒です。profile path は実行前に存在していては
+いけません。
+
+```powershell
+$runStamp = Get-Date -Format yyyyMMdd-HHmmss
+$profilePath = Join-Path $env:TEMP "swbt-m5-$runStamp-run-01.json"
+$evidencePath = Join-Path $env:TEMP "swbt-m5-$runStamp-run-01.ndjson"
+cargo run --locked --example pro_periodic_hardware --features bumble -- `
+  --adapter usb:0a12:0001 `
+  --profile $profilePath `
+  --pair-timeout-secs 60 `
+  --run 1 | Tee-Object -FilePath $evidencePath
+```
+
+runner は A と L+R を各 500 ms、左右 stick を独立に4方向へ各500 ms、non-neutral IMU を
+1秒送った後、neutral、close、profile 検査、adapter reopen を実行します。標準出力は
+schema `swbt.m5.pro-periodic` version 1 の NDJSON です。adapter selector、profile path、
+raw profile、key material、USB serial、error source は出力しません。report accepted counter と
+command 成功は Switch UI の変化を証明しないため、`ui_observed` は `null` のまま出力し、人の
+観測結果は別に記録します。終了 event は `runner_complete` で、`success` が run の機械判定です。
 
 ## 開発
 

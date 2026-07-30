@@ -270,6 +270,7 @@ where
     ))
 }
 
+#[cfg(not(feature = "bumble"))]
 pub(super) fn reject_unavailable_backend<M, R>(
     plan: CreateProfilePlan<M, R>,
 ) -> crate::Result<Controller<M, R>>

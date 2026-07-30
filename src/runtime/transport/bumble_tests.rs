@@ -67,6 +67,25 @@ fn target_adapter_reports_initialized_identity_version_and_classic_capability() 
 }
 
 #[test]
+fn unopened_bumble_transport_cleanup_is_idempotent() {
+    let config = TransportConfig::for_model::<Pro>();
+    let mut transport = BumbleTransportPort::new(AdapterSelector::from("invalid"), config);
+
+    transport
+        .drain_interrupt(Duration::ZERO)
+        .expect("unopened transport has no interrupt output to drain");
+    transport
+        .disconnect()
+        .expect("unopened transport has no controller link to disconnect");
+    transport
+        .close()
+        .expect("unopened transport has no reader to close");
+    transport
+        .close()
+        .expect("repeated close remains idempotent");
+}
+
+#[test]
 fn bumble_initialization_uses_configured_device_and_exact_hci_order() {
     let config = TransportConfig::for_model::<Pro>();
     let commands = Arc::new(Mutex::new(Vec::new()));
@@ -522,13 +541,9 @@ fn bumble_session_drives_pairing_connection_drain_and_disconnect() {
     session
         .send_interrupt(&[0x01, 0x02])
         .expect("open production HID interrupt channel accepts input");
-    assert_eq!(
-        session
-            .drain_interrupt(Duration::ZERO)
-            .expect_err("in-flight ACL packet is not drained")
-            .kind(),
-        TransportErrorKind::DrainTimedOut
-    );
+    session
+        .drain_interrupt(Duration::ZERO)
+        .expect("in-flight ACL packet has left the host queue");
     let sent_acl_packets = lock(&acl_packets).len();
     assert!(sent_acl_packets >= 4);
     source.push(Ok(Some(HciPacket::Event(
@@ -542,6 +557,47 @@ fn bumble_session_drives_pairing_connection_drain_and_disconnect() {
     session
         .drain_interrupt(Duration::from_secs(1))
         .expect("completed ACL packet drains");
+
+    assert!(session.interrupt_send_capacity_available());
+    for packet in 0..8 {
+        session
+            .send_interrupt(&[0x30, packet])
+            .expect("controller ACL window accepts one in-flight packet");
+    }
+    assert!(!session.interrupt_send_capacity_available());
+    session
+        .send_interrupt(&[0x30, 8])
+        .expect("full controller window queues one host-side packet");
+    assert_eq!(
+        session
+            .drain_interrupt(Duration::ZERO)
+            .expect_err("host-side packet is not flushed")
+            .kind(),
+        TransportErrorKind::DrainTimedOut
+    );
+    source.push(Ok(Some(HciPacket::Event(
+        Event::NumberOfCompletedPackets {
+            connection_handles: vec![CONNECTION_HANDLE],
+            num_completed_packets: vec![1],
+        },
+    ))));
+    session
+        .drain_interrupt(Duration::from_secs(1))
+        .expect("one completion flushes the host-side packet");
+    assert!(!session.interrupt_send_capacity_available());
+    source.push(Ok(Some(HciPacket::Event(
+        Event::NumberOfCompletedPackets {
+            connection_handles: vec![CONNECTION_HANDLE],
+            num_completed_packets: vec![8],
+        },
+    ))));
+    assert!(
+        session
+            .poll(Duration::from_secs(1))
+            .expect("remaining completions restore capacity")
+            .is_empty()
+    );
+    assert!(session.interrupt_send_capacity_available());
 
     session.disconnect().expect("disconnect active session");
     session
@@ -961,7 +1017,7 @@ fn expected_commands(config: &TransportConfig) -> Vec<Command> {
     commands
 }
 
-fn identity_commands(config: &TransportConfig) -> [Command; 5] {
+fn identity_commands(config: &TransportConfig) -> [Command; 6] {
     let mut local_name = [0; 248];
     local_name[..config.local_name().len()].copy_from_slice(config.local_name().as_bytes());
     [
@@ -975,6 +1031,9 @@ fn identity_commands(config: &TransportConfig) -> [Command; 5] {
         Command::WriteExtendedInquiryResponse {
             fec_required: 0,
             extended_inquiry_response: *config.extended_inquiry_response(),
+        },
+        Command::WriteDefaultLinkPolicySettings {
+            default_link_policy_settings: 0x0005,
         },
         Command::WriteScanEnable { scan_enable: 0 },
     ]

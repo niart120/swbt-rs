@@ -250,8 +250,18 @@ pub(crate) trait TransportPort: Send {
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>>;
 
+    /// Whether an automatic report can enter the transport without waiting in
+    /// an internal controller queue.
+    fn interrupt_send_capacity_available(&self) -> bool {
+        true
+    }
+
     fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance>;
 
+    /// Wait until pending interrupt packets have left the host-side queue.
+    ///
+    /// Packets already in the controller's flow-control window do not keep this
+    /// operation pending while completion credit is outstanding.
     fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()>;
 
     fn disconnect(&mut self) -> TransportResult<()>;

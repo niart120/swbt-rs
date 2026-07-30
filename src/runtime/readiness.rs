@@ -163,11 +163,16 @@ impl ReadinessGate {
         if !self.collect_handshake(handshake)? {
             return Ok(ReadinessProgress::Pending(ReadinessWait::Handshake));
         }
+        let reporting = if sender.session().report_mode() == Some(0x30) {
+            Some(periodic.start_when_unheld(now)?)
+        } else {
+            None
+        };
         if !sender.session().protocol_ready() {
             return Ok(ReadinessProgress::Pending(ReadinessWait::Protocol));
         }
 
-        match periodic.start_when_unheld(now)? {
+        match reporting.expect("protocol readiness requires supported report mode") {
             PeriodicStart::HeldOff { until } => {
                 Ok(ReadinessProgress::Pending(ReadinessWait::PeriodicHoldoff {
                     until,
@@ -451,6 +456,79 @@ mod tests {
                 (0x21, 3, Some(0x30)),
                 (0x30, 4, None),
             ]
+        );
+    }
+
+    #[test]
+    fn periodic_report_mode_starts_automatic_input_before_protocol_ready() {
+        let mut harness = Harness::new();
+        let mut periodic = PeriodicPolicy::new(REPORT_PERIOD).expect("valid period");
+        let session_id = harness.begin_periodic(&mut periodic);
+        let mut gate = ReadinessGate::new(session_id, OPERATION_DEADLINE);
+        let mut handshake = Some(Handshake::new(session_id));
+        harness.control.script_sends([
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Accepted,
+        ]);
+
+        harness.bootstrap(
+            handshake.as_mut().expect("active handshake"),
+            session_id,
+            Duration::from_millis(100),
+        );
+        let report_mode = harness.handle_subcommand(Duration::from_millis(110), 0x03, &[0x30]);
+        periodic
+            .record_output_completion(Duration::from_millis(110), &report_mode)
+            .expect("report-mode holdoff");
+        report_mode.expect("report-mode reply accepted");
+        harness.finish_handshake(
+            handshake.as_mut().expect("active handshake"),
+            session_id,
+            Duration::from_millis(110),
+        );
+
+        assert_eq!(
+            gate.evaluate_periodic(
+                Duration::from_millis(409),
+                &harness.sessions,
+                &mut handshake,
+                &harness.sender,
+                &mut periodic,
+            )
+            .expect("report mode waits for the accepted-reply holdoff"),
+            ReadinessProgress::Pending(ReadinessWait::Protocol)
+        );
+        assert_eq!(periodic.next_deadline(), None);
+
+        assert_eq!(
+            gate.evaluate_periodic(
+                Duration::from_millis(410),
+                &harness.sessions,
+                &mut handshake,
+                &harness.sender,
+                &mut periodic,
+            )
+            .expect("report mode starts automatic input before player lights"),
+            ReadinessProgress::Pending(ReadinessWait::Protocol)
+        );
+        assert!(!harness.sender.session().protocol_ready());
+        assert_eq!(periodic.next_deadline(), Some(Duration::from_millis(418)));
+        assert_eq!(
+            harness
+                .send_due(Duration::from_millis(417), &mut periodic)
+                .expect("pre-deadline check"),
+            AutomaticInput::NotDue
+        );
+        assert!(matches!(
+            harness
+                .send_due(Duration::from_millis(418), &mut periodic)
+                .expect("pre-ready automatic input"),
+            AutomaticInput::Sent { skipped: 0, .. }
+        ));
+        assert_eq!(
+            accepted_report_keys(&harness.control),
+            [(0x30, 0, None), (0x21, 1, Some(0x03)), (0x30, 2, None),]
         );
     }
 
