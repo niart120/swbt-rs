@@ -562,6 +562,36 @@ fn bumble_session_drives_pairing_connection_drain_and_disconnect() {
         .drain_interrupt(Duration::from_secs(1))
         .expect("completed ACL packet drains");
 
+    assert!(session.interrupt_send_capacity_available());
+    for packet in 0..8 {
+        session
+            .send_interrupt(&[0x30, packet])
+            .expect("controller ACL window accepts one in-flight packet");
+    }
+    assert!(!session.interrupt_send_capacity_available());
+    source.push(Ok(Some(HciPacket::Event(
+        Event::NumberOfCompletedPackets {
+            connection_handles: vec![CONNECTION_HANDLE],
+            num_completed_packets: vec![1],
+        },
+    ))));
+    assert!(
+        session
+            .poll(Duration::from_secs(1))
+            .expect("one completion reopens capacity")
+            .is_empty()
+    );
+    assert!(session.interrupt_send_capacity_available());
+    source.push(Ok(Some(HciPacket::Event(
+        Event::NumberOfCompletedPackets {
+            connection_handles: vec![CONNECTION_HANDLE],
+            num_completed_packets: vec![7],
+        },
+    ))));
+    session
+        .drain_interrupt(Duration::from_secs(1))
+        .expect("remaining capacity probe packets drain");
+
     session.disconnect().expect("disconnect active session");
     session
         .disconnect()
@@ -980,7 +1010,7 @@ fn expected_commands(config: &TransportConfig) -> Vec<Command> {
     commands
 }
 
-fn identity_commands(config: &TransportConfig) -> [Command; 5] {
+fn identity_commands(config: &TransportConfig) -> [Command; 6] {
     let mut local_name = [0; 248];
     local_name[..config.local_name().len()].copy_from_slice(config.local_name().as_bytes());
     [
@@ -994,6 +1024,9 @@ fn identity_commands(config: &TransportConfig) -> [Command; 5] {
         Command::WriteExtendedInquiryResponse {
             fec_required: 0,
             extended_inquiry_response: *config.extended_inquiry_response(),
+        },
+        Command::WriteDefaultLinkPolicySettings {
+            default_link_policy_settings: 0x0005,
         },
         Command::WriteScanEnable { scan_enable: 0 },
     ]

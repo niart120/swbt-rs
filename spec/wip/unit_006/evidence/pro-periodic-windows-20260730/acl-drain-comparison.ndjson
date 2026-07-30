@@ -1,0 +1,2 @@
+{"acl_pending_at_close_start":251,"acl_pending_before_timeout":163,"close_elapsed_ms":1008,"close_success":false,"profile_mode":"existing-profile-diagnostic","run_index":14,"schema":"swbt.m5.acl-drain-comparison","schema_version":1}
+{"acl_pending_at_close_start":11,"acl_pending_at_drain_complete":0,"close_elapsed_ms":131,"close_success":true,"profile_mode":"existing-profile-diagnostic","run_index":16,"schema":"swbt.m5.acl-drain-comparison","schema_version":1}

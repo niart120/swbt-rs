@@ -68,6 +68,15 @@ Switch UI 上の A、L+R、stick 反映と neutral 残存なしは人が観測�
 UI 成功へ読み替えない。実機 metadata は test 開始前に再取得し、roadmap 記載の firmware
 `22.1.0` を現在値として仮定しない。
 
+### 3.3 2026-07-30 実機
+
+- Windows 11 25H2、build 26200.8875
+- CSR8510 A10、VID/PID `0A12:0001`、WinUSB
+- local address `00:1B:DC:F9:9F:7D`
+- HCI/LMP version `0x06`、company identifier `0x000A`、subversion `0x22BB`
+- Nintendo Switch 2、system version `22.5.0`（実機 run 前のユーザ確認値）
+- evidence: `evidence/pro-periodic-windows-20260730/SUMMARY.md`
+
 ## 4. 対象範囲
 
 - production file profile create-new
@@ -190,7 +199,7 @@ accepted counter に限定する。
 - [x] **T04 — Pro Periodic hardware runner**
   - public API だけで pairing、status、A、L+R、sticks、IMU、neutral、close を実行する。
   - output schema と timeout を固定し、key material と raw profile を出力しない。
-- [ ] **T05 — single fresh pairing**
+- [x] **T05 — single fresh pairing**
   - current hardware metadata と Switch firmware を記録する。
   - fresh SSP から same-session NX Ready までの trace と所要時間を記録する。
   - 失敗時も valid empty profile と adapter reopen を確認する。
@@ -213,7 +222,7 @@ accepted counter に限定する。
 | refactor-done | T02 | red: all-feature targeted test は production pair continuation `ProductionPairDriver` が未定義で compile error。green: feature 有効時の public `create_profile()` が production file store と `ConcreteRuntimeBackend` を使い、invalid selector で USB access 前の typed `TransportOpen` まで到達し、valid empty Pro profile を先に残す。production pair continuation は worker の Pair command を上書きせず `Ok(())` を返す。feature 無効時の既存 test は target absent と `UnsupportedCapability` を維持。refactor: runtime factory へ generic controller 全体ではなく owned `RuntimeFactoryConfig { selector, transport }` だけを渡し、public reporting dispatch は `open()` と同じ sealed Periodic/Direct 境界へ統一。open と create-profile は同じ Bumble component builder を使う。README、crate rustdoc、public method docs を feature ごとの挙動、実機未検証、M6 の key persistence 境界へ更新。all-feature test 266 passed / 2 ignored、default test 234 passed / 1 ignored、all/default clippy が成功 |
 | refactor-skipped | T03 | red: all-feature production test は invalid selector の `TransportOpen` に無関係な cleanup failure が付加されるため失敗。原因は USB session 作成前の Bumble transport に対して共通 cleanup が drain と disconnect を実行し、両方の `Closed` を失敗扱いしたこと。green: unopened Bumble transport の drain、disconnect、close を冪等にし、public error と typed transport source の表示から selector sentinel が露出しないこと、related cleanup failure がないこと、valid empty profile だけが残り temporary file がないことを検査。existing file/directory と dangling symlink の no-replace test も all-feature で成功。部分的に開いた transport の drain、disconnect、close 順序は既存 test で維持。refactor: 追加の構造変更は不要と判断 |
 | refactor-done | T04 | red: `cargo test --example pro_periodic_hardware --all-features --locked` は明示入力 parser、固定 evidence schema、event builder が未定義で compile error。green: public API だけを使う example が absent profile の create-profile、Ready status、A 500 ms、L+R 500 ms、左右 stick の独立4方向各500 ms、non-neutral IMU 1秒、neutral、close、typed profile 再検査、adapter reopen を固定順で実行し、parser/schema の3 test が成功。pair timeout は必須の1–600秒、run index は1–20に制限する。schema `swbt.m5.pro-periodic` version 1 の NDJSON は selector、path、raw profile、key material、USB serial、error source を出力せず、UI 観測を `null` のまま機械結果と分離する。refactor: schema field の上書きを禁止し、各 event を明示 flush、失敗時も `runner_complete` を最終 event に統一。README に Switch pairing 画面、60秒 timeout、run 1 の具体的 command と証拠境界を追記 |
-| pending | T05 | 実機実行後に追記する |
+| refactor-done | T05 | red 1: production HCI identity command の期待を5件に固定した test が、Python 基準にある default Classic link policy `0x0005` の追加で10件中5件失敗。red 2: report mode `0x30` 受理後、protocol Ready 前の Periodic deadline は期待値418 msに対して `None`、worker の due action は期待1件に対して0件。red 3: ACL window 満杯時に automatic report を送らない test は `Backpressured` と transport capacity API が未定義で compile error。green: link policy を scan enable 前に設定し、report-mode holdoff 後は protocol Ready 前でも Periodic を開始する。automatic report は controller の8 packet HCI window が満杯ならその tick を捨て、内部 ACL queue へ積まない。Bumble controlled session、Periodic 6 test、worker 27 test が成功。実機 fresh run 10 は5298 msで same-session NX Ready、reply 16件、入力786件、valid profile、adapter 再openへ到達した。close backlog の再現 run 14 は251件から1秒後163件、修正後の再接続 run 16 は11件から0件へdrainして131 msで close、adapter 再open、全体12174 msで成功。refactor: link policy を named constant 化し、capacity 判定を transport、Bumble session、Classic channel の責務へ分けた。run 14–16 は既存 profile の診断であり fresh 成功数へ含めない |
 | pending | T06 | 実機実行と UI 観測後に追記する |
 | pending | T07 | 20 run 後に追記する |
 | pending | T08 | completion gate と self-review 後に追記する |
@@ -255,6 +264,26 @@ git diff --check
 hardware command は T04 で確定し、selector と profile path を明示する。実機実行前に
 `list_adapters()`、Windows PnP、driver、Switch firmware、pairing 画面を確認する。
 
+T05 targeted gate:
+
+```powershell
+cargo test --locked --features bumble runtime::periodic::tests
+# 6 passed
+cargo test --locked --features bumble runtime::transport::bumble_tests
+# 10 passed
+cargo test --locked --features bumble runtime::worker::tests
+# 27 passed
+```
+
+commit 前の回帰 gate は、all-feature unit 270 passed / 2 ignored、default unit
+237 passed / 1 ignoredで、対応する integration test と doctest も成功した。all/default の
+clippy `-D warnings`、build、rustfmt も成功した。実機を要求する ignored test は実行していない。
+
+実機の全 run と失敗を含む集計は
+`evidence/pro-periodic-windows-20260730/SUMMARY.md` に置く。T05 では fresh run 10 の
+same-session Ready を確認した。run 16 の clean close は stored-key reconnect の製品保証ではなく、
+T05 修正後の close 経路を切り分ける診断結果である。
+
 ## 10. 先送り事項
 
 - filesystem pairing key persistence、Python compatibility、atomic update、stored-key reconnect:
@@ -270,14 +299,14 @@ hardware command は T04 で確定し、selector と profile path を明示す�
 - [ ] T01-T08 がすべて完了している
 - [ ] public create-profile が empty envelope を USB open より先に保存する
 - [ ] feature-disabled と existing target の no-side-effect 契約を維持した
-- [ ] pairing 失敗後も valid typed Pro profile が残る
-- [ ] production pair が unsupported hook で停止しない
-- [ ] single fresh pairing が same-session NX Ready へ到達した
+- [x] pairing 失敗後も valid typed Pro profile が残る
+- [x] production pair が unsupported hook で停止しない
+- [x] single fresh pairing が same-session NX Ready へ到達した
 - [ ] A、L+R 500 ms、dual sticks の UI 反映を観測した
 - [ ] IMU command、neutral、drain、close、再open を検査した
 - [ ] 20 run の成功率と failure を除外せず記録した
 - [ ] 20 run で hang、leak、stale input、neutral 残存が0件だった
-- [ ] hardware metadata と current Switch firmware を記録した
+- [x] hardware metadata と current Switch firmware を記録した
 - [ ] report acceptance と Switch UI 反映を別 evidence として記録した
 - [ ] alpha.1 note draft を作成した
 - [ ] upstream PR を作成していない

@@ -206,6 +206,21 @@ impl ClassicDeviceSession {
             .is_none_or(|current| device.classic_channel_output_is_drained(current.handle))
     }
 
+    pub(super) fn interrupt_send_capacity_available(&self, device: &Device) -> bool {
+        let Some(current) = self.current.as_ref() else {
+            return false;
+        };
+        let Some(channel) = current.interrupt else {
+            return false;
+        };
+        let channel_is_open = device
+            .classic_channel(current.handle, channel.cid)
+            .is_some_and(|candidate| {
+                candidate.state == ClassicChannelState::Open && candidate.psm == HID_INTERRUPT_PSM
+            });
+        channel_is_open && device.acl_packets_pending() < device.acl_max_in_flight()
+    }
+
     pub(super) fn disconnect(
         &mut self,
         device: &mut Device,

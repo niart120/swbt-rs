@@ -473,6 +473,8 @@ pub(crate) trait WorkerReporting<M: ControllerModel>: ReportingMode {
 
     fn next_deadline(runtime: &Self::RuntimeState) -> Option<Duration>;
 
+    fn automatic_due_before_ready(runtime: &Self::RuntimeState) -> bool;
+
     fn run_due(
         runtime: &mut Self::RuntimeState,
         now: Duration,
@@ -890,7 +892,10 @@ where
             return self.close(request, clock.now(), progress);
         }
 
-        if self.lifecycle.state() == LifecycleState::Ready {
+        if self.lifecycle.state() == LifecycleState::Ready
+            || (self.lifecycle.state() == LifecycleState::Connecting
+                && R::automatic_due_before_ready(&self.reporting))
+        {
             let due = R::run_due(
                 &mut self.reporting,
                 clock.now(),
@@ -1479,6 +1484,10 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
         )
     }
 
+    fn automatic_due_before_ready(runtime: &Self::RuntimeState) -> bool {
+        runtime.policy.next_deadline().is_some()
+    }
+
     fn run_due(
         runtime: &mut Self::RuntimeState,
         now: Duration,
@@ -1535,7 +1544,11 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
             context.transport,
         ) {
             Ok(AutomaticInput::Sent { .. }) => due.actions += 1,
-            Ok(AutomaticInput::NotDue | AutomaticInput::HeldOff { .. }) => {}
+            Ok(
+                AutomaticInput::NotDue
+                | AutomaticInput::HeldOff { .. }
+                | AutomaticInput::Backpressured { .. },
+            ) => {}
             Err(error) => {
                 due.actions += 1;
                 due.errors.push(WorkerOperationError::Periodic(error));
@@ -1738,6 +1751,10 @@ impl<M: ControllerModel> WorkerReporting<M> for Direct {
             .pending_tap
             .as_ref()
             .map(PendingDirectTap::release_at)
+    }
+
+    fn automatic_due_before_ready(_runtime: &Self::RuntimeState) -> bool {
+        false
     }
 
     fn run_due(
@@ -2891,6 +2908,80 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             [(0x30, 0, None), (0x21, 1, Some(0x08))]
+        );
+    }
+
+    #[test]
+    fn periodic_worker_sends_report_mode_input_while_readiness_is_connecting() {
+        let (mut transport, control) = FakeTransport::with_limits(8, 8);
+        let (notifier, _receiver) = activity_channel();
+        transport.open(notifier).expect("open fake transport");
+        let clock = FakeClock::at(Duration::ZERO);
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let mut worker = WorkerCore::new_periodic(
+            protocol(),
+            Box::new(transport),
+            REPORT_PERIOD,
+            WorkerBudget::new(1, 1),
+            Box::new(|_| {}),
+        )
+        .expect("valid Periodic worker");
+        worker
+            .begin_connection(clock.now(), CONNECTION_TIMEOUT)
+            .expect("begin fake connection");
+        control.script_sends([
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Accepted,
+        ]);
+        control.inject_connected().expect("link event");
+        control
+            .inject_hid_channel_opened(HidChannel::Control)
+            .expect("control channel");
+        control
+            .inject_hid_channel_opened(HidChannel::Interrupt)
+            .expect("interrupt channel");
+        let mut commands = TracedCommands::new([], trace);
+        let mut no_shutdown = ShutdownLatch::default();
+
+        assert!(matches!(
+            worker.step(&clock, &mut no_shutdown, &mut commands),
+            WorkerStep::Continue(_)
+        ));
+        clock.set(Duration::from_millis(10));
+        control
+            .inject_hid_output(HidChannel::Interrupt, &subcommand_report(0x03, &[0x30]))
+            .expect("report mode");
+        assert!(matches!(
+            worker.step(&clock, &mut no_shutdown, &mut commands),
+            WorkerStep::Continue(_)
+        ));
+        assert_eq!(worker.lifecycle_state(), LifecycleState::Connecting);
+
+        clock.set(Duration::from_millis(310));
+        assert!(matches!(
+            worker.step(&clock, &mut no_shutdown, &mut commands),
+            WorkerStep::Continue(_)
+        ));
+        clock.set(Duration::from_millis(318));
+        let WorkerStep::Continue(progress) = worker.step(&clock, &mut no_shutdown, &mut commands)
+        else {
+            panic!("pre-ready automatic input keeps the worker running");
+        };
+
+        assert_eq!(worker.lifecycle_state(), LifecycleState::Connecting);
+        assert_eq!(progress.due_actions, 1);
+        assert_eq!(
+            control
+                .accepted_interrupts()
+                .iter()
+                .map(|report| (
+                    report[0],
+                    report[1],
+                    (report[0] == 0x21).then_some(report[14]),
+                ))
+                .collect::<Vec<_>>(),
+            [(0x30, 0, None), (0x21, 1, Some(0x03)), (0x30, 2, None),]
         );
     }
 

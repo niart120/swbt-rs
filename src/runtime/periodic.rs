@@ -110,6 +110,9 @@ pub(crate) enum AutomaticInput {
     HeldOff {
         until: Duration,
     },
+    Backpressured {
+        skipped: u64,
+    },
     Sent {
         acceptance: SendAcceptance,
         skipped: u64,
@@ -273,6 +276,9 @@ impl PeriodicPolicy {
         let TickDecision::Due { skipped } = scheduler.step(now)? else {
             return Ok(AutomaticInput::NotDue);
         };
+        if !transport.interrupt_send_capacity_available() {
+            return Ok(AutomaticInput::Backpressured { skipped });
+        }
         let snapshot = state.snapshot();
         let now_ns = u64::try_from(now.as_nanos()).map_err(|_| PeriodicError::ClockOverflow)?;
         let acceptance = sender.send_input(protocol, &snapshot, now_ns, transport)?;
@@ -400,6 +406,35 @@ mod tests {
         assert_eq!(accepted.len(), 1);
         assert_eq!((accepted[0][0], accepted[0][1]), (0x30, 0));
         assert_eq!(&accepted[0][3..6], &[0x08, 0x00, 0x00]);
+        assert_eq!(harness.sender.timer(), 1);
+    }
+
+    #[test]
+    fn periodic_automatic_input_skips_a_full_transport_window_without_queueing() {
+        let mut harness = Harness::new();
+        harness.control.set_interrupt_send_capacity(false);
+
+        assert_eq!(
+            harness
+                .send_due(REPORT_PERIOD)
+                .expect("transport backpressure is not a worker failure"),
+            AutomaticInput::Backpressured { skipped: 0 }
+        );
+        assert!(harness.control.accepted_interrupts().is_empty());
+        assert_eq!(harness.sender.timer(), 0);
+        assert_eq!(
+            harness.policy.next_deadline(),
+            Some(Duration::from_millis(200))
+        );
+
+        harness.control.set_interrupt_send_capacity(true);
+        assert!(matches!(
+            harness
+                .send_due(Duration::from_millis(200))
+                .expect("next capacity window accepts the latest input"),
+            AutomaticInput::Sent { skipped: 0, .. }
+        ));
+        assert_eq!(harness.control.accepted_interrupts().len(), 1);
         assert_eq!(harness.sender.timer(), 1);
     }
 
