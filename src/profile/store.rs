@@ -116,7 +116,10 @@ pub(crate) trait ProfileCreatePort: ProfileCreateTargetPort + ProfileReadPort {
 
 #[cfg_attr(
     not(test),
-    allow(dead_code, reason = "M6 T04 consumes atomic profile updates")
+    allow(
+        dead_code,
+        reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+    )
 )]
 pub(crate) trait ProfileUpdatePort: ProfileReadPort {
     /// Replaces an existing profile if it still has the expected complete bytes.
@@ -128,7 +131,10 @@ pub(crate) trait ProfileUpdatePort: ProfileReadPort {
 
 #[cfg_attr(
     not(test),
-    allow(dead_code, reason = "M6 T04 consumes atomic profile updates")
+    allow(
+        dead_code,
+        reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+    )
 )]
 fn try_lock_exclusive(file: &File) -> io::Result<()> {
     file.try_lock_exclusive().map_err(|source| {

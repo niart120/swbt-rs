@@ -9,6 +9,8 @@ mod config;
 #[cfg(feature = "bumble")]
 mod hidp;
 #[cfg(feature = "bumble")]
+mod profile_key_store;
+#[cfg(feature = "bumble")]
 mod sdp;
 #[cfg(all(test, feature = "bumble"))]
 mod virtual_tests;

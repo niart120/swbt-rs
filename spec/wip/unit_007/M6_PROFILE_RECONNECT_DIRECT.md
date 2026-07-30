@@ -76,11 +76,11 @@ M6 は profile file の完全性、Bumble key-store の変換、接続経路、S
 
 `ProfileDocument::parse_json` は raw document を保持し、少なくとも次を検証する。
 
-- `format == "swbt-pairing-profile"`
+- `format == "swbt.profile"`
 - `schema_version == 2`
 - `controller_kind` が既知で、typed conversion 時に `M::KIND` と一致する
 - `identity` が `adapter-default` または仕様上有効な local-address 形式である
-- `key_store_namespaces` は object である
+- `key_store.namespaces` は object である
 - namespace 名、peer address、address type、key field、hex 長と文字種が有効である
 - 各 namespace の current peer は最大1件である
 
@@ -172,7 +172,7 @@ Switch UI の入力反映と残留入力なしは人が観測し、runner の機
 | refactor-skipped | T01 Python schema v2 fixture を lossless に typed Rust profile として読み、model mismatch、壊れた key、複数 peer を拒否する | new/edge | unit/integration | adapter open 前の検証、secret-free error を含む |
 | refactor-done | T02 Rust profile を決定的 JSON として出力し、pinned Python reader が読めることを検査する | new | integration | 未知 field 保持、2-space/sorted/trailing newline |
 | refactor-done | T03 existing profile を lock 付き atomic replace し、競合と interruption 後も旧版か新版を読める | new/edge | unit/integration | create-new no-replace は維持 |
-| todo | T04 Bumble key object を adapter-default namespace の単一 peer として lossless に取得・更新・明示削除する | new | unit | `SwbtProfileKeyStore<M>` |
+| refactor-done | T04 Bumble key object を adapter-default namespace の単一 peer として lossless に取得・更新・明示削除する | new | unit | `SwbtProfileKeyStore<M>` |
 | todo | T05 production pairing の key-store update を profile へ保存し、永続化失敗を worker/public error へ伝える | new/regression | integration | raw key 非出力 |
 | todo | T06 virtual Classic で stored key の outgoing/incoming reconnect が同じ session の Ready へ到達する | new | integration | active/incoming 両経路 |
 | todo | T07 public connection API が no-bond、timeout、stale bond、明示 re-pair を仕様どおり分類する | new/edge | unit/integration | 暗黙削除・fallback なし |
@@ -187,6 +187,7 @@ Switch UI の入力反映と残留入力なしは人が観測し、runner の機
 | refactor-skipped | T01 | red: `cargo +1.87.0 test profile::document_tests --locked` は namespace 内部を未検証のため `namespace_shape_and_known_key_fields_are_validated_without_secret_echo` が失敗。green: pinned Python `0.6.0` / commit `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` の synthetic Classic link-key fixture を typed Pro profile として読み、namespace/peer address、単一 peer、既知 numeric/key field、hex、metadata type の不正を fixed secret-free error で拒否する7 test が成功。Rust 1.87 all-feature test は272 passed / 2 ignored、stable clippy all-target/all-feature `-D warnings`、rustfmt、diff check が成功。validation helper は raw document と typed key-store adapter の間に留まり、T04 の Bumble conversion を先取りしないため追加 refactor を省略 |
 | refactor-done | T02 | red: `cargo +1.87.0 test --test profile_compat --locked` は crate root に公開 `PairingProfile` がなく compile error。green: `PairingProfile<M>::from_json` と `to_json_bytes` を公開し、raw DTO と field mutation は非公開のまま、未知 top-level/key metadata の保持、反復出力一致、UTF-8、2-space indent、sorted keys、末尾改行を integration test で検査。manual ignored writer が作った Rust profile を Python 3.13、pinned repository HEAD `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` の `PairingProfile.load` が読み、Pro、adapter-default、namespace 1、peer 1を確認。key value は出力していない。Rust 1.87 all-feature lib は272 passed / 2 ignored、profile compatibility は1 passed / 1 manual ignored。stable clippy、all-feature rustdoc `-D warnings`、rustfmt、diff check が成功。refactor: integration fixture setup を共通 helper に抽出し、公開 profile module/crate docs を byte API と filesystem persistence の境界に合わせた |
 | refactor-done | T03 | red: `cargo +1.87.0 test profile::store::tests --locked` は `ProfileUpdatePort` と `update` が未定義で compile error。green: existing regular file の OS 排他 lock を非待機で取得し、lock 後に再読取した bytes が caller の expected bytes と一致する場合だけ、same-directory temporary file の complete write、flush、`sync_all`、Windows 対応 atomic replace、parent sync を行う。stale writer と lock contention は `WouldBlock` で target を変更せず、commit 前に atomic writer を破棄した場合は旧 profile、commit 後は新 profile が typed Pro として有効な6 test が成功。`atomic-write-file 0.3.0` と `fs2 0.4.3` を MSRV 1.87 で固定し、lockfile の既存 `http 1.4.2` と `rustls 0.23.42` は更新前 version を維持。Rust 1.87 all-feature lib は275 passed / 2 ignored、default lib は242 passed / 1 ignored、all-feature build、stable all/default clippy、rustfmt、diff check が成功。refactor: lock contention の OS error を一つの helper で `WouldBlock` へ正規化し、filesystem update 契約を T04 が利用する `ProfileUpdatePort` に分離した |
+| refactor-done | T04 | red: `cargo +1.87.0 test profile_key_store --all-features --locked` は `SwbtProfileKeyStore` が未定義で compile error。green: power-on 後 local address を adapter-default namespace に解決し、その namespace の0件または1件だけを Bumble `PairingKeys` と変換する3 test が成功。同じ peer の update は既知 key field だけを置換して未知 peer metadata を保持し、別 peer の update は current peer を1件へ置換する。delete は明示呼出しだけで行い、欠落 peer を secret-free `NotFound`、不正名を secret-free `InvalidAddress` とする。read、parse、serialize、atomic update error は path、peer、key value を含まない固定文言へ変換し、adapter `Debug` も path と namespace を伏せる。Rust 1.87 all-feature lib は278 passed / 2 ignored、default lib は242 passed / 1 ignored、all/default build、stable all/default clippy、all-feature rustdoc `-D warnings`、rustfmt、diff check が成功。refactor: raw document の未知 field 保持操作を profile 層、Bumble JSON 変換と error sanitization を transport adapter 層へ分離した。T05 が production `Device` へ adapter を接続するまで、該当内部入口だけに理由付き dead-code 許可を置く |
 
 ## 7. 対象ファイル
 

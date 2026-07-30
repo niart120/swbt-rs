@@ -1,6 +1,6 @@
 use std::{fmt, marker::PhantomData};
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::{
     error::{Error, ErrorKind},
@@ -11,6 +11,21 @@ use super::{ControllerKind, LocalAddress};
 
 const PROFILE_FORMAT: &str = "swbt.profile";
 const PROFILE_SCHEMA_VERSION: u64 = 2;
+#[allow(
+    dead_code,
+    reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+)]
+const KNOWN_PAIRING_KEY_FIELDS: [&str; 9] = [
+    "address_type",
+    "ltk",
+    "ltk_central",
+    "ltk_peripheral",
+    "irk",
+    "csrk",
+    "local_csrk",
+    "link_key",
+    "link_key_type",
+];
 
 pub(crate) struct ProfileDocument {
     controller_kind: ControllerKind,
@@ -172,6 +187,109 @@ impl ProfileDocument {
     }
 }
 
+#[allow(
+    dead_code,
+    reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+)]
+impl ProfileDocument {
+    fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<Value> {
+        self.namespaces()
+            .and_then(|namespaces| namespaces.get(namespace))
+            .and_then(Value::as_object)
+            .and_then(|peers| peers.get(peer))
+            .cloned()
+    }
+
+    fn all_pairing_keys(&self, namespace: &str) -> Vec<(String, Value)> {
+        self.namespaces()
+            .and_then(|namespaces| namespaces.get(namespace))
+            .and_then(Value::as_object)
+            .into_iter()
+            .flat_map(|peers| peers.iter())
+            .map(|(peer, keys)| (peer.clone(), keys.clone()))
+            .collect()
+    }
+
+    fn replace_pairing_keys(
+        &mut self,
+        namespace: &str,
+        peer: &str,
+        replacement: Value,
+    ) -> crate::Result<()> {
+        if !is_bluetooth_address(namespace) || !is_bluetooth_address(peer) {
+            return Err(invalid_profile(
+                "profile key-store update address is invalid",
+            ));
+        }
+        validate_pairing_keys(&replacement)?;
+        let mut replacement = replacement.as_object().cloned().ok_or_else(|| {
+            invalid_profile("profile key-store update must contain a pairing-key object")
+        })?;
+        let peers = self.namespace_mut(namespace)?;
+
+        if let Some(existing) = peers.get_mut(peer).and_then(Value::as_object_mut) {
+            for field in KNOWN_PAIRING_KEY_FIELDS {
+                existing.remove(field);
+            }
+            existing.append(&mut replacement);
+        } else {
+            peers.clear();
+            peers.insert(peer.to_owned(), Value::Object(replacement));
+        }
+        Ok(())
+    }
+
+    fn remove_pairing_keys(&mut self, namespace: &str, peer: &str) -> crate::Result<bool> {
+        if !is_bluetooth_address(namespace) || !is_bluetooth_address(peer) {
+            return Err(invalid_profile(
+                "profile key-store delete address is invalid",
+            ));
+        }
+        let Some(namespaces) = self.namespaces_mut()? else {
+            return Ok(false);
+        };
+        let Some(peers) = namespaces.get_mut(namespace).and_then(Value::as_object_mut) else {
+            return Ok(false);
+        };
+        Ok(peers.remove(peer).is_some())
+    }
+
+    fn namespaces(&self) -> Option<&Map<String, Value>> {
+        self.value
+            .as_object()
+            .and_then(|document| document.get("key_store"))
+            .and_then(Value::as_object)
+            .and_then(|key_store| key_store.get("namespaces"))
+            .and_then(Value::as_object)
+    }
+
+    fn namespaces_mut(&mut self) -> crate::Result<Option<&mut Map<String, Value>>> {
+        let namespaces = self
+            .value
+            .as_object_mut()
+            .and_then(|document| document.get_mut("key_store"))
+            .and_then(Value::as_object_mut)
+            .and_then(|key_store| key_store.get_mut("namespaces"));
+        match namespaces {
+            Some(Value::Object(namespaces)) => Ok(Some(namespaces)),
+            Some(_) => Err(internal_profile_shape_error()),
+            None => Ok(None),
+        }
+    }
+
+    fn namespace_mut(&mut self, namespace: &str) -> crate::Result<&mut Map<String, Value>> {
+        let namespaces = self
+            .namespaces_mut()?
+            .ok_or_else(internal_profile_shape_error)?;
+        let peers = namespaces
+            .entry(namespace.to_owned())
+            .or_insert_with(|| Value::Object(Map::new()));
+        peers
+            .as_object_mut()
+            .ok_or_else(internal_profile_shape_error)
+    }
+}
+
 fn validate_namespaces(namespaces: &serde_json::Map<String, Value>) -> crate::Result<()> {
     for (namespace, peers) in namespaces {
         if !is_bluetooth_address(namespace) {
@@ -303,6 +421,17 @@ fn invalid_profile(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidProfile, message)
 }
 
+#[allow(
+    dead_code,
+    reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+)]
+fn internal_profile_shape_error() -> Error {
+    Error::new(
+        ErrorKind::Internal,
+        "validated profile document shape changed unexpectedly",
+    )
+}
+
 impl fmt::Debug for ProfileDocument {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -358,6 +487,38 @@ impl<M: ControllerModel> PairingProfile<M> {
     #[must_use]
     pub const fn controller_kind(&self) -> ControllerKind {
         M::KIND
+    }
+}
+
+#[allow(
+    dead_code,
+    reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+)]
+impl<M: ControllerModel> PairingProfile<M> {
+    pub(crate) fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<Value> {
+        self.document.pairing_keys(namespace, peer)
+    }
+
+    pub(crate) fn all_pairing_keys(&self, namespace: &str) -> Vec<(String, Value)> {
+        self.document.all_pairing_keys(namespace)
+    }
+
+    pub(crate) fn replace_pairing_keys(
+        &mut self,
+        namespace: &str,
+        peer: &str,
+        replacement: Value,
+    ) -> crate::Result<()> {
+        self.document
+            .replace_pairing_keys(namespace, peer, replacement)
+    }
+
+    pub(crate) fn remove_pairing_keys(
+        &mut self,
+        namespace: &str,
+        peer: &str,
+    ) -> crate::Result<bool> {
+        self.document.remove_pairing_keys(namespace, peer)
     }
 }
 
