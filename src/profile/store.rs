@@ -1,10 +1,13 @@
 use std::{
     ffi::OsString,
     fs::{self, File, OpenOptions},
-    io::{self, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
+
+use atomic_write_file::AtomicWriteFile;
+use fs2::FileExt as _;
 
 const TEMP_CREATE_ATTEMPTS: usize = 128;
 static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
@@ -54,6 +57,37 @@ impl ProfileCreatePort for FileProfileStore {
     }
 }
 
+impl ProfileUpdatePort for FileProfileStore {
+    fn update(&mut self, path: &Path, expected: &[u8], replacement: &[u8]) -> io::Result<()> {
+        let metadata = fs::symlink_metadata(path)?;
+        if !metadata.file_type().is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "profile update target must be a regular file",
+            ));
+        }
+
+        let mut locked = OpenOptions::new().read(true).write(true).open(path)?;
+        try_lock_exclusive(&locked)?;
+        locked.seek(SeekFrom::Start(0))?;
+        let mut current = Vec::new();
+        locked.read_to_end(&mut current)?;
+        if current != expected {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "profile changed before the update lock was acquired",
+            ));
+        }
+
+        let mut atomic = AtomicWriteFile::open(path)?;
+        atomic.write_all(replacement)?;
+        atomic.flush()?;
+        atomic.sync_all()?;
+        atomic.commit()?;
+        sync_parent_directory(usable_parent(path))
+    }
+}
+
 pub(crate) trait ProfileReadPort {
     fn read(&mut self, path: &Path) -> io::Result<Vec<u8>>;
 }
@@ -78,6 +112,35 @@ pub(crate) trait ProfileCreatePort: ProfileCreateTargetPort + ProfileReadPort {
     ///
     /// An existing target must be reported as [`io::ErrorKind::AlreadyExists`].
     fn create_new(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()>;
+}
+
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "M6 T04 consumes atomic profile updates")
+)]
+pub(crate) trait ProfileUpdatePort: ProfileReadPort {
+    /// Replaces an existing profile if it still has the expected complete bytes.
+    ///
+    /// Lock contention and a stale expected document are reported as
+    /// [`io::ErrorKind::WouldBlock`].
+    fn update(&mut self, path: &Path, expected: &[u8], replacement: &[u8]) -> io::Result<()>;
+}
+
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "M6 T04 consumes atomic profile updates")
+)]
+fn try_lock_exclusive(file: &File) -> io::Result<()> {
+    file.try_lock_exclusive().map_err(|source| {
+        if source.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
+            io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "profile update lock is already held",
+            )
+        } else {
+            source
+        }
+    })
 }
 
 fn inspect_target(path: &Path) -> io::Result<ProfileCreateTargetState> {
@@ -141,10 +204,14 @@ fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::{
-        fs, io,
+        fs::{self, OpenOptions},
+        io::{self, Write},
         path::{Path, PathBuf},
         sync::atomic::{AtomicU64, Ordering},
     };
+
+    use atomic_write_file::AtomicWriteFile;
+    use fs2::FileExt as _;
 
     use crate::{
         model,
@@ -153,7 +220,7 @@ mod tests {
 
     use super::{
         FileProfileStore, ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState,
-        ProfileReadPort,
+        ProfileReadPort, ProfileUpdatePort,
     };
 
     static NEXT_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -263,6 +330,134 @@ mod tests {
             ["profile.json"],
             "symlink conflict must clean its temporary file"
         );
+    }
+
+    #[test]
+    fn file_profile_store_replaces_only_the_expected_complete_document() {
+        let temp = TempDirectory::new("update");
+        let target = temp.path().join("pro.json");
+        let old = valid_profile_bytes("old");
+        let new = valid_profile_bytes("new");
+        let competitor = valid_profile_bytes("competitor");
+        let mut store = FileProfileStore;
+        store
+            .create_new(&target, &old)
+            .expect("create original profile");
+
+        let error = store
+            .update(&target, &competitor, &new)
+            .expect_err("stale writer must not replace the current profile");
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(store.read(&target).expect("read current profile"), old);
+
+        store
+            .update(&target, &old, &new)
+            .expect("replace matching profile");
+        assert_eq!(store.read(&target).expect("read updated profile"), new);
+        PairingProfile::<model::Pro>::try_from(
+            ProfileDocument::parse_json(&new).expect("updated profile remains valid"),
+        )
+        .expect("updated profile remains Pro-typed");
+        assert_eq!(
+            directory_names(temp.path()),
+            ["pro.json"],
+            "successful update must remove the same-directory temporary file"
+        );
+    }
+
+    #[test]
+    fn file_profile_store_rejects_lock_contention_without_waiting_or_mutating() {
+        let temp = TempDirectory::new("contention");
+        let target = temp.path().join("pro.json");
+        let old = valid_profile_bytes("old");
+        let new = valid_profile_bytes("new");
+        let mut store = FileProfileStore;
+        store
+            .create_new(&target, &old)
+            .expect("create original profile");
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&target)
+            .expect("open target for test lock");
+        lock.try_lock_exclusive().expect("hold exclusive test lock");
+
+        let error = store
+            .update(&target, &old, &new)
+            .expect_err("contended update must fail immediately");
+
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        drop(lock);
+        assert_eq!(store.read(&target).expect("read unchanged profile"), old);
+        store
+            .update(&target, &old, &new)
+            .expect("update must work after the lock is released");
+        assert_eq!(store.read(&target).expect("read updated profile"), new);
+    }
+
+    #[test]
+    fn abandoned_atomic_replacement_leaves_the_old_valid_profile() {
+        let temp = TempDirectory::new("interrupted");
+        let target = temp.path().join("pro.json");
+        let old = valid_profile_bytes("old");
+        let new = valid_profile_bytes("new");
+        let mut store = FileProfileStore;
+        store
+            .create_new(&target, &old)
+            .expect("create original profile");
+
+        let mut interrupted =
+            AtomicWriteFile::open(&target).expect("start same-directory replacement");
+        interrupted
+            .write_all(&new)
+            .expect("write complete replacement");
+        interrupted.flush().expect("flush replacement");
+        interrupted.sync_all().expect("sync replacement");
+        drop(interrupted);
+
+        let after_interruption = store.read(&target).expect("read old profile");
+        assert_eq!(after_interruption, old);
+        PairingProfile::<model::Pro>::try_from(
+            ProfileDocument::parse_json(&after_interruption)
+                .expect("old profile remains valid after interruption"),
+        )
+        .expect("old profile remains Pro-typed");
+
+        store
+            .update(&target, &old, &new)
+            .expect("complete later replacement");
+        let after_commit = store.read(&target).expect("read new profile");
+        assert_eq!(after_commit, new);
+        PairingProfile::<model::Pro>::try_from(
+            ProfileDocument::parse_json(&after_commit).expect("new profile is valid"),
+        )
+        .expect("new profile is Pro-typed");
+        assert_eq!(
+            directory_names(temp.path()),
+            ["pro.json"],
+            "discard and commit must clean their temporary files"
+        );
+    }
+
+    fn valid_profile_bytes(marker: &str) -> Vec<u8> {
+        let value = serde_json::json!({
+            "format": "swbt.profile",
+            "schema_version": 2,
+            "controller_kind": "pro",
+            "identity": {
+                "kind": "adapter-default"
+            },
+            "key_store": {
+                "namespaces": {}
+            },
+            "future_extension": {
+                "marker": marker
+            }
+        });
+        ProfileDocument::parse_json(value.to_string().as_bytes())
+            .expect("test profile must parse")
+            .to_json_bytes()
+            .expect("test profile must serialize")
     }
 
     fn directory_names(path: &Path) -> Vec<String> {
