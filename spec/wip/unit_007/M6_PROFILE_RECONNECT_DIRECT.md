@@ -169,7 +169,7 @@ Switch UI の入力反映と残留入力なしは人が観測し、runner の機
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | T01 Python schema v2 fixture を lossless に typed Rust profile として読み、model mismatch、壊れた key、複数 peer を拒否する | new/edge | unit/integration | adapter open 前の検証、secret-free error を含む |
+| refactor-skipped | T01 Python schema v2 fixture を lossless に typed Rust profile として読み、model mismatch、壊れた key、複数 peer を拒否する | new/edge | unit/integration | adapter open 前の検証、secret-free error を含む |
 | todo | T02 Rust profile を決定的 JSON として出力し、pinned Python reader が読めることを検査する | new | integration | 未知 field 保持、2-space/sorted/trailing newline |
 | todo | T03 existing profile を lock 付き atomic replace し、競合と interruption 後も旧版か新版を読める | new/edge | unit/integration | create-new no-replace は維持 |
 | todo | T04 Bumble key object を adapter-default namespace の単一 peer として lossless に取得・更新・明示削除する | new | unit | `SwbtProfileKeyStore<M>` |
@@ -179,6 +179,12 @@ Switch UI の入力反映と残留入力なしは人が観測し、runner の機
 | todo | T08 同じ Pro profile を Periodic/Direct で再利用し、Direct idle、send failure、tap、neutral close の契約を満たす | new/regression | integration | 既存単体挙動を profile 接続面で検査 |
 | todo | T09 hardware runner で Periodic reconnect、power-cycle reconnect、Direct input と clean close を記録する | new | hardware | UI 観測を別 record にする |
 | todo | T10 completion gate と alpha.2 criteria note を確定する | new | docs/package | Rust 1.87、各 feature 組合せ、未検証事項 |
+
+### 6.1 TDD cycle evidence
+
+| phase | item | evidence |
+|---|---|---|
+| refactor-skipped | T01 | red: `cargo +1.87.0 test profile::document_tests --locked` は namespace 内部を未検証のため `namespace_shape_and_known_key_fields_are_validated_without_secret_echo` が失敗。green: pinned Python `0.6.0` / commit `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` の synthetic Classic link-key fixture を typed Pro profile として読み、namespace/peer address、単一 peer、既知 numeric/key field、hex、metadata type の不正を fixed secret-free error で拒否する7 test が成功。Rust 1.87 all-feature test は272 passed / 2 ignored、stable clippy all-target/all-feature `-D warnings`、rustfmt、diff check が成功。validation helper は raw document と typed key-store adapter の間に留まり、T04 の Bumble conversion を先取りしないため追加 refactor を省略 |
 
 ## 7. 対象ファイル
 
@@ -206,8 +212,8 @@ cargo +1.87.0 check --all-targets --all-features --locked
 cargo +1.87.0 test --all-features --locked
 cargo +1.87.0 test --locked
 cargo +1.87.0 test --no-default-features --locked
-cargo +1.87.0 clippy --all-targets --all-features --locked -- -D warnings
-cargo +1.87.0 clippy --all-targets --locked -- -D warnings
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo clippy --all-targets --locked -- -D warnings
 cargo +1.87.0 build --all-features --locked
 cargo +1.87.0 build --locked
 cargo +1.87.0 build --no-default-features --locked

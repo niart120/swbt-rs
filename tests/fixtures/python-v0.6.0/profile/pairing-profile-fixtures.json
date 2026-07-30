@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "adapter_default_with_classic_link_key",
+      "profile": {
+        "controller_kind": "pro",
+        "format": "swbt.profile",
+        "identity": {
+          "kind": "adapter-default"
+        },
+        "key_store": {
+          "namespaces": {
+            "00:11:22:33:44:55": {
+              "98:B6:E9:11:22:33": {
+                "link_key": {
+                  "authenticated": true,
+                  "value": "01010101010101010101010101010101"
+                },
+                "link_key_type": 4
+              }
+            }
+          }
+        },
+        "schema_version": 2
+      }
+    }
+  ],
+  "format": "swbt.profile-fixtures",
+  "generation": "PairingProfile.create_new followed by _PairingProfileKeyStore.update with synthetic key material",
+  "python_version": "3.13",
+  "schema_version": 1,
+  "source_commit": "84d2723b127f70fc78e12f4496f5c40af0ccfb0a",
+  "source_paths": [
+    "src/swbt/transport/_bumble_key_store.py",
+    "src/swbt/transport/_pairing_profile.py"
+  ],
+  "source_repository": "https://github.com/niart120/swbt-python",
+  "source_version": "0.6.0"
+}

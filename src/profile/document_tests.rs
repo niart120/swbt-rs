@@ -12,6 +12,30 @@ use super::{ControllerKind, PairingProfile, ProfileDocument};
 const SECRET_SENTINEL: &str = "KNOWN_PROFILE_SECRET_7E3C1A";
 
 #[test]
+fn python_v2_fixture_converts_to_typed_pro_profile() {
+    let fixture: Value = serde_json::from_slice(include_bytes!(
+        "../../tests/fixtures/python-v0.6.0/profile/pairing-profile-fixtures.json"
+    ))
+    .expect("Python profile fixture must be valid JSON");
+    assert_eq!(fixture["format"], "swbt.profile-fixtures");
+    assert_eq!(fixture["source_version"], "0.6.0");
+    assert_eq!(
+        fixture["source_commit"],
+        "84d2723b127f70fc78e12f4496f5c40af0ccfb0a"
+    );
+    let profile = fixture["cases"][0]["profile"].clone();
+
+    let document = ProfileDocument::parse_json(
+        &serde_json::to_vec(&profile).expect("serialize fixture profile"),
+    )
+    .expect("Python schema v2 profile must parse");
+    let typed = PairingProfile::<model::Pro>::try_from(document)
+        .expect("Python Pro profile must convert to typed Rust profile");
+
+    assert_eq!(typed.controller_kind(), ControllerKind::Pro);
+}
+
+#[test]
 fn matching_v2_envelope_converts_to_the_requested_model() {
     assert_matching_model::<model::Pro>("pro");
     assert_matching_model::<model::JoyConL>("joycon_l");
@@ -93,6 +117,44 @@ fn raw_envelope_rejects_invalid_schema_and_shape_without_guessing() {
 }
 
 #[test]
+fn namespace_shape_and_known_key_fields_are_validated_without_secret_echo() {
+    let invalid_namespace_cases = [
+        json!([]),
+        json!({"98:B6:E9:11:22:33": []}),
+        json!({"not-an-address": {}}),
+        json!({"00:11:22:33:44:55": {"not-an-address": {}}}),
+        json!({
+            "00:11:22:33:44:55": {
+                "98:B6:E9:11:22:33": {},
+                "98:B6:E9:44:55:66": {}
+            }
+        }),
+    ];
+    for namespaces in invalid_namespace_cases {
+        let mut invalid = valid_profile("pro");
+        invalid["key_store"]["namespaces"] = namespaces;
+        assert_invalid_profile_without_secret(invalid);
+    }
+
+    let invalid_key_cases = [
+        json!({"address_type": 256}),
+        json!({"link_key_type": "4"}),
+        json!({"link_key": SECRET_SENTINEL}),
+        json!({"link_key": {"value": SECRET_SENTINEL}}),
+        json!({"link_key": {"value": "123"}}),
+        json!({"link_key": {"value": "00", "authenticated": "yes"}}),
+        json!({"ltk": {"value": "00", "ediv": 65536}}),
+        json!({"irk": {"value": "00", "rand": "xyz"}}),
+        json!({"csrk": {"value": "00", "sign_counter": -1}}),
+    ];
+    for keys in invalid_key_cases {
+        let mut invalid = valid_profile("pro");
+        invalid["key_store"]["namespaces"]["02:12:34:56:78:9A"]["AA:BB:CC:DD:EE:FF"] = keys;
+        assert_invalid_profile_without_secret(invalid);
+    }
+}
+
+#[test]
 fn typed_conversion_returns_structured_model_mismatch_without_secret_echo() {
     let document = parse(valid_profile("pro"));
 
@@ -159,7 +221,11 @@ fn valid_profile(controller_kind: &str) -> Value {
             "namespaces": {
                 "02:12:34:56:78:9A": {
                     "AA:BB:CC:DD:EE:FF": {
-                        "link_key": SECRET_SENTINEL
+                        "link_key": {
+                            "authenticated": true,
+                            "value": "01010101010101010101010101010101"
+                        },
+                        "link_key_type": 4
                     }
                 }
             }
@@ -168,6 +234,15 @@ fn valid_profile(controller_kind: &str) -> Value {
             "opaque_secret": SECRET_SENTINEL
         }
     })
+}
+
+fn assert_invalid_profile_without_secret(value: Value) {
+    let error = ProfileDocument::parse_json(value.to_string().as_bytes())
+        .expect_err("invalid key-store shape must fail profile parsing");
+
+    assert_eq!(error.kind(), ErrorKind::InvalidProfile);
+    assert!(!error.to_string().contains(SECRET_SENTINEL));
+    assert!(!format!("{error:?}").contains(SECRET_SENTINEL));
 }
 
 fn parse(value: Value) -> ProfileDocument {
