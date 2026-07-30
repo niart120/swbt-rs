@@ -4,6 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use bumble::{Address, AddressType};
 use bumble_hci::{Command, ReturnParameters};
 use bumble_host::{Device, DeviceConfiguration};
 use bumble_transport::{
@@ -121,6 +122,13 @@ impl TransportPort for BumbleTransportPort {
             .start_pairing()
     }
 
+    fn start_reconnect(&mut self) -> TransportResult<()> {
+        self.session
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
+            .start_reconnect()
+    }
+
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
         self.session
             .as_mut()
@@ -183,6 +191,37 @@ impl BumbleSession {
         runtime
             .classic
             .start_pairing(&mut runtime.device, &mut runtime.host)
+    }
+
+    pub(super) fn start_reconnect(&mut self) -> TransportResult<()> {
+        if let Some(terminal) = self.terminal_error() {
+            return Err(terminal);
+        }
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
+        let bonds = runtime
+            .device
+            .bonds()
+            .map_err(|_| TransportError::new(TransportErrorKind::InvalidKeyStore))?;
+        let mut classic_peers = bonds.into_iter().filter_map(|(peer, keys)| {
+            keys.link_key
+                .as_ref()
+                .is_some_and(|key| key.value.len() == 16)
+                .then_some(peer)
+        });
+        let Some(peer) = classic_peers.next() else {
+            return Err(TransportError::new(TransportErrorKind::NoBond));
+        };
+        if classic_peers.next().is_some() {
+            return Err(TransportError::new(TransportErrorKind::InvalidKeyStore));
+        }
+        let peer_address = Address::parse(&peer, AddressType::PUBLIC_DEVICE)
+            .map_err(|_| TransportError::new(TransportErrorKind::InvalidKeyStore))?;
+        runtime
+            .classic
+            .start_reconnect(&mut runtime.device, &mut runtime.host, peer_address, true)
     }
 
     pub(super) fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {

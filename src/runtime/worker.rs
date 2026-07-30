@@ -225,6 +225,16 @@ where
     Pair {
         timeout: Duration,
     },
+    #[cfg_attr(
+        any(not(test), not(feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "T07 connects the public reconnect API to this worker command"
+        )
+    )]
+    Reconnect {
+        timeout: Duration,
+    },
     Input(<R as reporting::sealed::Sealed>::Command<M>),
 }
 
@@ -565,7 +575,7 @@ where
     observed: ObservedSubcommands,
     sessions: ConnectionSessions,
     connection: Option<ConnectionWork>,
-    pair_pending: bool,
+    connection_command_pending: bool,
     connected: bool,
     status: StatusPublisher<M>,
     transport: Box<dyn TransportPort>,
@@ -680,7 +690,7 @@ where
             observed: ObservedSubcommands::default(),
             sessions: ConnectionSessions::new(),
             connection: None,
-            pair_pending: false,
+            connection_command_pending: false,
             connected: false,
             status,
             transport,
@@ -763,7 +773,7 @@ where
             return self.close(request, clock.now(), progress);
         }
 
-        if !self.pair_pending && !R::has_pending(&self.reporting) {
+        if !self.connection_command_pending && !R::has_pending(&self.reporting) {
             for _ in 0..self.budget.command_batch {
                 let Some(command) = commands.try_next() else {
                     break;
@@ -778,7 +788,23 @@ where
                             .and_then(|()| self.begin_connection(clock.now(), timeout))
                         {
                             Ok(_) => {
-                                self.pair_pending = true;
+                                self.connection_command_pending = true;
+                                WorkerCommandProgress::Pending
+                            }
+                            Err(error) => WorkerCommandProgress::Complete(Err(
+                                WorkerCommandError::Pair(PairingError::Begin(error)),
+                            )),
+                        }
+                    }
+                    RuntimeCommand::Reconnect { timeout } => {
+                        match self
+                            .transport
+                            .start_reconnect()
+                            .map_err(WorkerCoreError::Transport)
+                            .and_then(|()| self.begin_connection(clock.now(), timeout))
+                        {
+                            Ok(_) => {
+                                self.connection_command_pending = true;
                                 WorkerCommandProgress::Pending
                             }
                             Err(error) => WorkerCommandProgress::Complete(Err(
@@ -822,7 +848,7 @@ where
             }
         }
         if progress.commands == self.budget.command_batch
-            && !self.pair_pending
+            && !self.connection_command_pending
             && !R::has_pending(&self.reporting)
         {
             progress.immediate = true;
@@ -1060,7 +1086,7 @@ where
                 &mut connection.handshake,
                 ReadinessError::Disconnected { reason },
             );
-            self.complete_pairing(
+            self.complete_connection_command(
                 Err(WorkerCommandError::Pair(PairingError::Readiness(error))),
                 progress,
             );
@@ -1148,7 +1174,7 @@ where
                     return Err(WorkerCoreError::InvalidLifecycle);
                 }
                 self.status.set_lifecycle(self.lifecycle.state());
-                self.complete_pairing(Ok(()), progress);
+                self.complete_connection_command(Ok(()), progress);
                 actions += 1;
             }
             Err(error) => {
@@ -1165,7 +1191,7 @@ where
         progress: &mut StepProgress,
     ) {
         let error = connection.readiness.abort(&mut connection.handshake, error);
-        self.complete_pairing(
+        self.complete_connection_command(
             Err(WorkerCommandError::Pair(PairingError::Readiness(error))),
             progress,
         );
@@ -1187,7 +1213,7 @@ where
         now: Duration,
         mut progress: StepProgress,
     ) -> WorkerStep {
-        self.complete_pairing(Err(WorkerCommandError::Shutdown), &mut progress);
+        self.complete_connection_command(Err(WorkerCommandError::Shutdown), &mut progress);
         let interrupted = R::cancel_for_shutdown(
             &mut self.reporting,
             ReportingEventContext {
@@ -1280,20 +1306,23 @@ where
             }
             _ => PairingError::WorkerFailed,
         };
-        self.complete_pairing(Err(WorkerCommandError::Pair(pairing_error)), &mut progress);
+        self.complete_connection_command(
+            Err(WorkerCommandError::Pair(pairing_error)),
+            &mut progress,
+        );
         self.lifecycle.mark_failed();
         self.connected = false;
         self.status.fail(error.status_message());
         WorkerStep::Failed { error, progress }
     }
 
-    fn complete_pairing(
+    fn complete_connection_command(
         &mut self,
         result: Result<(), WorkerCommandError>,
         progress: &mut StepProgress,
     ) {
-        if self.pair_pending {
-            self.pair_pending = false;
+        if self.connection_command_pending {
+            self.connection_command_pending = false;
             progress
                 .command_results
                 .push(WorkerCommandProgress::Complete(result));

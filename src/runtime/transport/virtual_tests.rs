@@ -1,10 +1,11 @@
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use bumble::keys::{Key, KeyStore, MemoryKeyStore, PairingKeys};
+use bumble::keys::{Key, KeyStore, KeyStoreResult, MemoryKeyStore, PairingKeys};
 use bumble::{Address, AddressType, Uuid};
-use bumble_controller::{Controller as LinkController, LocalLink};
+use bumble_controller::{Controller as LinkController, LocalLink, ROLE_CENTRAL, ROLE_PERIPHERAL};
 use bumble_host::{Device, DeviceConfiguration, pump};
 use bumble_l2cap::{ClassicChannelSpec, ClassicChannelState};
 use bumble_sdp::{DataElement, SdpPdu};
@@ -174,6 +175,63 @@ fn all_model_reporting_combinations_reach_ready_over_the_virtual_packet_path() {
 #[test]
 fn reverse_channels_malformed_packets_and_stored_key_reconnect_remain_isolated() {
     run_resilience_case(VirtualScenario::resilient());
+}
+
+#[test]
+fn stored_key_active_and_incoming_reconnect_reach_ready_without_fresh_pairing() {
+    run_reconnect_case(VirtualReconnectDirection::Active, ROLE_CENTRAL);
+    run_reconnect_case(VirtualReconnectDirection::Incoming, ROLE_PERIPHERAL);
+}
+
+fn run_reconnect_case(direction: VirtualReconnectDirection, expected_swbt_role: u8) {
+    let (transport, trace) = VirtualClassicTransport::new_reconnect::<Pro>(direction);
+    let (status, reader) = status_projection();
+    let mut worker = WorkerCore::new_direct_with_status(
+        SwitchHidProtocol::<Pro>::new(None, DEVICE_INFO_ADDRESS),
+        Box::new(transport),
+        WorkerBudget::new(2, 4),
+        Box::new(|_| {}),
+        status,
+    );
+    let mut commands = QueuedCommands::from([RuntimeCommand::<Pro, Direct>::Reconnect {
+        timeout: CONNECTION_TIMEOUT,
+    }]);
+    let mut clock = ManualClock::default();
+    let mut shutdown = ShutdownLatch::default();
+
+    drive_until_ready(
+        &mut worker,
+        &reader,
+        &mut clock,
+        &mut shutdown,
+        &mut commands,
+    );
+
+    {
+        let trace = lock(&trace);
+        assert_eq!(trace.pairing_completions, 0);
+        assert!(trace.stored_key_reconnect_complete);
+        assert_eq!(trace.reconnect_completions, 1);
+        assert_eq!(trace.reconnect_directions, [direction]);
+        assert_eq!(trace.swbt_connection_roles, [expected_swbt_role]);
+        assert!(trace.sdp_record_complete);
+        assert_eq!(
+            trace
+                .input_reports
+                .iter()
+                .filter(|report| report.first() == Some(&0x21))
+                .count(),
+            2,
+            "report-mode and player-light replies belong to the reconnect session"
+        );
+    }
+    close_ready_worker(&mut worker, &reader, &clock, &mut shutdown, &mut commands);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VirtualReconnectDirection {
+    Active,
+    Incoming,
 }
 
 fn run_periodic_case<M: ControllerModel>() {
@@ -410,7 +468,11 @@ impl VirtualScenario {
 #[derive(Default)]
 struct VirtualTrace {
     stored_key_pairing_complete: bool,
+    stored_key_reconnect_complete: bool,
     pairing_completions: usize,
+    reconnect_completions: usize,
+    reconnect_directions: Vec<VirtualReconnectDirection>,
+    swbt_connection_roles: Vec<u8>,
     sdp_rounds: usize,
     sdp_completions: usize,
     sdp_record_complete: bool,
@@ -433,6 +495,9 @@ struct VirtualClassicTransport {
     scenario: VirtualScenario,
     pairing_started: bool,
     pairing_recorded: bool,
+    reconnect_direction: Option<VirtualReconnectDirection>,
+    reconnect_started: bool,
+    reconnect_recorded: bool,
     connection_requested: bool,
     encryption_started: bool,
     ctkd_started: bool,
@@ -445,6 +510,7 @@ struct VirtualClassicTransport {
     control_cid: Option<u16>,
     interrupt_cid: Option<u16>,
     peer_outputs_sent: bool,
+    key_store_reads: [Arc<AtomicUsize>; 2],
     trace: Arc<Mutex<VirtualTrace>>,
     closed: bool,
 }
@@ -452,6 +518,14 @@ struct VirtualClassicTransport {
 impl VirtualClassicTransport {
     fn new<M: ControllerModel>() -> (Self, Arc<Mutex<VirtualTrace>>) {
         Self::new_with_scenario::<M>(VirtualScenario::default())
+    }
+
+    fn new_reconnect<M: ControllerModel>(
+        direction: VirtualReconnectDirection,
+    ) -> (Self, Arc<Mutex<VirtualTrace>>) {
+        let (mut transport, trace) = Self::new::<M>();
+        transport.reconnect_direction = Some(direction);
+        (transport, trace)
     }
 
     fn new_with_scenario<M: ControllerModel>(
@@ -481,8 +555,10 @@ impl VirtualClassicTransport {
             Device::from_config(swbt_id, swbt_config).expect("configured virtual swbt device"),
         ];
         let link_key = [0xC7; 16];
-        devices[0].set_key_store(stored_link_key(&swbt_address, link_key));
-        devices[1].set_key_store(stored_link_key(&peer_address, link_key));
+        let (peer_store, peer_key_store_reads) = observed_stored_link_key(&swbt_address, link_key);
+        let (swbt_store, swbt_key_store_reads) = observed_stored_link_key(&peer_address, link_key);
+        devices[0].set_key_store(peer_store);
+        devices[1].set_key_store(swbt_store);
         devices[0].power_on(&mut link).expect("power virtual peer");
         devices[1]
             .power_on(&mut link)
@@ -506,6 +582,9 @@ impl VirtualClassicTransport {
                 scenario,
                 pairing_started: false,
                 pairing_recorded: false,
+                reconnect_direction: None,
+                reconnect_started: false,
+                reconnect_recorded: false,
                 connection_requested: false,
                 encryption_started: false,
                 ctkd_started: false,
@@ -518,6 +597,7 @@ impl VirtualClassicTransport {
                 control_cid: None,
                 interrupt_cid: None,
                 peer_outputs_sent: false,
+                key_store_reads: [peer_key_store_reads, swbt_key_store_reads],
                 trace: Arc::clone(&trace),
                 closed: false,
             },
@@ -569,6 +649,8 @@ impl VirtualClassicTransport {
     fn reset_connection_state(&mut self) {
         self.pairing_started = false;
         self.pairing_recorded = false;
+        self.reconnect_started = false;
+        self.reconnect_recorded = false;
         self.connection_requested = false;
         self.encryption_started = false;
         self.ctkd_started = false;
@@ -584,7 +666,10 @@ impl VirtualClassicTransport {
     }
 
     fn advance_peer(&mut self) {
-        if self.pairing_started && !self.connection_requested {
+        let peer_should_initiate = self.pairing_started
+            || (self.reconnect_started
+                && self.reconnect_direction == Some(VirtualReconnectDirection::Incoming));
+        if peer_should_initiate && !self.connection_requested {
             self.devices[0].connect_classic(&mut self.link, self.swbt_address.clone());
             self.connection_requested = true;
             return;
@@ -603,21 +688,41 @@ impl VirtualClassicTransport {
         if !self.devices[0].is_classic_encrypted() || !self.devices[1].is_classic_encrypted() {
             return;
         }
-        if !self.ctkd_started {
-            self.devices[0]
-                .pair_classic(&mut self.link)
-                .expect("start virtual BR/EDR CTKD");
-            self.ctkd_started = true;
-            return;
-        }
-        if !self.stored_key_pairing_complete() {
-            return;
-        }
-        if !self.pairing_recorded {
-            let mut trace = lock(&self.trace);
-            trace.stored_key_pairing_complete = true;
-            trace.pairing_completions += 1;
-            self.pairing_recorded = true;
+        if self.reconnect_started {
+            if !self.reconnect_recorded {
+                if !self.stored_key_reconnect_complete() {
+                    return;
+                }
+                let direction = self
+                    .reconnect_direction
+                    .expect("reconnect direction is configured");
+                let role = self.devices[1]
+                    .classic_connection_role()
+                    .expect("virtual swbt Classic role is known");
+                let mut trace = lock(&self.trace);
+                trace.stored_key_reconnect_complete = true;
+                trace.reconnect_completions += 1;
+                trace.reconnect_directions.push(direction);
+                trace.swbt_connection_roles.push(role);
+                self.reconnect_recorded = true;
+            }
+        } else {
+            if !self.ctkd_started {
+                self.devices[0]
+                    .pair_classic(&mut self.link)
+                    .expect("start virtual BR/EDR CTKD");
+                self.ctkd_started = true;
+                return;
+            }
+            if !self.stored_key_pairing_complete() {
+                return;
+            }
+            if !self.pairing_recorded {
+                let mut trace = lock(&self.trace);
+                trace.stored_key_pairing_complete = true;
+                trace.pairing_completions += 1;
+                self.pairing_recorded = true;
+            }
         }
 
         if self.sdp_cid.is_none() {
@@ -693,6 +798,12 @@ impl VirtualClassicTransport {
         [peer_bond, swbt_bond]
             .into_iter()
             .all(|bond| bond.is_some_and(|keys| keys.link_key.is_some() && keys.ltk.is_some()))
+    }
+
+    fn stored_key_reconnect_complete(&self) -> bool {
+        self.key_store_reads
+            .iter()
+            .all(|reads| reads.load(Ordering::SeqCst) > 0)
     }
 
     fn advance_sdp(&mut self, peer_handle: u16) {
@@ -850,6 +961,27 @@ impl TransportPort for VirtualClassicTransport {
         Ok(())
     }
 
+    fn start_reconnect(&mut self) -> TransportResult<()> {
+        if self.closed {
+            return Err(TransportError::new(TransportErrorKind::Closed));
+        }
+        let direction = self
+            .reconnect_direction
+            .ok_or_else(|| TransportError::new(TransportErrorKind::NoBond))?;
+        if !self.reconnect_started {
+            self.reset_connection_state();
+        }
+        self.session.start_reconnect(
+            &mut self.devices[1],
+            &mut self.link,
+            self.peer_address.clone(),
+            direction == VirtualReconnectDirection::Active,
+        )?;
+        self.reconnect_started = true;
+        self.connection_requested = direction == VirtualReconnectDirection::Active;
+        Ok(())
+    }
+
     fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
         if self.closed {
             return Err(TransportError::new(TransportErrorKind::Closed));
@@ -968,6 +1100,44 @@ fn stored_link_key(peer_address: &Address, value: [u8; 16]) -> MemoryKeyStore {
         )
         .expect("store virtual Classic link key");
     store
+}
+
+fn observed_stored_link_key(
+    peer_address: &Address,
+    value: [u8; 16],
+) -> (ObservedKeyStore, Arc<AtomicUsize>) {
+    let reads = Arc::new(AtomicUsize::new(0));
+    (
+        ObservedKeyStore {
+            inner: stored_link_key(peer_address, value),
+            reads: Arc::clone(&reads),
+        },
+        reads,
+    )
+}
+
+struct ObservedKeyStore {
+    inner: MemoryKeyStore,
+    reads: Arc<AtomicUsize>,
+}
+
+impl KeyStore for ObservedKeyStore {
+    fn delete(&mut self, name: &str) -> KeyStoreResult<()> {
+        self.inner.delete(name)
+    }
+
+    fn update(&mut self, name: &str, keys: PairingKeys) -> KeyStoreResult<()> {
+        self.inner.update(name, keys)
+    }
+
+    fn get(&self, name: &str) -> KeyStoreResult<Option<PairingKeys>> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.inner.get(name)
+    }
+
+    fn get_all(&self) -> KeyStoreResult<Vec<(String, PairingKeys)>> {
+        self.inner.get_all()
+    }
 }
 
 fn public_address(value: &str) -> Address {

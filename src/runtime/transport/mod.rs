@@ -127,6 +127,8 @@ pub(crate) enum TransportErrorKind {
     UnsupportedController,
     /// The configured pairing profile could not supply or persist key material.
     InvalidKeyStore,
+    /// The configured pairing profile has no usable Classic bond.
+    NoBond,
     #[cfg_attr(
         not(any(test, feature = "bumble")),
         allow(
@@ -223,6 +225,7 @@ impl fmt::Display for TransportError {
             TransportErrorKind::InvalidKeyStore => {
                 "transport pairing key store could not be read or updated"
             }
+            TransportErrorKind::NoBond => "transport has no usable Classic bond",
             TransportErrorKind::Closed => "transport is closed",
             TransportErrorKind::SendRejected => "transport rejected the send",
             TransportErrorKind::DrainTimedOut => "transport send drain timed out",
@@ -256,6 +259,10 @@ pub(crate) trait TransportPort: Send {
     fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities>;
 
     fn start_pairing(&mut self) -> TransportResult<()>;
+
+    fn start_reconnect(&mut self) -> TransportResult<()> {
+        Err(TransportError::new(TransportErrorKind::NoBond))
+    }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>>;
 

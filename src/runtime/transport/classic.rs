@@ -32,6 +32,7 @@ pub(super) struct ClassicDeviceSession {
     activity: ActivityNotifier,
     servers_registered: bool,
     pairing: Option<PairingWindow>,
+    reconnect: Option<ReconnectWindow>,
     current: Option<ConnectionSession>,
     events: VecDeque<TransportEvent>,
     terminal: Option<TransportError>,
@@ -39,6 +40,11 @@ pub(super) struct ClassicDeviceSession {
 
 struct PairingWindow {
     peer_address: Option<Address>,
+    connection_request_accepted: bool,
+}
+
+struct ReconnectWindow {
+    peer_address: Address,
     connection_request_accepted: bool,
 }
 
@@ -68,6 +74,7 @@ impl ClassicDeviceSession {
             activity,
             servers_registered: false,
             pairing: None,
+            reconnect: None,
             current: None,
             events: VecDeque::with_capacity(EVENT_QUEUE_CAPACITY),
             terminal: None,
@@ -118,7 +125,7 @@ impl ClassicDeviceSession {
         if self.pairing.is_some() {
             return Ok(());
         }
-        if self.current.is_some() {
+        if self.reconnect.is_some() || self.current.is_some() {
             return Err(TransportError::new(TransportErrorKind::SendRejected));
         }
 
@@ -134,6 +141,42 @@ impl ClassicDeviceSession {
             peer_address: None,
             connection_request_accepted: false,
         });
+        Ok(())
+    }
+
+    pub(super) fn start_reconnect(
+        &mut self,
+        device: &mut Device,
+        link: &mut (dyn HostTransport + 'static),
+        peer_address: Address,
+        initiate: bool,
+    ) -> TransportResult<()> {
+        if let Some(terminal) = &self.terminal {
+            return Err(terminal.clone());
+        }
+        if self
+            .reconnect
+            .as_ref()
+            .is_some_and(|reconnect| reconnect.peer_address == peer_address)
+        {
+            return Ok(());
+        }
+        if self.pairing.is_some() || self.reconnect.is_some() || self.current.is_some() {
+            return Err(TransportError::new(TransportErrorKind::SendRejected));
+        }
+
+        device.set_connectable(link, true);
+        if let Err(error) = device.set_discoverable(link, false) {
+            device.set_connectable(link, false);
+            return Err(map_pairing_source(error));
+        }
+        self.reconnect = Some(ReconnectWindow {
+            peer_address: peer_address.clone(),
+            connection_request_accepted: false,
+        });
+        if initiate {
+            device.connect_classic(link, peer_address);
+        }
         Ok(())
     }
 
@@ -230,7 +273,7 @@ impl ClassicDeviceSession {
             return Err(terminal.clone());
         }
         let Some(current) = self.current.take() else {
-            return self.end_pairing_window(device, link);
+            return self.end_connection_window(device, link);
         };
 
         let mut first_failure = None;
@@ -262,7 +305,7 @@ impl ClassicDeviceSession {
         {
             first_failure = Some(TransportError::new(TransportErrorKind::SourceTerminated));
         }
-        if let Err(error) = self.end_pairing_window(device, link) {
+        if let Err(error) = self.end_connection_window(device, link) {
             if first_failure.is_none() {
                 first_failure = Some(error);
             }
@@ -283,7 +326,7 @@ impl ClassicDeviceSession {
                     link_type: 0x01,
                     ..
                 } => {
-                    let accept = self.pairing.as_mut().is_some_and(|pairing| {
+                    let accept_pairing = self.pairing.as_mut().is_some_and(|pairing| {
                         if pairing.connection_request_accepted {
                             return false;
                         }
@@ -296,7 +339,16 @@ impl ClassicDeviceSession {
                             }
                         }
                     });
-                    if accept {
+                    let accept_reconnect = self.reconnect.as_mut().is_some_and(|reconnect| {
+                        if reconnect.connection_request_accepted
+                            || reconnect.peer_address != peer_address
+                        {
+                            return false;
+                        }
+                        reconnect.connection_request_accepted = true;
+                        true
+                    });
+                    if accept_pairing || accept_reconnect {
                         device.accept_classic(link, peer_address);
                     } else {
                         link.handle_command(
@@ -309,12 +361,20 @@ impl ClassicDeviceSession {
                     }
                 }
                 DeviceEvent::ClassicConnectionEstablished(connection) => {
-                    let expected_peer = self.pairing.as_ref().and_then(|pairing| {
-                        pairing
-                            .connection_request_accepted
-                            .then_some(pairing.peer_address.as_ref())
-                            .flatten()
-                    });
+                    let expected_peer = self
+                        .pairing
+                        .as_ref()
+                        .and_then(|pairing| {
+                            pairing
+                                .connection_request_accepted
+                                .then_some(pairing.peer_address.as_ref())
+                                .flatten()
+                        })
+                        .or_else(|| {
+                            self.reconnect
+                                .as_ref()
+                                .map(|reconnect| &reconnect.peer_address)
+                        });
                     if expected_peer != Some(&connection.peer_address) {
                         let _ = device.disconnect_handle(
                             link,
@@ -331,6 +391,7 @@ impl ClassicDeviceSession {
                         device
                             .set_discoverable(link, false)
                             .map_err(map_pairing_source)?;
+                        device.set_connectable(link, false);
                         self.current = Some(ConnectionSession {
                             handle: connection.connection_handle,
                             peer_address: connection.peer_address,
@@ -353,7 +414,7 @@ impl ClassicDeviceSession {
                     .is_some_and(|current| current.handle == connection_handle) =>
                 {
                     self.current = None;
-                    self.end_pairing_window(device, link)?;
+                    self.end_connection_window(device, link)?;
                     self.enqueue(TransportEvent::Disconnected {
                         reason: Some(reason),
                     });
@@ -476,19 +537,21 @@ impl ClassicDeviceSession {
             let _ = device.disconnect_handle(link, handle, AUTHENTICATION_FAILURE);
         }
         self.current = None;
-        self.end_pairing_window(device, link)?;
+        self.end_connection_window(device, link)?;
         self.enqueue(TransportEvent::Disconnected {
             reason: Some(reason),
         });
         Ok(())
     }
 
-    fn end_pairing_window(
+    fn end_connection_window(
         &mut self,
         device: &mut Device,
         link: &mut (dyn HostTransport + 'static),
     ) -> TransportResult<()> {
-        let was_active = self.pairing.take().is_some();
+        let was_pairing = self.pairing.take().is_some();
+        let was_reconnecting = self.reconnect.take().is_some();
+        let was_active = was_pairing || was_reconnecting;
         if !was_active && !device.config.discoverable && !device.config.connectable {
             return Ok(());
         }
