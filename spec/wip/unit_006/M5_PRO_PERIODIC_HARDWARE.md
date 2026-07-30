@@ -203,7 +203,7 @@ accepted counter に限定する。
   - current hardware metadata と Switch firmware を記録する。
   - fresh SSP から same-session NX Ready までの trace と所要時間を記録する。
   - 失敗時も valid empty profile と adapter reopen を確認する。
-- [ ] **T06 — input reflection and cleanup**
+- [x] **T06 — input reflection and cleanup**
   - A UI 反映、L+R 500 ms、dual sticks を人の観測として記録する。
   - typed IMU command、neutral snapshot、trailing neutral、close/drain、再open を機械観測する。
 - [ ] **T07 — 20-run clean pairing**
@@ -223,7 +223,7 @@ accepted counter に限定する。
 | refactor-skipped | T03 | red: all-feature production test は invalid selector の `TransportOpen` に無関係な cleanup failure が付加されるため失敗。原因は USB session 作成前の Bumble transport に対して共通 cleanup が drain と disconnect を実行し、両方の `Closed` を失敗扱いしたこと。green: unopened Bumble transport の drain、disconnect、close を冪等にし、public error と typed transport source の表示から selector sentinel が露出しないこと、related cleanup failure がないこと、valid empty profile だけが残り temporary file がないことを検査。existing file/directory と dangling symlink の no-replace test も all-feature で成功。部分的に開いた transport の drain、disconnect、close 順序は既存 test で維持。refactor: 追加の構造変更は不要と判断 |
 | refactor-done | T04 | red: `cargo test --example pro_periodic_hardware --all-features --locked` は明示入力 parser、固定 evidence schema、event builder が未定義で compile error。green: public API だけを使う example が absent profile の create-profile、Ready status、A 500 ms、L+R 500 ms、左右 stick の独立4方向各500 ms、non-neutral IMU 1秒、neutral、close、typed profile 再検査、adapter reopen を固定順で実行し、parser/schema の3 test が成功。pair timeout は必須の1–600秒、run index は1–20に制限する。schema `swbt.m5.pro-periodic` version 1 の NDJSON は selector、path、raw profile、key material、USB serial、error source を出力せず、UI 観測を `null` のまま機械結果と分離する。refactor: schema field の上書きを禁止し、各 event を明示 flush、失敗時も `runner_complete` を最終 event に統一。README に Switch pairing 画面、60秒 timeout、run 1 の具体的 command と証拠境界を追記 |
 | refactor-done | T05 | red 1: production HCI identity command の期待を5件に固定した test が、Python 基準にある default Classic link policy `0x0005` の追加で10件中5件失敗。red 2: report mode `0x30` 受理後、protocol Ready 前の Periodic deadline は期待値418 msに対して `None`、worker の due action は期待1件に対して0件。red 3: ACL window 満杯時に automatic report を送らない test は `Backpressured` と transport capacity API が未定義で compile error。green: link policy を scan enable 前に設定し、report-mode holdoff 後は protocol Ready 前でも Periodic を開始する。automatic report は controller の8 packet HCI window が満杯ならその tick を捨て、内部 ACL queue へ積まない。Bumble controlled session、Periodic 6 test、worker 27 test が成功。実機 fresh run 10 は5298 msで same-session NX Ready、reply 16件、入力786件、valid profile、adapter 再openへ到達した。close backlog の再現 run 14 は251件から1秒後163件、修正後の再接続 run 16 は11件から0件へdrainして131 msで close、adapter 再open、全体12174 msで成功。refactor: link policy を named constant 化し、capacity 判定を transport、Bumble session、Classic channel の責務へ分けた。run 14–16 は既存 profile の診断であり fresh 成功数へ含めない |
-| pending | T06 | 実機実行と UI 観測後に追記する |
+| refactor-skipped | T06 | machine: 既存 profile を使う診断 run 16 で、A と L+R は各517 ms、左右 stick 8操作は各516–517 ms、non-neutral IMU は1017 ms、explicit neutral は16 msで完了した。report acceptance は各入力で増加し、neutral snapshot、ACL drain 11→0、close 131 ms、adapter 再open、`runner_complete success=true` を確認。human: ユーザは A、L+R、左右 stick の Switch UI 反映と、neutral 後の入力残りなしを報告した。raw runner の `ui_observed: null` は変更せず、`ui-observation-run-16.ndjson` へ独立記録した。refactor: 製品コード変更はなく、機械観測と人手観測の証拠境界を維持できているため省略 |
 | pending | T07 | 20 run 後に追記する |
 | pending | T08 | completion gate と self-review 後に追記する |
 
@@ -302,12 +302,12 @@ T05 修正後の close 経路を切り分ける診断結果である。
 - [x] pairing 失敗後も valid typed Pro profile が残る
 - [x] production pair が unsupported hook で停止しない
 - [x] single fresh pairing が same-session NX Ready へ到達した
-- [ ] A、L+R 500 ms、dual sticks の UI 反映を観測した
-- [ ] IMU command、neutral、drain、close、再open を検査した
+- [x] A、L+R 500 ms、dual sticks の UI 反映を観測した
+- [x] IMU command、neutral、drain、close、再open を検査した
 - [ ] 20 run の成功率と failure を除外せず記録した
 - [ ] 20 run で hang、leak、stale input、neutral 残存が0件だった
 - [x] hardware metadata と current Switch firmware を記録した
-- [ ] report acceptance と Switch UI 反映を別 evidence として記録した
+- [x] report acceptance と Switch UI 反映を別 evidence として記録した
 - [ ] alpha.1 note draft を作成した
 - [ ] upstream PR を作成していない
 - [ ] placeholder、未根拠の完了表現、secret を含む evidence が残っていない

@@ -73,5 +73,6 @@ Bumble `0.0.233` passed its fresh-pairing hardware control on the same Switch an
 pairing material.
 
 All runner records retain `ui_observed: null`. Report acceptance, typed command completion, neutral
-snapshot, close, and adapter reopen are machine observations. A, L+R, stick reflection, and absence
-of residual UI input require a separate human observation.
+snapshot, close, and adapter reopen are machine observations. The separate
+`ui-observation-run-16.ndjson` records the user's post-run observation: A, L+R, left stick, and
+right stick were reflected in the Switch UI, and no residual input remained after neutral.
