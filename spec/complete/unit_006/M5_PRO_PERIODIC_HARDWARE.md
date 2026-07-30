@@ -1,6 +1,6 @@
 # M5 Pro Periodic fresh pairing
 
-- 状態: **着手中**
+- 状態: **完了**
 - milestone: M5
 - branch: `feat/unit-006-m5-pro-periodic-hardware`
 - 正本:
@@ -211,7 +211,7 @@ accepted counter に限定する。
   - 20 run の成功率と各 run の所要時間を保存する。
   - hang、leak、stale input、neutral 残存を0件にする。
   - failure を除外せず、必要な再現 test と修正を同じ evidence に結ぶ。
-- [ ] **T08 — completion gate and alpha.1 note**
+- [x] **T08 — completion gate and alpha.1 note**
   - Rust 1.87、all/default/no-default、clippy、test、build、rustdoc、fmt、diff check を通す。
   - alpha.1 note draft、未実行条件、residual risk、upstream PR 未作成を記録する。
 
@@ -226,7 +226,7 @@ accepted counter に限定する。
 | refactor-done | T05 | red 1: production HCI identity command の期待を5件に固定した test が、Python 基準にある default Classic link policy `0x0005` の追加で10件中5件失敗。red 2: report mode `0x30` 受理後、protocol Ready 前の Periodic deadline は期待値418 msに対して `None`、worker の due action は期待1件に対して0件。red 3: ACL window 満杯時に automatic report を送らない test は `Backpressured` と transport capacity API が未定義で compile error。green: link policy を scan enable 前に設定し、report-mode holdoff 後は protocol Ready 前でも Periodic を開始する。automatic report は controller の8 packet HCI window が満杯ならその tick を捨て、内部 ACL queue へ積まない。Bumble controlled session、Periodic 6 test、worker 27 test が成功。実機 fresh run 10 は5298 msで same-session NX Ready、reply 16件、入力786件、valid profile、adapter 再openへ到達した。close backlog の再現 run 14 は251件から1秒後163件、修正後の再接続 run 16 は11件から0件へdrainして131 msで close、adapter 再open、全体12174 msで成功。refactor: link policy を named constant 化し、capacity 判定を transport、Bumble session、Classic channel の責務へ分けた。run 14–16 は既存 profile の診断であり fresh 成功数へ含めない |
 | refactor-skipped | T06 | machine: 既存 profile を使う診断 run 16 で、A と L+R は各517 ms、左右 stick 8操作は各516–517 ms、non-neutral IMU は1017 ms、explicit neutral は16 msで完了した。report acceptance は各入力で増加し、neutral snapshot、ACL drain 11→0、close 131 ms、adapter 再open、`runner_complete success=true` を確認。human: ユーザは A、L+R、左右 stick の Switch UI 反映と、neutral 後の入力残りなしを報告した。raw runner の `ui_observed: null` は変更せず、`ui-observation-run-16.ndjson` へ独立記録した。refactor: 製品コード変更はなく、機械観測と人手観測の証拠境界を維持できているため省略 |
 | refactor-done | T07 | red: fresh run 16 は ACL pending 11件のうち2件を5秒後も controller flow-control credit として保持し、fresh run 18 は10件のうち4件を1秒後も保持して explicit close が失敗した。Bumble controlled-session test も、host queue を離れて controller 内でin-flightの packetに対する `drain_interrupt(Duration::ZERO)` を `DrainTimedOut` としていた。green: public fork の `DataPacketQueue` と `Device` に connection別 host-queue-flushed predicate を追加し、従来の controller-acknowledged predicate は変更しない。swbt の drain は満杯の8 packet windowへ追加された1件がhost queueを離れるまで待つが、controller内の8件のcreditは待たない testへ変更した。fork `bumble-host` 全testとall-target clippy、swbt all-feature unit 270 passed / 2 ignoredとclippyが成功。fresh run 19はACL pending 11→10でhost flush後15 ms close、run 20は10→10で12 ms closeし、両方ともprofile検証とadapter再openに成功。20 fresh attempt全体は成功4/20、same-session Ready 8/20、connection failure 8/20、pair timeout 4/20、Ready後close failure 4/20。20/20がrunner完了、valid profile、adapter再openへ到達し、Ready 8件のpre-close snapshotは全件neutral。人手UI記録があるfresh run 16–20は5/5でA、L+R、左右stick反映とneutral残存なし。他15件には人手UI記録がない。refactor: cleanupの`neutral → drain → disconnect`順序は変更せず、fork側で`is_drained`と`is_flushed`を別契約にした。upstream PRは未作成 |
-| pending | T08 | completion gate と self-review 後に追記する |
+| refactor-skipped | T08 | completion: Rust 1.87 all-target/all-feature check と test、default/no-default test、all/default clippy `-D warnings`、all/default/no-default build、all-feature rustdoc `-D warnings`、rustfmt、diff check が成功した。all-feature lib は270 passed / 2 ignored、default とno-defaultは各237 passed / 1 ignoredで、対応するintegration/example testも成功した。T08では実機用ignored testを再実行せず、T04–T07で保存した20 fresh attemptと5件のUI観測を根拠にした。self-reviewでは、最終修正後2/2を長期信頼性の根拠にしないこと、pairing key未保存、fork SHA依存、未検証のOS/adapter/system versionをresidual riskとして残した。fork branch headは`b8c7cd625bc2ac2f58a4beb4ade1264426969819`、upstream PRは0件。alpha.1 note draftを追加した。製品コードを変更しない完了記録のためrefactorは省略 |
 
 ## 8. 対象ファイル
 
@@ -237,7 +237,7 @@ accepted counter に限定する。
 - `src/runtime/`
 - `tests/`
 - `examples/`
-- `spec/wip/unit_006/`
+- `spec/complete/unit_006/`
 
 TDD cycle で必要性を確認したファイルだけを変更する。profile key compatibility と reconnect の
 実装を M5 へ混ぜない。
@@ -300,12 +300,84 @@ commit 前の回帰 gate は、all-feature unit 270 passed / 2 ignored、default
 237 passed / 1 ignoredで、対応する integration test と doctest も成功した。all/default の
 clippy `-D warnings`、build、rustfmt も成功した。実機を要求する ignored test は実行していない。
 
+T08 completion gate は 2026-07-30 に次の結果で完了した。
+
+- Rust 1.87 all-target/all-feature check: 成功
+- Rust 1.87 all-target/all-feature test: lib 270 passed / 2 ignored、integration と example 成功
+- default/no-default all-target test: 各 lib 237 passed / 1 ignored、integration と example 成功
+- all/default clippy `-D warnings`: 成功
+- Rust 1.87 all/default/no-default build: 成功
+- Rust 1.87 all-feature rustdoc `-D warnings`: 成功
+- rustfmt、`git diff --check`: 成功
+- fork branch head: `b8c7cd625bc2ac2f58a4beb4ade1264426969819`
+- upstream PR: 0件
+
+T08 では実機を要求する ignored test を再実行していない。実機結果は T04–T07 の保存済み
+evidence を使い、publish、cross compile、long-run 測定は対象外として実行していない。
+
 実機の全 run と失敗を含む集計は
 `evidence/pro-periodic-windows-20260730/SUMMARY.md` に置く。T05 では fresh run 10 の
 same-session Ready を確認した。run 16 の clean close は stored-key reconnect の製品保証ではなく、
 T05 修正後の close 経路を切り分ける診断結果である。
 
-## 10. 先送り事項
+## 10. alpha.1 note draft
+
+`0.1.0-alpha.1` 向けの注記案:
+
+> `bumble` feature に、Windows の USB HCI adapter を使う Pro Controller / Periodic
+> reporting の同一接続内 fresh pairing と型付き入力を追加しました。profile の target は
+> USB open より先に valid empty envelope として作成し、失敗時も raw pairing material を
+> 記録しません。Windows 11 25H2、CSR8510 A10、Switch 2 system version 22.5.0
+> （ユーザ報告）で20回の修正履歴を保存し、8回が same-session Ready に到達しました。
+> 人手観測を行った5回では A、L+R、左右スティックが Switch UI に反映され、neutral 後の
+> 入力残りはありませんでした。20回中の完了成功は4回、最終 ACL close 修正後は2回中2回
+> です。この件数は長期信頼性を保証しません。
+>
+> pairing key の profile 保存と既存 profile からの reconnect、Pro Direct、Joy-Con、
+> Windows 以外、他の adapter/system version、長時間動作は未対応または未検証です。
+> `bumble` feature は一時的に public fork
+> `niart120/bumble-rs@b8c7cd625bc2ac2f58a4beb4ade1264426969819` を固定しています。
+
+## 11. Self-review
+
+### Work
+
+- spec: `unit_006` の Pro Periodic fresh pairing
+- intent delta: production create-profile、same-session pairing/input、期限付き close、20回の実機証拠
+- non-goals: key persistence/reconnect、Direct、Joy-Con、他 OS、publish、upstream PR
+
+### Findings
+
+| severity | finding | evidence | disposition |
+|---|---|---|---|
+| medium | 修正履歴20回の完了成功は4回、最終修正後の再試行は2回だけで、長期信頼性は未確認 | hardware `SUMMARY.md` の全20回 | M8 の long-run timing と診断へ先送り |
+| medium | pairing key を profile に保存しないため、作成した profile を reconnect に再利用できない | empty profile 検査、M5 対象外 | M6 で persistence、compatibility、reconnect を実装 |
+| medium | `bumble` feature が upstream 未収録の public fork SHA に依存する | fork head の live 検査、upstream PR 0件 | SHAを固定し、upstream PRを作らない制約を明記 |
+| low | 実機証拠は Windows 11 25H2、CSR8510 A10、Switch 2 22.5.0 に限定される | environment metadata | 他 OS、adapter、system version を未検証として公開文書に明記 |
+
+critical/high finding はない。M5 の exit criteria を満たすために上記 finding を隠さず、
+保証範囲を same-session の観測へ限定した。
+
+### Gates
+
+| gate | result | evidence |
+|---|---|---|
+| Requirements | pass | roadmap M5、initial API/architecture、T01–T08 と照合 |
+| Scope | pass | key persistence、reconnect、Direct、Joy-Con、publish を実装していない |
+| TDD / Tests | pass | 各 item の red/green 履歴、completion gate、20 fresh attempt |
+| Static | pass | all/default clippy、rustfmt、rustdoc、residue/secret 検査 |
+| Package | build pass / package not applicable | Rust 1.87 all/default/no-default build。`cargo package` は release 対象外 |
+| Integration Review | pass | public docs、initial spec、work-unit、fork SHA、evidence 集計を照合 |
+| Hardware | pass within M5 scope | 20/20 runner完了・profile検証・adapter再open、Ready 8件のmachine neutral、UI観測5件の残留入力0件 |
+
+未実行:
+
+- T08 では adapter hardware の ignored test を再実行していない。M3 の lifecycle evidence と
+  T04–T07 の runner evidence を参照した。
+- Linux、macOS、cross compile、long-run timing、package/publish は M5 対象外。
+- 15 fresh attempt には人手 UI 観測がなく、うち12件は Ready 前に終了した。
+
+## 12. 先送り事項
 
 - filesystem pairing key persistence、Python compatibility、atomic update、stored-key reconnect:
   M6
@@ -315,11 +387,11 @@ T05 修正後の close 経路を切り分ける診断結果である。
 - Linux、macOS、license/SBOM、release publish: M9
 - explicit local address: 独立 milestone
 
-## 11. 完了チェックリスト
+## 13. 完了チェックリスト
 
-- [ ] T01-T08 がすべて完了している
-- [ ] public create-profile が empty envelope を USB open より先に保存する
-- [ ] feature-disabled と existing target の no-side-effect 契約を維持した
+- [x] T01-T08 がすべて完了している
+- [x] public create-profile が empty envelope を USB open より先に保存する
+- [x] feature-disabled と existing target の no-side-effect 契約を維持した
 - [x] pairing 失敗後も valid typed Pro profile が残る
 - [x] production pair が unsupported hook で停止しない
 - [x] single fresh pairing が same-session NX Ready へ到達した
@@ -329,8 +401,8 @@ T05 修正後の close 経路を切り分ける診断結果である。
 - [x] 20 run でhang、adapter leak、machine stale snapshotは0件、UI観測5件でneutral残存は0件だった
 - [x] hardware metadata と current Switch firmware を記録した
 - [x] report acceptance と Switch UI 反映を別 evidence として記録した
-- [ ] alpha.1 note draft を作成した
+- [x] alpha.1 note draft を作成した
 - [x] upstream PR を作成していない
-- [ ] placeholder、未根拠の完了表現、secret を含む evidence が残っていない
-- [ ] self-review で未実行条件と residual risk を明記した
-- [ ] `spec/complete/unit_006/` へ移動した
+- [x] placeholder、未根拠の完了表現、secret を含む evidence が残っていない
+- [x] self-review で未実行条件と residual risk を明記した
+- [x] `spec/complete/unit_006/` へ移動した
