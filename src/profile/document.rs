@@ -11,9 +11,12 @@ use super::{ControllerKind, LocalAddress};
 
 const PROFILE_FORMAT: &str = "swbt.profile";
 const PROFILE_SCHEMA_VERSION: u64 = 2;
-#[allow(
-    dead_code,
-    reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+#[cfg_attr(
+    not(feature = "bumble"),
+    allow(
+        dead_code,
+        reason = "feature-disabled builds do not adapt profile pairing keys"
+    )
 )]
 const KNOWN_PAIRING_KEY_FIELDS: [&str; 9] = [
     "address_type",
@@ -187,9 +190,12 @@ impl ProfileDocument {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+#[cfg_attr(
+    not(feature = "bumble"),
+    allow(
+        dead_code,
+        reason = "feature-disabled builds do not adapt profile pairing keys"
+    )
 )]
 impl ProfileDocument {
     fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<Value> {
@@ -421,9 +427,12 @@ fn invalid_profile(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidProfile, message)
 }
 
-#[allow(
-    dead_code,
-    reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+#[cfg_attr(
+    not(feature = "bumble"),
+    allow(
+        dead_code,
+        reason = "feature-disabled builds do not adapt profile pairing keys"
+    )
 )]
 fn internal_profile_shape_error() -> Error {
     Error::new(
@@ -490,9 +499,12 @@ impl<M: ControllerModel> PairingProfile<M> {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+#[cfg_attr(
+    not(feature = "bumble"),
+    allow(
+        dead_code,
+        reason = "feature-disabled builds do not adapt profile pairing keys"
+    )
 )]
 impl<M: ControllerModel> PairingProfile<M> {
     pub(crate) fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<Value> {

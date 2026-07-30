@@ -27,6 +27,8 @@ pub(crate) use capabilities::TransportCapabilities;
 #[cfg(any(feature = "bumble", test))]
 pub(crate) use capabilities::{ClassicAclBufferInfo, ControllerVersionInfo, UsbTransportMetadata};
 pub(crate) use config::TransportConfig;
+#[cfg(feature = "bumble")]
+pub(crate) use profile_key_store::ProfileKeyStoreFactory;
 
 #[cfg(test)]
 pub(in crate::runtime) mod fake;
@@ -123,6 +125,8 @@ pub(crate) enum TransportErrorKind {
     InvalidControllerIdentity,
     /// The controller lacks the Classic feature or ACL buffers required by NX.
     UnsupportedController,
+    /// The configured pairing profile could not supply or persist key material.
+    InvalidKeyStore,
     #[cfg_attr(
         not(any(test, feature = "bumble")),
         allow(
@@ -215,6 +219,9 @@ impl fmt::Display for TransportError {
             }
             TransportErrorKind::UnsupportedController => {
                 "transport controller lacks required Classic ACL capability"
+            }
+            TransportErrorKind::InvalidKeyStore => {
+                "transport pairing key store could not be read or updated"
             }
             TransportErrorKind::Closed => "transport is closed",
             TransportErrorKind::SendRejected => "transport rejected the send",

@@ -365,7 +365,9 @@ impl ClassicDeviceSession {
             }
         }
         if !device.take_key_store_errors().is_empty() {
-            self.fail_pairing(device, link, AUTHENTICATION_FAILURE)?;
+            let terminal = TransportError::new(TransportErrorKind::InvalidKeyStore);
+            self.terminal = Some(terminal.clone());
+            return Err(terminal);
         }
         Ok(())
     }

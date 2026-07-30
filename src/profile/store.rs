@@ -115,10 +115,10 @@ pub(crate) trait ProfileCreatePort: ProfileCreateTargetPort + ProfileReadPort {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+        reason = "feature-disabled builds do not persist pairing-key updates"
     )
 )]
 pub(crate) trait ProfileUpdatePort: ProfileReadPort {
@@ -130,10 +130,10 @@ pub(crate) trait ProfileUpdatePort: ProfileReadPort {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
+        reason = "feature-disabled builds do not persist pairing-key updates"
     )
 )]
 fn try_lock_exclusive(file: &File) -> io::Result<()> {

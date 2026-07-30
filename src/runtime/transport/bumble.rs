@@ -14,6 +14,7 @@ use bumble_transport::{
 use crate::adapter::AdapterSelector;
 
 use super::classic::ClassicDeviceSession;
+use super::profile_key_store::ProfileKeyStoreFactory;
 use super::{
     ActivityNotifier, ClassicAclBufferInfo, ControllerVersionInfo, SendAcceptance,
     TransportCapabilities, TransportConfig, TransportError, TransportErrorKind, TransportEvent,
@@ -58,14 +59,30 @@ struct BumbleRuntime {
 pub(crate) struct BumbleTransportPort {
     selector: AdapterSelector,
     config: TransportConfig,
+    profile_key_store: Option<ProfileKeyStoreFactory>,
     session: Option<BumbleSession>,
 }
 
 impl BumbleTransportPort {
+    #[cfg(test)]
     pub(crate) const fn new(selector: AdapterSelector, config: TransportConfig) -> Self {
         Self {
             selector,
             config,
+            profile_key_store: None,
+            session: None,
+        }
+    }
+
+    pub(crate) const fn with_profile_key_store(
+        selector: AdapterSelector,
+        config: TransportConfig,
+        profile_key_store: Option<ProfileKeyStoreFactory>,
+    ) -> Self {
+        Self {
+            selector,
+            config,
+            profile_key_store,
             session: None,
         }
     }
@@ -75,6 +92,7 @@ impl BumbleTransportPort {
         Self {
             selector: AdapterSelector::from("usb:0"),
             config: TransportConfig::for_model::<crate::model::Pro>(),
+            profile_key_store: None,
             session: Some(session),
         }
     }
@@ -85,7 +103,12 @@ impl TransportPort for BumbleTransportPort {
         if let Some(session) = self.session.as_ref() {
             return Ok(session.capabilities());
         }
-        let session = initialize_bumble_session(&self.selector, &self.config, activity)?;
+        let session = initialize_bumble_session(
+            &self.selector,
+            &self.config,
+            activity,
+            self.profile_key_store.as_ref(),
+        )?;
         let capabilities = session.capabilities();
         self.session = Some(session);
         Ok(capabilities)
@@ -318,15 +341,36 @@ pub(super) fn initialize_bumble_session(
     selector: &AdapterSelector,
     config: &TransportConfig,
     activity: ActivityNotifier,
+    profile_key_store: Option<&ProfileKeyStoreFactory>,
 ) -> TransportResult<BumbleSession> {
-    initialize_bumble_session_with(&mut SystemSplitTransportOpener, selector, config, activity)
+    initialize_bumble_session_with_profile(
+        &mut SystemSplitTransportOpener,
+        selector,
+        config,
+        activity,
+        profile_key_store,
+    )
 }
 
+#[cfg(test)]
 pub(super) fn initialize_bumble_session_with<O>(
     opener: &mut O,
     selector: &AdapterSelector,
     config: &TransportConfig,
     activity: ActivityNotifier,
+) -> TransportResult<BumbleSession>
+where
+    O: SplitTransportOpener,
+{
+    initialize_bumble_session_with_profile(opener, selector, config, activity, None)
+}
+
+pub(super) fn initialize_bumble_session_with_profile<O>(
+    opener: &mut O,
+    selector: &AdapterSelector,
+    config: &TransportConfig,
+    activity: ActivityNotifier,
+    profile_key_store: Option<&ProfileKeyStoreFactory>,
 ) -> TransportResult<BumbleSession>
 where
     O: SplitTransportOpener,
@@ -347,6 +391,9 @@ where
         .map_err(map_bumble_error)?;
     let local_address = read_local_address(&mut host)?;
     let capabilities = controller_capabilities(&controller, &device, local_address, usb)?;
+    if let Some(factory) = profile_key_store {
+        device.set_key_store(factory.create(local_address));
+    }
 
     for command in identity_commands(config) {
         send_successful_command_complete(&mut host, command)?;

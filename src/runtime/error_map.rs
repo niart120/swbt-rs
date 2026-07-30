@@ -100,6 +100,10 @@ fn map_pairing_error(error: PairingError) -> Error {
     match error {
         PairingError::Begin(error) => map_worker_core_error(error),
         PairingError::Readiness(error) => map_readiness_error(error),
+        PairingError::InvalidKeyStore => Error::new(
+            ErrorKind::InvalidKeyStore,
+            "controller pairing key store could not be read or updated",
+        ),
         PairingError::WorkerFailed => Error::new(
             ErrorKind::WorkerFailed,
             "controller worker terminated during pairing",
@@ -260,6 +264,15 @@ fn map_worker_core_error(error: WorkerCoreError) -> Error {
             "controller worker handshake failed",
             source,
         ),
+        WorkerCoreError::Transport(source)
+            if source.kind() == crate::runtime::transport::TransportErrorKind::InvalidKeyStore =>
+        {
+            Error::with_source(
+                ErrorKind::InvalidKeyStore,
+                "controller pairing key store could not be read or updated",
+                source,
+            )
+        }
         WorkerCoreError::Transport(source) => Error::with_source(
             ErrorKind::WorkerFailed,
             "controller worker transport failed",
@@ -295,7 +308,23 @@ mod tests {
         },
     };
 
-    use super::{map_command_error, map_worker_outcome};
+    use super::{map_command_error, map_worker_failure, map_worker_outcome};
+
+    #[test]
+    fn key_store_transport_terminal_maps_to_the_public_profile_category() {
+        let error = map_worker_failure(WorkerFailureCause::Core(WorkerCoreError::Transport(
+            TransportError::new(TransportErrorKind::InvalidKeyStore),
+        )));
+
+        assert_eq!(error.kind(), ErrorKind::InvalidKeyStore);
+        assert_eq!(
+            error.to_string(),
+            "controller pairing key store could not be read or updated"
+        );
+        let debug = format!("{error:?}");
+        assert!(debug.contains("InvalidKeyStore"));
+        assert!(!debug.contains("TransportError"));
+    }
 
     #[test]
     fn direct_and_periodic_not_ready_map_to_transport_closed() {

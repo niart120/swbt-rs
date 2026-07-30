@@ -1,11 +1,3 @@
-#![cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "M6 T05 attaches the T04 key-store adapter to the Bumble device"
-    )
-)]
-
 use std::{fmt, io, marker::PhantomData, path::PathBuf};
 
 use bumble::keys::{KeyStore, KeyStoreError, KeyStoreResult, PairingKeys};
@@ -15,6 +7,56 @@ use crate::{
     model::ControllerModel,
     profile::{FileProfileStore, PairingProfile, ProfileReadPort, ProfileUpdatePort},
 };
+
+pub(crate) struct ProfileKeyStoreFactory {
+    create: Box<dyn Fn([u8; 6]) -> ProfileKeyStore + Send>,
+}
+
+impl ProfileKeyStoreFactory {
+    pub(crate) fn for_model<M: ControllerModel>(path: PathBuf) -> Self {
+        Self {
+            create: Box::new(move |local_address| {
+                ProfileKeyStore(Box::new(SwbtProfileKeyStore::<M>::new(
+                    path.clone(),
+                    local_address,
+                )))
+            }),
+        }
+    }
+
+    pub(super) fn create(&self, local_address: [u8; 6]) -> ProfileKeyStore {
+        (self.create)(local_address)
+    }
+}
+
+impl fmt::Debug for ProfileKeyStoreFactory {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProfileKeyStoreFactory")
+            .field("path", &Redacted)
+            .finish_non_exhaustive()
+    }
+}
+
+pub(super) struct ProfileKeyStore(Box<dyn KeyStore>);
+
+impl KeyStore for ProfileKeyStore {
+    fn delete(&mut self, name: &str) -> KeyStoreResult<()> {
+        self.0.delete(name)
+    }
+
+    fn update(&mut self, name: &str, keys: PairingKeys) -> KeyStoreResult<()> {
+        self.0.update(name, keys)
+    }
+
+    fn get(&self, name: &str) -> KeyStoreResult<Option<PairingKeys>> {
+        self.0.get(name)
+    }
+
+    fn get_all(&self) -> KeyStoreResult<Vec<(String, PairingKeys)>> {
+        self.0.get_all()
+    }
+}
 
 pub(super) struct SwbtProfileKeyStore<M: ControllerModel> {
     path: PathBuf,

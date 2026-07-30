@@ -53,6 +53,11 @@ use super::{
     },
 };
 
+#[cfg(feature = "bumble")]
+use super::runtime::RuntimeFactoryConfig;
+#[cfg(feature = "bumble")]
+use crate::profile::PairingProfile;
+
 const DEVICE_INFO_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
 const PAIR_TIMEOUT: Duration = Duration::from_secs(2);
 const PERIODIC_READY_AT: Duration = Duration::from_millis(300);
@@ -67,6 +72,28 @@ fn production_pair_driver_leaves_the_worker_pair_command_in_control() {
     driver
         .after_pair_enqueued()
         .expect("production pairing needs no test-only continuation");
+}
+
+#[cfg(feature = "bumble")]
+#[test]
+fn runtime_factory_projects_only_persistent_profiles_to_the_key_store() {
+    let profile_bytes = ProfileDocument::empty_adapter_default::<crate::model::Pro>()
+        .to_json_bytes()
+        .expect("serialize test profile");
+    let persistent = ProController::builder("usb:0")
+        .profile_path("profiles/runtime-key-store.json")
+        .validate()
+        .expect("validate persistent builder")
+        .finalize_with_profile(|_| PairingProfile::from_json(&profile_bytes))
+        .expect("finalize persistent profile");
+    let ephemeral = ProController::builder("usb:0")
+        .validate()
+        .expect("validate ephemeral builder")
+        .finalize_with_profile(|_| panic!("ephemeral builder must not load a profile"))
+        .expect("finalize ephemeral profile");
+
+    assert!(RuntimeFactoryConfig::from_controller(&persistent).has_profile_key_store());
+    assert!(!RuntimeFactoryConfig::from_controller(&ephemeral).has_profile_key_store());
 }
 
 #[cfg(not(feature = "bumble"))]
@@ -216,6 +243,24 @@ fn public_pair_requires_open_runtime_and_reports_timeout_and_disconnect() {
     disconnected
         .close_without_neutral()
         .expect("close disconnected runtime");
+}
+
+#[test]
+fn public_pair_preserves_profile_key_store_failure_category() {
+    let (mut controller, control) =
+        open_public_pair_controller([PublicPairScript::InvalidKeyStore]);
+
+    let error = controller
+        .pair(PAIR_TIMEOUT)
+        .expect_err("key-store terminal must fail public pairing");
+
+    assert_eq!(error.kind(), ErrorKind::InvalidKeyStore);
+    assert_eq!(
+        error.to_string(),
+        "controller pairing key store could not be read or updated"
+    );
+    assert_eq!(control.pairing_starts(), 1);
+    wait_for_lifecycle(&controller, LifecycleState::Failed);
 }
 
 #[test]
@@ -1151,6 +1196,7 @@ fn open_public_pair_controller(
                 clock,
                 scripts,
                 advance_timeout_on_poll: false,
+                fail_key_store_on_poll: false,
             }),
             worker_clock,
             ChannelWorkerWaiter::new(activity_receiver),
@@ -1203,6 +1249,7 @@ enum PublicPairScript {
     Ready,
     Timeout,
     Disconnect,
+    InvalidKeyStore,
 }
 
 struct PublicPairTransport {
@@ -1211,6 +1258,7 @@ struct PublicPairTransport {
     clock: ManualClock,
     scripts: VecDeque<PublicPairScript>,
     advance_timeout_on_poll: bool,
+    fail_key_store_on_poll: bool,
 }
 
 struct DisconnectingPairDriver {
@@ -1404,11 +1452,17 @@ impl TransportPort for PublicPairTransport {
                 self.control.inject_connected()?;
                 self.control.inject_disconnected(Some(0x13))?;
             }
+            PublicPairScript::InvalidKeyStore => {
+                self.fail_key_store_on_poll = true;
+            }
         }
         Ok(())
     }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+        if self.fail_key_store_on_poll {
+            return Err(TransportError::new(TransportErrorKind::InvalidKeyStore));
+        }
         let events = self.inner.poll(timeout)?;
         if self.advance_timeout_on_poll {
             self.advance_timeout_on_poll = false;

@@ -32,7 +32,7 @@ use crate::{
 #[cfg(any(test, feature = "bumble"))]
 use super::create::with_cleanup_error;
 #[cfg(feature = "bumble")]
-use crate::runtime::transport::TransportConfig;
+use crate::runtime::transport::{ProfileKeyStoreFactory, TransportConfig};
 #[cfg(feature = "bumble")]
 use crate::runtime::worker::ChannelWorkerWaiter;
 
@@ -142,6 +142,8 @@ pub(super) struct RuntimeFactoryConfig {
     selector: crate::AdapterSelector,
     #[cfg(feature = "bumble")]
     transport: TransportConfig,
+    #[cfg(feature = "bumble")]
+    profile_key_store: Option<ProfileKeyStoreFactory>,
 }
 
 #[cfg_attr(
@@ -152,7 +154,7 @@ pub(super) struct RuntimeFactoryConfig {
     )
 )]
 impl RuntimeFactoryConfig {
-    fn from_controller<M, R>(config: &ControllerConfig<M, R>) -> Self
+    pub(super) fn from_controller<M, R>(config: &ControllerConfig<M, R>) -> Self
     where
         M: ControllerModel,
         R: ReportingMode,
@@ -162,6 +164,10 @@ impl RuntimeFactoryConfig {
             Self {
                 selector: config.adapter.clone(),
                 transport: config.transport_config(),
+                profile_key_store: config
+                    .profile
+                    .persistent_path()
+                    .map(|path| ProfileKeyStoreFactory::for_model::<M>(path.to_owned())),
             }
         }
         #[cfg(not(feature = "bumble"))]
@@ -169,6 +175,11 @@ impl RuntimeFactoryConfig {
             let _ = config;
             Self {}
         }
+    }
+
+    #[cfg(all(test, feature = "bumble"))]
+    pub(super) const fn has_profile_key_store(&self) -> bool {
+        self.profile_key_store.is_some()
     }
 }
 
@@ -495,10 +506,13 @@ fn bumble_runtime_components(
     activity_receiver: Receiver<()>,
 ) -> crate::Result<RuntimeComponents<SystemClock, ChannelWorkerWaiter, ProductionPairDriver>> {
     Ok(RuntimeComponents::new(
-        Box::new(crate::runtime::transport::BumbleTransportPort::new(
-            config.selector,
-            config.transport,
-        )),
+        Box::new(
+            crate::runtime::transport::BumbleTransportPort::with_profile_key_store(
+                config.selector,
+                config.transport,
+                config.profile_key_store,
+            ),
+        ),
         SystemClock::new(),
         ChannelWorkerWaiter::new(activity_receiver),
         ProductionPairDriver,

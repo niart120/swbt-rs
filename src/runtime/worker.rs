@@ -298,16 +298,20 @@ pub(crate) enum WorkerCoreError {
 pub(crate) enum PairingError {
     Begin(WorkerCoreError),
     Readiness(ReadinessError),
+    InvalidKeyStore,
     WorkerFailed,
 }
 
 impl WorkerCoreError {
-    pub(crate) const fn status_message(&self) -> &'static str {
+    pub(crate) fn status_message(&self) -> &'static str {
         match self {
             Self::DeadlineOverflow => "worker deadline overflowed",
             Self::InvalidLifecycle => "worker lifecycle invariant failed",
             Self::Session(_) => "worker session failed",
             Self::Handshake(_) => "worker handshake failed",
+            Self::Transport(error) if error.kind() == TransportErrorKind::InvalidKeyStore => {
+                "worker pairing key store failed"
+            }
             Self::Transport(_) => "worker transport failed",
         }
     }
@@ -1268,10 +1272,15 @@ where
     }
 
     fn fail(&mut self, error: WorkerCoreError, mut progress: StepProgress) -> WorkerStep {
-        self.complete_pairing(
-            Err(WorkerCommandError::Pair(PairingError::WorkerFailed)),
-            &mut progress,
-        );
+        let pairing_error = match &error {
+            WorkerCoreError::Transport(source)
+                if source.kind() == TransportErrorKind::InvalidKeyStore =>
+            {
+                PairingError::InvalidKeyStore
+            }
+            _ => PairingError::WorkerFailed,
+        };
+        self.complete_pairing(Err(WorkerCommandError::Pair(pairing_error)), &mut progress);
         self.lifecycle.mark_failed();
         self.connected = false;
         self.status.fail(error.status_message());
