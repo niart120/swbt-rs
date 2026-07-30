@@ -1,4 +1,4 @@
-//! Controller identity values and the internal pairing-profile envelope.
+//! Controller identity, color, and typed pairing-profile values.
 
 mod colors;
 mod document;
@@ -12,7 +12,8 @@ mod identity_tests;
 
 pub use crate::model::ControllerKind;
 pub use colors::{ControllerColors, Rgb24};
-pub(crate) use document::{PairingProfile, ProfileDocument};
+pub use document::PairingProfile;
+pub(crate) use document::ProfileDocument;
 pub use identity::{LocalAddress, ProfileIdentity};
 pub(crate) use store::{
     FileProfileStore, ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState,

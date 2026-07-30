@@ -25,11 +25,13 @@
 //! without replacing an existing target before it opens the adapter and waits
 //! for pairing readiness. Feature-disabled profile creation stops before
 //! creating a file. Pairing-key persistence and reconnect from an existing
-//! profile remain unavailable. Explicit close waits for cleanup completion,
-//! joins the worker, and returns cleanup or join failures. Pending interrupt
-//! sends are drained until they enter the controller's flow-control window;
-//! close does not wait for the controller to return completion credit for every
-//! in-flight packet.
+//! profile remain unavailable. [`PairingProfile`] parses and writes complete
+//! schema v2 JSON without discarding unknown extension fields; filesystem
+//! update is not part of that value API. Explicit close waits for cleanup
+//! completion, joins the worker, and returns cleanup or join failures. Pending
+//! interrupt sends are drained until they enter the controller's flow-control
+//! window; close does not wait for the controller to return completion credit
+//! for every in-flight packet.
 //! Dropping a controller instead uses bounded best-effort shutdown: it omits
 //! neutral reporting and pending-send draining and cannot report failures. Its
 //! internal wait duration is not a public timing guarantee. A new connection
@@ -79,5 +81,7 @@ pub use input::{
     JoyConRButton, JoyConRInputState, ProButton, ProInputState, Stick,
 };
 pub use model::{ControllerModel, HasDualSticks, HasLeftStick, HasRightStick};
-pub use profile::{ControllerColors, ControllerKind, LocalAddress, ProfileIdentity, Rgb24};
+pub use profile::{
+    ControllerColors, ControllerKind, LocalAddress, PairingProfile, ProfileIdentity, Rgb24,
+};
 pub use reporting::{ReportingKind, ReportingMode};

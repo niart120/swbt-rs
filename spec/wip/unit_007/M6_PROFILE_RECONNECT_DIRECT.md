@@ -170,7 +170,7 @@ Switch UI の入力反映と残留入力なしは人が観測し、runner の機
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | T01 Python schema v2 fixture を lossless に typed Rust profile として読み、model mismatch、壊れた key、複数 peer を拒否する | new/edge | unit/integration | adapter open 前の検証、secret-free error を含む |
-| todo | T02 Rust profile を決定的 JSON として出力し、pinned Python reader が読めることを検査する | new | integration | 未知 field 保持、2-space/sorted/trailing newline |
+| refactor-done | T02 Rust profile を決定的 JSON として出力し、pinned Python reader が読めることを検査する | new | integration | 未知 field 保持、2-space/sorted/trailing newline |
 | todo | T03 existing profile を lock 付き atomic replace し、競合と interruption 後も旧版か新版を読める | new/edge | unit/integration | create-new no-replace は維持 |
 | todo | T04 Bumble key object を adapter-default namespace の単一 peer として lossless に取得・更新・明示削除する | new | unit | `SwbtProfileKeyStore<M>` |
 | todo | T05 production pairing の key-store update を profile へ保存し、永続化失敗を worker/public error へ伝える | new/regression | integration | raw key 非出力 |
@@ -185,6 +185,7 @@ Switch UI の入力反映と残留入力なしは人が観測し、runner の機
 | phase | item | evidence |
 |---|---|---|
 | refactor-skipped | T01 | red: `cargo +1.87.0 test profile::document_tests --locked` は namespace 内部を未検証のため `namespace_shape_and_known_key_fields_are_validated_without_secret_echo` が失敗。green: pinned Python `0.6.0` / commit `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` の synthetic Classic link-key fixture を typed Pro profile として読み、namespace/peer address、単一 peer、既知 numeric/key field、hex、metadata type の不正を fixed secret-free error で拒否する7 test が成功。Rust 1.87 all-feature test は272 passed / 2 ignored、stable clippy all-target/all-feature `-D warnings`、rustfmt、diff check が成功。validation helper は raw document と typed key-store adapter の間に留まり、T04 の Bumble conversion を先取りしないため追加 refactor を省略 |
+| refactor-done | T02 | red: `cargo +1.87.0 test --test profile_compat --locked` は crate root に公開 `PairingProfile` がなく compile error。green: `PairingProfile<M>::from_json` と `to_json_bytes` を公開し、raw DTO と field mutation は非公開のまま、未知 top-level/key metadata の保持、反復出力一致、UTF-8、2-space indent、sorted keys、末尾改行を integration test で検査。manual ignored writer が作った Rust profile を Python 3.13、pinned repository HEAD `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` の `PairingProfile.load` が読み、Pro、adapter-default、namespace 1、peer 1を確認。key value は出力していない。Rust 1.87 all-feature lib は272 passed / 2 ignored、profile compatibility は1 passed / 1 manual ignored。stable clippy、all-feature rustdoc `-D warnings`、rustfmt、diff check が成功。refactor: integration fixture setup を共通 helper に抽出し、公開 profile module/crate docs を byte API と filesystem persistence の境界に合わせた |
 
 ## 7. 対象ファイル
 

@@ -36,13 +36,15 @@ impl ProfileDocument {
     }
 
     pub(crate) fn to_json_bytes(&self) -> crate::Result<Vec<u8>> {
-        serde_json::to_vec(&self.value).map_err(|source| {
+        let mut bytes = serde_json::to_vec_pretty(&self.value).map_err(|source| {
             Error::with_source(
                 ErrorKind::Internal,
                 "profile document could not be serialized",
                 source,
             )
-        })
+        })?;
+        bytes.push(b'\n');
+        Ok(bytes)
     }
 
     pub(crate) fn parse_json(bytes: &[u8]) -> crate::Result<Self> {
@@ -315,14 +317,46 @@ impl fmt::Debug for ProfileDocument {
     }
 }
 
-pub(crate) struct PairingProfile<M: ControllerModel> {
+/// A validated schema v2 pairing profile for one controller model.
+///
+/// The type retains unknown JSON fields so that reading and writing a profile
+/// does not discard extensions created by another compatible implementation.
+/// Its [`Debug`](fmt::Debug) representation does not expose the raw document or
+/// pairing-key values.
+pub struct PairingProfile<M: ControllerModel> {
     document: ProfileDocument,
     _model: PhantomData<fn() -> M>,
 }
 
 impl<M: ControllerModel> PairingProfile<M> {
-    #[cfg(test)]
-    pub(crate) const fn controller_kind(&self) -> ControllerKind {
+    /// Parses and validates a UTF-8 schema v2 profile document.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidProfile`] when the document is not valid
+    /// schema v2 JSON or contains an invalid identity or key-store shape.
+    /// Returns [`ErrorKind::ProfileControllerMismatch`] when the document is
+    /// for a controller model other than `M`.
+    pub fn from_json(bytes: &[u8]) -> crate::Result<Self> {
+        Self::try_from(ProfileDocument::parse_json(bytes)?)
+    }
+
+    /// Serializes the complete profile as deterministic UTF-8 JSON.
+    ///
+    /// Object keys are sorted, indentation is two spaces, and the output ends
+    /// with one newline. Unknown fields retained during parsing are included.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::Internal`] if the retained JSON document cannot be
+    /// serialized.
+    pub fn to_json_bytes(&self) -> crate::Result<Vec<u8>> {
+        self.document.to_json_bytes()
+    }
+
+    /// Returns the controller model encoded by this typed profile.
+    #[must_use]
+    pub const fn controller_kind(&self) -> ControllerKind {
         M::KIND
     }
 }
