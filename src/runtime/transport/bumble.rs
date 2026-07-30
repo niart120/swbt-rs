@@ -199,7 +199,7 @@ impl BumbleSession {
                 .as_mut()
                 .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
             drive_runtime(runtime)?;
-            if runtime.classic.interrupt_output_is_drained(&runtime.device) {
+            if runtime.classic.interrupt_output_is_flushed(&runtime.device) {
                 return Ok(());
             }
             let remaining = deadline.saturating_duration_since(Instant::now());

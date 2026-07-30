@@ -734,7 +734,7 @@ sessionごとにreset:
 1. new command acceptance停止
 2. tap / scheduler停止
 3. connectedならtyped neutral encode/send
-4. pending interrupt ACLをbounded drain
+4. 未送信の interrupt ACL がホスト側の待ち行列を離れてコントローラのフロー制御枠へ入るまで期限付きで排出
 5. HID interrupt close
 6. HID control close
 7. Classic ACL disconnect
@@ -744,7 +744,7 @@ sessionごとにreset:
 11. reader termination確認
 12. worker response / join
 
-neutral sendまたはdrain失敗でも後続cleanupを続ける。`Drop`では完全順序を保証しない。
+コントローラ内で送信中の ACL に対する完了クレジットが残っていても、ホスト側の待ち行列が空なら排出完了とする。neutral send または drain 失敗でも後続 cleanup を続ける。`Drop` では完全順序を保証しない。
 
 ## 20. timing
 

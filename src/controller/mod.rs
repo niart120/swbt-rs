@@ -242,9 +242,12 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 
     /// Closes the runtime, attempting a trailing neutral report first.
     ///
-    /// Cleanup continues through drain, disconnect, transport close, worker
-    /// completion, and join if sending the neutral report fails. Calling this
-    /// method when no runtime remains records
+    /// The bounded drain waits until host-side interrupt packets, including the
+    /// trailing neutral report, have entered the controller's flow-control
+    /// window. It does not wait for completion credit for every packet already
+    /// in flight. Cleanup continues through disconnect, transport close, worker
+    /// completion, and join if sending or draining the neutral report fails.
+    /// Calling this method when no runtime remains records
     /// [`crate::LifecycleState::Closed`] and succeeds.
     ///
     /// # Errors
@@ -259,8 +262,10 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 
     /// Closes the runtime without sending a trailing neutral report.
     ///
-    /// Bounded drain, disconnect, transport close, worker completion, and join
-    /// still run. Calling this method when no runtime remains records
+    /// Bounded host-side interrupt drain, disconnect, transport close, worker
+    /// completion, and join still run. The drain waits for packets to enter the
+    /// controller's flow-control window, not for completion credit for every
+    /// in-flight packet. Calling this method when no runtime remains records
     /// [`crate::LifecycleState::Closed`] and succeeds.
     ///
     /// # Errors

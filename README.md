@@ -29,8 +29,8 @@ descriptor-only adapter discovery を実装しています。
 - `build()` 直後の Configured controller には open runtime がないため、入力操作は
   `ErrorKind::TransportClosed` を返します。
 - default feature は空です。`bumble` feature を有効にした場合だけ、reader shutdown と
-  join を追加した一時 fork の commit
-  `48f1bc36169b2692d2a61e87eda4223b126dca2b` と `rusb` を組み込みます。
+  join、および ACL パケットがホスト側の待ち行列を離れた状態の判定を追加した一時 fork の commit
+  `b8c7cd625bc2ac2f58a4beb4ade1264426969819` と `rusb` を組み込みます。
 - `list_adapters()` は `bumble` feature で USB device/config/interface descriptor を読み、
   Bluetooth HCI class の candidate を返します。device open、driver detach、interface claim、
   HCI command は行いません。feature 無効時は `ErrorKind::UnsupportedCapability` を返します。
@@ -44,13 +44,17 @@ descriptor-only adapter discovery を実装しています。
 - model 固有 HID descriptor と SDP record、Classic pairing window、NoInputNoOutput SSP
   policy、SDP/HID control/interrupt session は crate 内の Bumble `LocalLink` packet path
   で検査しています。production USB runtime の poll/send/cleanup に同じ Classic session
-  を接続していますが、実 adapter と Switch を使う pairing は未検証です。
+  を接続し、Windows 11 25H2、CSR8510 A10、Switch 2 system version 22.5.0
+  （ユーザ報告）で実機 pairing と入力を確認しています。他の OS、adapter、system
+  version と長時間の信頼性は未検証です。
 - `bumble` feature の `create_profile()` は既存 target を置換せず、valid empty envelope を
   USB open より先に保存してから pairing と NX readiness を待ちます。feature 無効時は file を
   作らず `ErrorKind::UnsupportedCapability` を返します。pairing key の file 更新と既存
   profile からの reconnect は未実装です。
 - CSR8510 A10 の claim/reset、100回の open/init/close、unplug/reopen は確認済みです。
-  Switch 実機の pairing と入力反映は未検証です。
+  M5 の fresh pairing 20回中8回が same-session Ready に到達し、人手観測を行った5回では
+  A、L+R、左右スティックが Switch UI に反映され、neutral 後の入力残りはありませんでした。
+  20回は修正途中の失敗も含む履歴であり、成功率を製品の信頼性としては扱いません。
 
 ## Pro Periodic 実機 runner
 

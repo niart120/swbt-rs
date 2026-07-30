@@ -541,13 +541,9 @@ fn bumble_session_drives_pairing_connection_drain_and_disconnect() {
     session
         .send_interrupt(&[0x01, 0x02])
         .expect("open production HID interrupt channel accepts input");
-    assert_eq!(
-        session
-            .drain_interrupt(Duration::ZERO)
-            .expect_err("in-flight ACL packet is not drained")
-            .kind(),
-        TransportErrorKind::DrainTimedOut
-    );
+    session
+        .drain_interrupt(Duration::ZERO)
+        .expect("in-flight ACL packet has left the host queue");
     let sent_acl_packets = lock(&acl_packets).len();
     assert!(sent_acl_packets >= 4);
     source.push(Ok(Some(HciPacket::Event(
@@ -569,28 +565,39 @@ fn bumble_session_drives_pairing_connection_drain_and_disconnect() {
             .expect("controller ACL window accepts one in-flight packet");
     }
     assert!(!session.interrupt_send_capacity_available());
+    session
+        .send_interrupt(&[0x30, 8])
+        .expect("full controller window queues one host-side packet");
+    assert_eq!(
+        session
+            .drain_interrupt(Duration::ZERO)
+            .expect_err("host-side packet is not flushed")
+            .kind(),
+        TransportErrorKind::DrainTimedOut
+    );
     source.push(Ok(Some(HciPacket::Event(
         Event::NumberOfCompletedPackets {
             connection_handles: vec![CONNECTION_HANDLE],
             num_completed_packets: vec![1],
         },
     ))));
-    assert!(
-        session
-            .poll(Duration::from_secs(1))
-            .expect("one completion reopens capacity")
-            .is_empty()
-    );
-    assert!(session.interrupt_send_capacity_available());
+    session
+        .drain_interrupt(Duration::from_secs(1))
+        .expect("one completion flushes the host-side packet");
+    assert!(!session.interrupt_send_capacity_available());
     source.push(Ok(Some(HciPacket::Event(
         Event::NumberOfCompletedPackets {
             connection_handles: vec![CONNECTION_HANDLE],
-            num_completed_packets: vec![7],
+            num_completed_packets: vec![8],
         },
     ))));
-    session
-        .drain_interrupt(Duration::from_secs(1))
-        .expect("remaining capacity probe packets drain");
+    assert!(
+        session
+            .poll(Duration::from_secs(1))
+            .expect("remaining completions restore capacity")
+            .is_empty()
+    );
+    assert!(session.interrupt_send_capacity_available());
 
     session.disconnect().expect("disconnect active session");
     session

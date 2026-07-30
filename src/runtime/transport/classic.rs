@@ -200,10 +200,10 @@ impl ClassicDeviceSession {
         Ok(SendAcceptance::ACCEPTED)
     }
 
-    pub(super) fn interrupt_output_is_drained(&self, device: &Device) -> bool {
+    pub(super) fn interrupt_output_is_flushed(&self, device: &Device) -> bool {
         self.current
             .as_ref()
-            .is_none_or(|current| device.classic_channel_output_is_drained(current.handle))
+            .is_none_or(|current| device.classic_channel_output_is_flushed(current.handle))
     }
 
     pub(super) fn interrupt_send_capacity_available(&self, device: &Device) -> bool {

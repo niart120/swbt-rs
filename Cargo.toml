@@ -29,14 +29,14 @@ bumble = [
 ]
 
 [dependencies]
-bumble = { git = "https://github.com/niart120/bumble-rs", rev = "48f1bc36169b2692d2a61e87eda4223b126dca2b", optional = true }
-bumble-controller = { git = "https://github.com/niart120/bumble-rs", rev = "48f1bc36169b2692d2a61e87eda4223b126dca2b", optional = true }
-bumble-hci = { git = "https://github.com/niart120/bumble-rs", rev = "48f1bc36169b2692d2a61e87eda4223b126dca2b", optional = true }
-bumble-hid = { git = "https://github.com/niart120/bumble-rs", rev = "48f1bc36169b2692d2a61e87eda4223b126dca2b", optional = true }
-bumble-host = { git = "https://github.com/niart120/bumble-rs", rev = "48f1bc36169b2692d2a61e87eda4223b126dca2b", optional = true }
-bumble-l2cap = { git = "https://github.com/niart120/bumble-rs", rev = "48f1bc36169b2692d2a61e87eda4223b126dca2b", optional = true }
-bumble-sdp = { git = "https://github.com/niart120/bumble-rs", rev = "48f1bc36169b2692d2a61e87eda4223b126dca2b", optional = true }
-bumble-transport = { git = "https://github.com/niart120/bumble-rs", rev = "48f1bc36169b2692d2a61e87eda4223b126dca2b", optional = true }
+bumble = { git = "https://github.com/niart120/bumble-rs", rev = "b8c7cd625bc2ac2f58a4beb4ade1264426969819", optional = true }
+bumble-controller = { git = "https://github.com/niart120/bumble-rs", rev = "b8c7cd625bc2ac2f58a4beb4ade1264426969819", optional = true }
+bumble-hci = { git = "https://github.com/niart120/bumble-rs", rev = "b8c7cd625bc2ac2f58a4beb4ade1264426969819", optional = true }
+bumble-hid = { git = "https://github.com/niart120/bumble-rs", rev = "b8c7cd625bc2ac2f58a4beb4ade1264426969819", optional = true }
+bumble-host = { git = "https://github.com/niart120/bumble-rs", rev = "b8c7cd625bc2ac2f58a4beb4ade1264426969819", optional = true }
+bumble-l2cap = { git = "https://github.com/niart120/bumble-rs", rev = "b8c7cd625bc2ac2f58a4beb4ade1264426969819", optional = true }
+bumble-sdp = { git = "https://github.com/niart120/bumble-rs", rev = "b8c7cd625bc2ac2f58a4beb4ade1264426969819", optional = true }
+bumble-transport = { git = "https://github.com/niart120/bumble-rs", rev = "b8c7cd625bc2ac2f58a4beb4ade1264426969819", optional = true }
 rusb = { version = "0.9.4", features = ["vendored"], optional = true }
 serde_json = "1"
 tracing = { version = "0.1", optional = true }

@@ -13,7 +13,8 @@
 - Bumble fork:
   - repository: `https://github.com/niart120/bumble-rs`
   - branch: `fix/external-host-reader-lifecycle`
-  - revision: `48f1bc36169b2692d2a61e87eda4223b126dca2b`
+  - base revision: `48f1bc36169b2692d2a61e87eda4223b126dca2b`
+  - revision: `b8c7cd625bc2ac2f58a4beb4ade1264426969819`
   - public fork と branch push だけを許可範囲とし、upstream PR は作成しない
 
 ## 1. 目的
@@ -206,7 +207,7 @@ accepted counter に限定する。
 - [x] **T06 — input reflection and cleanup**
   - A UI 反映、L+R 500 ms、dual sticks を人の観測として記録する。
   - typed IMU command、neutral snapshot、trailing neutral、close/drain、再open を機械観測する。
-- [ ] **T07 — 20-run clean pairing**
+- [x] **T07 — 20-run clean pairing**
   - 20 run の成功率と各 run の所要時間を保存する。
   - hang、leak、stale input、neutral 残存を0件にする。
   - failure を除外せず、必要な再現 test と修正を同じ evidence に結ぶ。
@@ -224,7 +225,7 @@ accepted counter に限定する。
 | refactor-done | T04 | red: `cargo test --example pro_periodic_hardware --all-features --locked` は明示入力 parser、固定 evidence schema、event builder が未定義で compile error。green: public API だけを使う example が absent profile の create-profile、Ready status、A 500 ms、L+R 500 ms、左右 stick の独立4方向各500 ms、non-neutral IMU 1秒、neutral、close、typed profile 再検査、adapter reopen を固定順で実行し、parser/schema の3 test が成功。pair timeout は必須の1–600秒、run index は1–20に制限する。schema `swbt.m5.pro-periodic` version 1 の NDJSON は selector、path、raw profile、key material、USB serial、error source を出力せず、UI 観測を `null` のまま機械結果と分離する。refactor: schema field の上書きを禁止し、各 event を明示 flush、失敗時も `runner_complete` を最終 event に統一。README に Switch pairing 画面、60秒 timeout、run 1 の具体的 command と証拠境界を追記 |
 | refactor-done | T05 | red 1: production HCI identity command の期待を5件に固定した test が、Python 基準にある default Classic link policy `0x0005` の追加で10件中5件失敗。red 2: report mode `0x30` 受理後、protocol Ready 前の Periodic deadline は期待値418 msに対して `None`、worker の due action は期待1件に対して0件。red 3: ACL window 満杯時に automatic report を送らない test は `Backpressured` と transport capacity API が未定義で compile error。green: link policy を scan enable 前に設定し、report-mode holdoff 後は protocol Ready 前でも Periodic を開始する。automatic report は controller の8 packet HCI window が満杯ならその tick を捨て、内部 ACL queue へ積まない。Bumble controlled session、Periodic 6 test、worker 27 test が成功。実機 fresh run 10 は5298 msで same-session NX Ready、reply 16件、入力786件、valid profile、adapter 再openへ到達した。close backlog の再現 run 14 は251件から1秒後163件、修正後の再接続 run 16 は11件から0件へdrainして131 msで close、adapter 再open、全体12174 msで成功。refactor: link policy を named constant 化し、capacity 判定を transport、Bumble session、Classic channel の責務へ分けた。run 14–16 は既存 profile の診断であり fresh 成功数へ含めない |
 | refactor-skipped | T06 | machine: 既存 profile を使う診断 run 16 で、A と L+R は各517 ms、左右 stick 8操作は各516–517 ms、non-neutral IMU は1017 ms、explicit neutral は16 msで完了した。report acceptance は各入力で増加し、neutral snapshot、ACL drain 11→0、close 131 ms、adapter 再open、`runner_complete success=true` を確認。human: ユーザは A、L+R、左右 stick の Switch UI 反映と、neutral 後の入力残りなしを報告した。raw runner の `ui_observed: null` は変更せず、`ui-observation-run-16.ndjson` へ独立記録した。refactor: 製品コード変更はなく、機械観測と人手観測の証拠境界を維持できているため省略 |
-| pending | T07 | 20 run 後に追記する |
+| refactor-done | T07 | red: fresh run 16 は ACL pending 11件のうち2件を5秒後も controller flow-control credit として保持し、fresh run 18 は10件のうち4件を1秒後も保持して explicit close が失敗した。Bumble controlled-session test も、host queue を離れて controller 内でin-flightの packetに対する `drain_interrupt(Duration::ZERO)` を `DrainTimedOut` としていた。green: public fork の `DataPacketQueue` と `Device` に connection別 host-queue-flushed predicate を追加し、従来の controller-acknowledged predicate は変更しない。swbt の drain は満杯の8 packet windowへ追加された1件がhost queueを離れるまで待つが、controller内の8件のcreditは待たない testへ変更した。fork `bumble-host` 全testとall-target clippy、swbt all-feature unit 270 passed / 2 ignoredとclippyが成功。fresh run 19はACL pending 11→10でhost flush後15 ms close、run 20は10→10で12 ms closeし、両方ともprofile検証とadapter再openに成功。20 fresh attempt全体は成功4/20、same-session Ready 8/20、connection failure 8/20、pair timeout 4/20、Ready後close failure 4/20。20/20がrunner完了、valid profile、adapter再openへ到達し、Ready 8件のpre-close snapshotは全件neutral。人手UI記録があるfresh run 16–20は5/5でA、L+R、左右stick反映とneutral残存なし。他15件には人手UI記録がない。refactor: cleanupの`neutral → drain → disconnect`順序は変更せず、fork側で`is_drained`と`is_flushed`を別契約にした。upstream PRは未作成 |
 | pending | T08 | completion gate と self-review 後に追記する |
 
 ## 8. 対象ファイル
@@ -275,6 +276,26 @@ cargo test --locked --features bumble runtime::worker::tests
 # 27 passed
 ```
 
+T07 targeted gate:
+
+```powershell
+# public fork checkout
+cargo test -p bumble-host
+cargo clippy -p bumble-host --all-targets -- -D warnings
+
+# swbt-rs
+cargo test --locked --features bumble runtime::transport::bumble_tests::bumble_session_drives_pairing_connection_drain_and_disconnect -- --exact
+cargo test --locked --features bumble runtime::transport::virtual_tests
+cargo test --locked --all-features --lib
+cargo clippy --locked --all-targets --all-features -- -D warnings
+git ls-remote https://github.com/niart120/bumble-rs.git refs/heads/fix/external-host-reader-lifecycle
+gh api --method GET repos/chaitanyarahalkar/bumble-rs/pulls -f state=all -f head=niart120:fix/external-host-reader-lifecycle --jq length
+```
+
+fork側は `bumble-host` 全testとclippyが成功した。swbt側はcontrolled Bumble test 1件、
+virtual transport 3件、all-feature unit 270 passed / 2 ignored、all-target clippyが成功した。
+fork branch headは`b8c7cd625bc2ac2f58a4beb4ade1264426969819`、対応するupstream PRは0件だった。
+
 commit 前の回帰 gate は、all-feature unit 270 passed / 2 ignored、default unit
 237 passed / 1 ignoredで、対応する integration test と doctest も成功した。all/default の
 clippy `-D warnings`、build、rustfmt も成功した。実機を要求する ignored test は実行していない。
@@ -304,12 +325,12 @@ T05 修正後の close 経路を切り分ける診断結果である。
 - [x] single fresh pairing が same-session NX Ready へ到達した
 - [x] A、L+R 500 ms、dual sticks の UI 反映を観測した
 - [x] IMU command、neutral、drain、close、再open を検査した
-- [ ] 20 run の成功率と failure を除外せず記録した
-- [ ] 20 run で hang、leak、stale input、neutral 残存が0件だった
+- [x] 20 run の成功率と failure を除外せず記録した
+- [x] 20 run でhang、adapter leak、machine stale snapshotは0件、UI観測5件でneutral残存は0件だった
 - [x] hardware metadata と current Switch firmware を記録した
 - [x] report acceptance と Switch UI 反映を別 evidence として記録した
 - [ ] alpha.1 note draft を作成した
-- [ ] upstream PR を作成していない
+- [x] upstream PR を作成していない
 - [ ] placeholder、未根拠の完了表現、secret を含む evidence が残っていない
 - [ ] self-review で未実行条件と residual risk を明記した
 - [ ] `spec/complete/unit_006/` へ移動した

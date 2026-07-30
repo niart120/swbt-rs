@@ -258,6 +258,10 @@ pub(crate) trait TransportPort: Send {
 
     fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance>;
 
+    /// Wait until pending interrupt packets have left the host-side queue.
+    ///
+    /// Packets already in the controller's flow-control window do not keep this
+    /// operation pending while completion credit is outstanding.
     fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()>;
 
     fn disconnect(&mut self) -> TransportResult<()>;

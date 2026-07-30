@@ -297,7 +297,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 
 `open()` は冪等とする。`close()` と `close_without_neutral()` も冪等にし、一部 cleanup が失敗しても残りを続行する。
 
-`close()` は接続中なら trailing neutral report を 1 件送信し、pending interrupt send を bounded timeout で drain した後、HID channel、Classic ACL、HCI transport、worker を停止する。
+`close()` は接続中なら trailing neutral report を 1 件送信し、未送信の interrupt report がホスト側の待ち行列を離れて HCI コントローラのフロー制御枠へ入るまで期限付きで排出した後、HID channel、Classic ACL、HCI transport、worker を停止する。コントローラ内で送信中のパケットに対する完了クレジットがすべて返るまでは待たない。
 
 `close()` と `close_without_neutral()` は cleanup の完了を待って worker を join し、cleanup または join の失敗を `Result` で返す。
 
