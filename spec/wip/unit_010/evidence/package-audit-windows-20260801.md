@@ -27,7 +27,7 @@
 - `Cargo.toml` と `Cargo.lock`
 - `README.md`、`LICENSE`、`CHANGELOG.md`、`SECURITY.md`
 
-変更を commit した clean worktree で `cargo package --locked --list` を実行し、120 files を得た。
+release 文書まで commit した clean worktree で `cargo package --locked --list` を実行し、124 files を得た。
 Cargo が生成する `.cargo_vcs_info.json` と正規化前 manifest の `Cargo.toml.orig` を含む。
 `.agents/`、`.codex/`、`.github/`、`spec/`、`tools/` と実機 trace は含まない。
 

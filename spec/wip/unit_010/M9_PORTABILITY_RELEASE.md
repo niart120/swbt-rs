@@ -78,7 +78,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| refactor-skipped | T01: 0.1.0 package 候補が配布対象だけを含み、registry 用 dependency metadata を持つ | regression | package | 120 files。開発用 root と実機 trace を除外し、8 Git dependency に `=0.1.0` を追加。manifest 構造の追加 refactor は不要 |
+| refactor-skipped | T01: 0.1.0 package 候補が配布対象だけを含み、registry 用 dependency metadata を持つ | regression | package | 最終 candidate 124 files。開発用 root と実機 trace を除外し、8 Git dependency に `=0.1.0` を追加。manifest 構造の追加 refactor は不要 |
 | refactor-done | T02: 6 alias の model/reporting 対応と公開 API 契約を rustdoc と compile 済み example から確認できる | characterization | public API / docs | 既存型契約と全 button wire mapping は green。alias rustdoc に reporting と side-specific input を追記 |
 | refactor-done | T03: Windows 利用者が driver claim、close、unplug、backend rollback を手順どおり実施できる | new | docs | WinUSB 専用 adapter、排他 claim、明示 close、reopen、Python rollback を公開 docs に分離 |
 | refactor-done | T04: Linux 利用者が udev permission と kernel driver ownership を区別でき、支援水準を誤認しない | new | docs / source audit | `TAG+="uaccess"` と fixed Bumble/libusb の自動 detach/release を記録。hardware は未検証と明記 |
@@ -157,7 +157,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 
 | command | result | notes |
 |---|---|---|
-| `cargo package --locked --list` | success | 120 files。`.agents/`、`.codex/`、`.github/`、`spec/`、`tools/`、実機 trace を含まない |
+| `cargo package --locked --list` | success | 最終 candidate 124 files。`.agents/`、`.codex/`、`.github/`、`spec/`、`tools/`、実機 trace を含まない |
 | `cargo package --locked` | failed (tracked blocker) | manifest 検査と packaging 開始後、crates.io に `bumble-controller@0.1.0` がなく停止 |
 | `cargo fmt --all --check` | not run | 実装後に実行 |
 | `cargo check --all-targets --all-features --locked` | not run | 実装後に current Rust と MSRV 1.87 で実行 |
@@ -178,6 +178,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | Linux adapter hardware test | not run | 専用 Linux host/adapter がなく、CI と source audit で代替しない |
 | `cargo-deny 0.20.2 --locked check` | success | advisories、bans、licenses、sources pass。複数版は warning |
 | `cargo-cyclonedx 0.5.9` Windows/Linux all-features | success | CycloneDX 1.5、220/222 dependency components、license 欠落0 |
+| fixture/package secret audit | success | JSON fixture 4件の provenance と合成 key 3件を確認。代表 credential pattern 0件、実機 profile/trace の収録なし |
 | release docs placeholder scan | success | `[TODO]`、`TBD`、`xxx` の残存なし |
 | release docs relative-link audit | success | README、CHANGELOG、SECURITY、platform/troubleshooting、publishing の local link 解決を確認 |
 | `git diff --check` | not run | 各 cycle と全体 gate で実行 |
