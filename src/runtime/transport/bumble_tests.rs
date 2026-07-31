@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bumble_hci::{
     AclDataPacket, Address, AddressType, Command, Event, HciPacket, ReturnParameters,
@@ -609,9 +609,11 @@ fn bumble_session_drives_pairing_connection_drain_and_disconnect() {
         encryption_enabled: 0,
     }))));
     assert_eq!(
-        session
-            .poll(Duration::from_secs(1))
-            .expect("drive accepted Classic connection"),
+        poll_until_transport_event(
+            &mut session,
+            Duration::from_secs(1),
+            "drive accepted Classic connection",
+        ),
         [TransportEvent::Connected]
     );
 
@@ -651,9 +653,11 @@ fn bumble_session_drives_pairing_connection_drain_and_disconnect() {
         },
     ))));
     assert_eq!(
-        session
-            .poll(Duration::from_secs(1))
-            .expect("complete HID interrupt configuration"),
+        poll_until_transport_event(
+            &mut session,
+            Duration::from_secs(1),
+            "complete HID interrupt configuration",
+        ),
         [TransportEvent::HidChannelOpened {
             channel: super::HidChannel::Interrupt,
         }]
@@ -968,6 +972,28 @@ struct ControlledSession {
     drops: Receiver<&'static str>,
     commands: Arc<Mutex<Vec<Command>>>,
     acl_packets: Arc<Mutex<Vec<AclDataPacket>>>,
+}
+
+fn poll_until_transport_event(
+    session: &mut BumbleSession,
+    timeout: Duration,
+    context: &str,
+) -> Vec<TransportEvent> {
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .expect("test poll deadline must be representable");
+    loop {
+        let events = session
+            .poll(deadline.saturating_duration_since(Instant::now()))
+            .unwrap_or_else(|error| panic!("{context}: {error}"));
+        if !events.is_empty() {
+            return events;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{context}: timed out before a transport event"
+        );
+    }
 }
 
 fn controlled_session_with_recording() -> ControlledSession {

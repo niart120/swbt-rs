@@ -37,6 +37,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --all-targets --all-features --locked
 
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --all-targets --all-features --locked
+      - run: cargo test --all-targets --all-features --locked
+
   clippy:
     runs-on: ubuntu-latest
     steps:
@@ -79,3 +87,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --doc --all-features --locked
       - run: cargo doc --no-deps --all-features --locked
+
+  dependency-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2.1.1
+        with:
+          command: check
+          arguments: --locked

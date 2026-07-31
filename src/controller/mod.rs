@@ -636,20 +636,42 @@ impl<M: ControllerModel> ControllerBuilder<M, reporting::Periodic> {
     }
 }
 
-/// Periodic Pro Controller.
+/// Pro Controller using scheduled periodic reports.
+///
+/// This is [`Controller<model::Pro, reporting::Periodic>`]. Input operations
+/// commit the local state for the periodic worker to emit on a later tick.
 pub type ProController = Controller<model::Pro, reporting::Periodic>;
 
-/// Direct-reporting Pro Controller.
+/// Pro Controller using caller-driven direct reports.
+///
+/// This is [`Controller<model::Pro, reporting::Direct>`]. Input operations
+/// require a Ready transport and commit state after transport acceptance.
 pub type DirectProController = Controller<model::Pro, reporting::Direct>;
 
-/// Periodic left Joy-Con.
+/// Left Joy-Con using scheduled periodic reports.
+///
+/// This is [`Controller<model::JoyConL, reporting::Periodic>`]. Its typed input
+/// exposes the left-side buttons and stick only. Input operations commit local
+/// state for the periodic worker to emit on a later tick.
 pub type JoyConL = Controller<model::JoyConL, reporting::Periodic>;
 
-/// Direct-reporting left Joy-Con.
+/// Left Joy-Con using caller-driven direct reports.
+///
+/// This is [`Controller<model::JoyConL, reporting::Direct>`]. Its typed input
+/// exposes the left-side buttons and stick only. Input operations require a
+/// Ready transport and commit state after transport acceptance.
 pub type DirectJoyConL = Controller<model::JoyConL, reporting::Direct>;
 
-/// Periodic right Joy-Con.
+/// Right Joy-Con using scheduled periodic reports.
+///
+/// This is [`Controller<model::JoyConR, reporting::Periodic>`]. Its typed input
+/// exposes the right-side buttons and stick only. Input operations commit local
+/// state for the periodic worker to emit on a later tick.
 pub type JoyConR = Controller<model::JoyConR, reporting::Periodic>;
 
-/// Direct-reporting right Joy-Con.
+/// Right Joy-Con using caller-driven direct reports.
+///
+/// This is [`Controller<model::JoyConR, reporting::Direct>`]. Its typed input
+/// exposes the right-side buttons and stick only. Input operations require a
+/// Ready transport and commit state after transport acceptance.
 pub type DirectJoyConR = Controller<model::JoyConR, reporting::Direct>;
