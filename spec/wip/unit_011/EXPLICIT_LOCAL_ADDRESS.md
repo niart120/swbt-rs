@@ -149,7 +149,7 @@ characterization で使った未割当 universal dummy address は製品経路�
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | T01 CSR GETREQ / volatile SETREQ / warm reset bytes、address decode、response matching、status failure を固定 fixture で検査する | new/characterization | pure unit | adapter I/O なし |
-| pending | T02 Bumble `ExternalHost` が generic command に一致する Vendor Event を期限付きで返し、warm reset command を応答待ちなしで送れることを fork 側 test で固定する | new | dependency unit | public fork branch。upstream PR なし |
+| refactor-done | T02 Bumble `ExternalHost` が generic command に一致する Vendor Event を期限付きで返し、warm reset command を応答待ちなしで送れることを fork 側 test で固定する | new | dependency unit | public fork branch。upstream PR なし |
 | pending | T03 identity preparation の already-active、rewrite→re-enumerate→read-back、非 CSR、write 前 failure、write 後 recovery-required を fake port で検査する | new/safety | transport unit | closed stage、bounded retry |
 | pending | T04 local-address empty profile を adapter open 前に create-new / typed reopen し、feature-disabled と concurrent target の順序を検査する | new/regression | profile/controller | persisted identity が正本 |
 | pending | T05 create/reconnect の normal power-on expected-address guard、actual namespace、adapter-default 無変更を fake / Bumble session で検査する | new/regression | runtime/transport | pairing可視化前に拒否 |
@@ -166,6 +166,7 @@ Bumble fork 側 T02 は fork repository の専用 branch に独立 commit を作
 | phase | item | evidence |
 |---|---|---|
 | refactor-skipped | T01 | red: CSR codec の6 itemを参照する4 unit testsは全item未定義の `E0432` で失敗した。green: opcode `0xFC00`、channel `0xC2`、PSKEY_BDADDR `0x0001`、volatile selector `0x0008` の GETREQ / SETREQ / warm reset bytes、GETRESP matching、status/address decodeをpure moduleへ実装し、targeted default/all-feature testは各4 passed。malformed/non-CSR errorはpayloadを保持しないclosed enumとした。`cargo fmt --check`、all-target/all-feature clippy `-D warnings`、`git diff --check`も成功した。refactor: codecはI/Oなしの単一moduleに分離済みで、重複や不要な公開境界がないため追加変更を行わなかった |
+| refactor-done | T02 | red: Bumble forkのhost testsは`send_vendor_command`と`send_command_without_response`が未定義の`E0599`で失敗した。green: `ExternalHost`へ期限付きVendor Event matchingと応答待ちなしcommand送信を追加し、一致しないpacketをpending順序へ戻した。matching、1 ms timeout、no-response sendの3 testsを追加し、`bumble-transport` host unit 32 passed、package lib clippy `-D warnings`、format、diff checkが成功した。refactor: 既存blocking commandを含むstate/device-flow/write検査をprivate `begin_direct_command`へ集約した。public fork branch `feat/external-host-vendor-command`、commit `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1`へpushし、swbtの8 dependencyとlockを同SHAへ更新した。swbt all-feature testはlibrary 304 passed / 2 ignoredと全integration/doc test成功、all-target/all-feature clippy `-D warnings`も成功した。upstream PRは作成していない |
 
 ## 7. 対象ファイル
 
