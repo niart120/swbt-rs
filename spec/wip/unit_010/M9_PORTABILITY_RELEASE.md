@@ -79,7 +79,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | T01: 0.1.0 package 候補が配布対象だけを含み、registry 用 dependency metadata を持つ | regression | package | 120 files。開発用 root と実機 trace を除外し、8 Git dependency に `=0.1.0` を追加。manifest 構造の追加 refactor は不要 |
-| todo | T02: 6 alias の model/reporting 対応と公開 API 契約を rustdoc と compile 済み example から確認できる | characterization | public API / docs | alias 自体の rustdoc と model/mapping audit を対象にする |
+| refactor-done | T02: 6 alias の model/reporting 対応と公開 API 契約を rustdoc と compile 済み example から確認できる | characterization | public API / docs | 既存型契約と全 button wire mapping は green。alias rustdoc に reporting と side-specific input を追記 |
 | todo | T03: Windows 利用者が driver claim、close、unplug、backend rollback を手順どおり実施できる | new | docs | command、排他条件、失敗時の確認点を含める |
 | todo | T04: Linux 利用者が udev permission と kernel driver ownership を区別でき、支援水準を誤認しない | new | docs / source audit | fixed Bumble revision の `set_auto_detach_kernel_driver(true)` と Drop 境界を根拠にする |
 | todo | T05: Windows と Linux の CI が all-feature compile/test を実行し、hardware 未検証を置き換えない | regression | CI | Windows job を追加し、Ubuntu job の意味を docs と整合させる |
@@ -118,6 +118,19 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 - crates.io blocker の解消は Bumble crate 群の正規公開、または backend 配布境界の再設計を要する。
   fork branch push だけでは registry dependency を満たさない。
 
+### 7.3 public API / model mapping audit
+
+- 公開 controller surface は generic `Controller<M, R>` と6 aliasで過不足がない。新しい dynamic
+  controller enum や Bumble 型の公開は不要である。
+- `tests/controller_type_contract.rs` は6 aliasが3 modelと2 reporting modeの直積に一致することを
+  compile 時に検査する。
+- `src/model/tests.rs` は各 model の全 button を Python 基準 wire position と比較し、reserved bitを
+  使用しないことを検査する。
+- `examples/pro_profile_hardware.rs` と `examples/joycon_profile_hardware.rs` は6 aliasを実際の builder、
+  input、close 経路で使用し、`cargo check --examples --all-features --locked` で compile する。
+- alias rustdoc は Periodic の後続 tick と Direct の Ready/transport acceptance を区別し、Joy-Conは
+  入力できる側だけを明記する。型 signature と error contract は変更しない。
+
 ## 8. 対象ファイル
 
 | path | change | 内容 |
@@ -150,8 +163,11 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | `cargo test --lib protocol:: --no-default-features --locked` | not run | Bumble-free 境界を検査 |
 | `cargo build --all-features --locked` | not run | 実装後に実行 |
 | `cargo build --no-default-features --locked` | not run | 実装後に実行 |
-| `cargo test --doc --all-features --locked` | not run | rustdoc 変更後に実行 |
-| `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked` | not run | public API docs を検査 |
+| `cargo test --test controller_type_contract --locked` | success | 2 passed。6 alias と builder の2型軸を検査 |
+| `cargo test --lib model::tests --no-default-features --locked` | success | 3 passed。model metadata と全 button wire mapping を検査 |
+| `cargo check --examples --all-features --locked` | success | public/hardware examples を compile |
+| `cargo test --doc --all-features --locked` | success | 1 passed |
+| `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked` | success | warning なし |
 | `cargo deny check` | not run | tool availability と policy 作成後に実行 |
 | `git diff --check` | not run | 各 cycle と全体 gate で実行 |
 
