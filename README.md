@@ -14,6 +14,11 @@ library target `swbt` を提供し、
 model-valid input、crate 内部の Switch HID protocol と runtime、公開 controller builder、
 descriptor-only adapter discovery を実装しています。
 
+0.1.0 は未公開です。固定 Bumble fork の同名 crate を crates.io dependency へ正規化できないため、
+現在は repository source からだけ build できます。配布境界の再設計、clean `cargo package --locked`、
+archive smoke が完了するまで `publish = false` を維持します。利用者向けの変更は
+[変更履歴](CHANGELOG.md)、脆弱性報告時の注意は[セキュリティ方針](SECURITY.md)に記録しています。
+
 - pure protocol は `swbt-python` 0.6.0 の固定 commit
   `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` から生成した 55 fixture を直接検査します。
 - `ControllerBuilder::build()` は adapter や worker を開始せず、profile path 未指定なら

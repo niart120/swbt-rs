@@ -47,14 +47,15 @@ required by package `swbt-rs v0.1.0`
 
 2026-08-01 に `cargo info <name>@0.1.0 --registry crates-io` で確認した範囲では、
 `bumble-controller`、`bumble-transport`、`bumble-hci` は crates.io に存在しない。
-crates.io の `bumble@0.2.0` は repository が `google/bumble` の別 crate であり、この依存を
-置き換えない。
+`bumble@0.1.0` は存在するが repository が `google/bumble` の別 crate であり、固定 fork workspace の
+同名 crate を置き換えない。したがって不足 subcrate の公開だけでは解決せず、crate 名または backend
+の配布境界を再設計する必要がある。
 
 ## 判定
 
 - package file selection: pass
 - Git dependency version metadata: pass
-- verified package archive: blocked by unpublished registry dependencies
+- verified package archive: blocked by registry name collision and unpublished dependencies
 - `publish = false`: 維持
 - `cargo package --no-verify`: not run。archive smoke と registry dependency 解決を検証しないため、
   release gate の代替にしない

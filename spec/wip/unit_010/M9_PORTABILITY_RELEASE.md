@@ -84,8 +84,8 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | refactor-done | T04: Linux 利用者が udev permission と kernel driver ownership を区別でき、支援水準を誤認しない | new | docs / source audit | `TAG+="uaccess"` と fixed Bumble/libusb の自動 detach/release を記録。hardware は未検証と明記 |
 | green | T05: Windows と Linux の CI が all-feature compile/test を実行し、hardware 未検証を置き換えない | regression | CI | `windows-latest` に all-targets/all-features check/test を追加。remote run と refactor 判定は PR 後 |
 | refactor-done | T06: resolved dependency graph の license と SBOM inventory が生成され、未知 license と禁止 source を検出できる | new | package / release | cargo-deny policy と Windows/Linux CycloneDX 1.5 SBOM を追加。CI job でも検査 |
-| todo | T07: changelog、security policy、hardware matrix、known limitations、source baseline、release/rollback checklist を一続きに辿れる | new | docs / release | M8 timing variation と crates.io dependency blocker を含める |
-| deferred | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | `bumble-controller@0.1.0` を含む必要 crate が registry にない。`--no-verify` を成功根拠にしない |
+| refactor-done | T07: changelog、security policy、hardware matrix、known limitations、source baseline、release/rollback checklist を一続きに辿れる | new | docs / release | 未公開 candidate と明記し、M8 timing variation、registry 名衝突、private vulnerability reporting 未設定を停止条件にした |
+| deferred | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | crates.io の `bumble@0.1.0` は別実装で、他の必要 crate は未公開。配布境界の再設計が必要。`--no-verify` を成功根拠にしない |
 | todo | T09: local gate と public docs review が変更範囲に対して成功し、未実行 hardware/publish を明記する | regression | quality gate | all/default/no-default、MSRV、doc、package、diff を記録する |
 
 ## 7. 設計メモ
@@ -98,9 +98,9 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
   package 候補に含める。
 - clean worktree の `cargo package --locked` は、Bumble dependency に version requirement が
   ないため packaging 前検査で停止する。
-- 2026-08-01 に crates.io registry を指定して確認したところ、`bumble-transport@0.1.0` と
-  `bumble-hci@0.1.0` は存在しない。`bumble@0.2.0` は Google Bumble の別実装であり、固定 fork
-  workspace の `bumble@0.1.0` の代替ではない。
+- 2026-08-01 に crates.io registry を指定して確認したところ、`bumble-controller@0.1.0`、
+  `bumble-transport@0.1.0`、`bumble-hci@0.1.0` は存在しない。`bumble@0.1.0` は存在するが Google
+  Bumble の別実装であり、固定 fork workspace の同名 crate の代替ではない。
 - fixed Bumble revision の `bumble-transport/src/usb.rs` は USB handle に
   `set_auto_detach_kernel_driver(true)` を設定してから interface を claim する。
 - current CI は `ubuntu-latest` のみで、Windows build/test は local evidence だけである。
@@ -116,7 +116,10 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 - Linux の detach/reattach code を `swbt-rs` に重複実装しない。Bumble transport が handle と
   interface lifecycle を所有するため、公開 docs と source revision 監査で境界を固定する。
 - crates.io blocker の解消は Bumble crate 群の正規公開、または backend 配布境界の再設計を要する。
-  fork branch push だけでは registry dependency を満たさない。
+  `bumble` 自体の registry 名も別実装と衝突するため、不足 subcrate の公開や fork branch push だけでは
+  registry dependency を満たさない。
+- GitHub Private Vulnerability Reporting が無効の間は、恒久的な非公開報告先がない。0.1.0 の公開前に
+  有効化し、`SECURITY.md` を実際の報告先へ更新する。
 
 ### 7.3 public API / model mapping audit
 
@@ -145,6 +148,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | `CHANGELOG.md` | new | 0.1.0 の利用者向け変更履歴 |
 | `SECURITY.md` | new | 脆弱性報告と秘密情報を含む報告の扱い |
 | `deny.toml` | new | license/advisory/source policy |
+| `spec/initial/source-baseline.md` | modify | 0.1.0 candidate の fork revision と差分 |
 | `spec/publishing.md` | new | 0.1.0 release runbook と停止条件 |
 | `spec/wip/unit_010/evidence/` | new | package list、license/SBOM、source audit、gate の非秘密 evidence |
 | `spec/wip/unit_010/M9_PORTABILITY_RELEASE.md` | new | 本作業仕様 |
@@ -174,12 +178,15 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | Linux adapter hardware test | not run | 専用 Linux host/adapter がなく、CI と source audit で代替しない |
 | `cargo-deny 0.20.2 --locked check` | success | advisories、bans、licenses、sources pass。複数版は warning |
 | `cargo-cyclonedx 0.5.9` Windows/Linux all-features | success | CycloneDX 1.5、220/222 dependency components、license 欠落0 |
+| release docs placeholder scan | success | `[TODO]`、`TBD`、`xxx` の残存なし |
+| release docs relative-link audit | success | README、CHANGELOG、SECURITY、platform/troubleshooting、publishing の local link 解決を確認 |
 | `git diff --check` | not run | 各 cycle と全体 gate で実行 |
 
 ## 10. 先送り事項
 
 - crates.io publish: Bumble fork の必要 crate が registry に存在せず、`cargo package` を検証できない。
-  `spec/publishing.md` に registry dependency gate と再開条件を置く。
+  同名 `bumble` も別実装が使用中である。`spec/publishing.md` に配布境界の再設計、registry dependency
+  gate、再開条件を置く。
 - Linux hardware: 専用 Linux host/adapter を用いた pair/reconnect/close/reattach は未実行。
   `docs/platform-support.md` で build-tested と hardware-verified を分け、後続 evidence の完了条件を置く。
 - macOS: roadmap どおり unsupported。USB transport と driver ownership の調査を別 unit とする。
@@ -190,9 +197,9 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test List を作成した
 - [ ] TDD Test List の各 item を更新した
-- [ ] Windows/Linux/macOS の支援水準を公開文書へ反映した
-- [ ] public API、alias、model/mapping、examples を監査した
-- [ ] package file list、license/SBOM、security、changelog を検査した
-- [ ] release/rollback runbook と blocker を検査した
+- [x] Windows/Linux/macOS の支援水準を公開文書へ反映した
+- [x] public API、alias、model/mapping、examples を監査した
+- [x] package file list、license/SBOM、security、changelog を検査した
+- [x] release/rollback runbook と blocker を検査した
 - [ ] 検証結果または未実行理由を記録した
 - [x] package / release / public API に触れる gate を記録した
