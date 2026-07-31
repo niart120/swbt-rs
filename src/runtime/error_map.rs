@@ -7,7 +7,7 @@ use crate::{
         lifecycle::LifecycleCommandError,
         periodic::PeriodicError,
         readiness::ReadinessError,
-        worker::{PairingError, WorkerCommandError, WorkerCoreError},
+        worker::{PairingError, ReconnectError, WorkerCommandError, WorkerCoreError},
         worker_thread::{WorkerFailureCause, WorkerJoinError, WorkerThreadOutcome},
     },
 };
@@ -64,6 +64,7 @@ pub(crate) fn map_command_error(error: WorkerCommandError) -> Error {
             "controller shutdown interrupted the operation",
         ),
         WorkerCommandError::Pair(error) => map_pairing_error(error),
+        WorkerCommandError::Reconnect(error) => map_reconnect_error(error),
         WorkerCommandError::Direct(DirectTapError::NotReady)
         | WorkerCommandError::Periodic(PeriodicError::NotReady) => Error::new(
             ErrorKind::TransportClosed,
@@ -96,15 +97,65 @@ pub(crate) fn map_command_error(error: WorkerCommandError) -> Error {
     }
 }
 
+fn map_reconnect_error(error: ReconnectError) -> Error {
+    match error {
+        ReconnectError::Begin(WorkerCoreError::Transport(source))
+            if source.kind() == crate::runtime::transport::TransportErrorKind::NoBond =>
+        {
+            Error::with_source(
+                ErrorKind::NoBond,
+                "controller profile has no usable Classic bond",
+                source,
+            )
+        }
+        ReconnectError::Begin(error) => map_worker_core_error(error),
+        ReconnectError::Readiness(error) => map_reconnect_readiness_error(error),
+        ReconnectError::InvalidKeyStore => Error::new(
+            ErrorKind::InvalidKeyStore,
+            "controller pairing key store could not be read or updated",
+        ),
+        ReconnectError::WorkerFailed => Error::new(
+            ErrorKind::WorkerFailed,
+            "controller worker terminated during reconnect",
+        ),
+    }
+}
+
 fn map_pairing_error(error: PairingError) -> Error {
     match error {
         PairingError::Begin(error) => map_worker_core_error(error),
         PairingError::Readiness(error) => map_readiness_error(error),
+        PairingError::InvalidKeyStore => Error::new(
+            ErrorKind::InvalidKeyStore,
+            "controller pairing key store could not be read or updated",
+        ),
         PairingError::WorkerFailed => Error::new(
             ErrorKind::WorkerFailed,
             "controller worker terminated during pairing",
         ),
     }
+}
+
+fn map_reconnect_readiness_error(error: ReadinessError) -> Error {
+    let (kind, message) = match &error {
+        ReadinessError::TimedOut => (
+            ErrorKind::ConnectionTimeout,
+            "controller reconnect timed out",
+        ),
+        ReadinessError::Disconnected { .. } => (
+            ErrorKind::ConnectionFailed,
+            "controller disconnected before reconnect completed",
+        ),
+        ReadinessError::StaleSession { .. } | ReadinessError::HandshakeSessionMismatch { .. } => (
+            ErrorKind::Protocol,
+            "controller reconnect protocol state was inconsistent",
+        ),
+        ReadinessError::Scheduler(_) => (
+            ErrorKind::ConnectionFailed,
+            "controller reconnect readiness failed",
+        ),
+    };
+    Error::with_source(kind, message, error)
 }
 
 fn map_readiness_error(error: ReadinessError) -> Error {
@@ -260,6 +311,24 @@ fn map_worker_core_error(error: WorkerCoreError) -> Error {
             "controller worker handshake failed",
             source,
         ),
+        WorkerCoreError::Transport(source)
+            if source.kind() == crate::runtime::transport::TransportErrorKind::InvalidKeyStore =>
+        {
+            Error::with_source(
+                ErrorKind::InvalidKeyStore,
+                "controller pairing key store could not be read or updated",
+                source,
+            )
+        }
+        WorkerCoreError::Transport(source)
+            if source.kind() == crate::runtime::transport::TransportErrorKind::NoBond =>
+        {
+            Error::with_source(
+                ErrorKind::NoBond,
+                "controller profile has no usable Classic bond",
+                source,
+            )
+        }
         WorkerCoreError::Transport(source) => Error::with_source(
             ErrorKind::WorkerFailed,
             "controller worker transport failed",
@@ -295,7 +364,23 @@ mod tests {
         },
     };
 
-    use super::{map_command_error, map_worker_outcome};
+    use super::{map_command_error, map_worker_failure, map_worker_outcome};
+
+    #[test]
+    fn key_store_transport_terminal_maps_to_the_public_profile_category() {
+        let error = map_worker_failure(WorkerFailureCause::Core(WorkerCoreError::Transport(
+            TransportError::new(TransportErrorKind::InvalidKeyStore),
+        )));
+
+        assert_eq!(error.kind(), ErrorKind::InvalidKeyStore);
+        assert_eq!(
+            error.to_string(),
+            "controller pairing key store could not be read or updated"
+        );
+        let debug = format!("{error:?}");
+        assert!(debug.contains("InvalidKeyStore"));
+        assert!(!debug.contains("TransportError"));
+    }
 
     #[test]
     fn direct_and_periodic_not_ready_map_to_transport_closed() {

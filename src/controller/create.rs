@@ -107,6 +107,9 @@ where
     /// Starts pairing and waits for the worker's readiness result.
     fn pair(&mut self, timeout: Duration) -> crate::Result<()>;
 
+    /// Starts stored-key reconnect and waits for the worker's readiness result.
+    fn reconnect(&mut self, timeout: Duration) -> crate::Result<()>;
+
     /// Sends one reporting-specific command and waits for its worker response.
     fn request(
         &mut self,
@@ -147,6 +150,10 @@ impl<M: ControllerModel, R: ReportingMode> ControllerRuntime<M, R> {
         self.port.pair(timeout)
     }
 
+    pub(super) fn reconnect(&mut self, timeout: Duration) -> crate::Result<()> {
+        self.port.reconnect(timeout)
+    }
+
     pub(super) fn close(self, mode: CloseMode) -> crate::Result<()> {
         self.port.close(mode)
     }
@@ -175,6 +182,13 @@ where
         Err(Error::new(
             ErrorKind::WorkerFailed,
             "test runtime token cannot process pairing commands",
+        ))
+    }
+
+    fn reconnect(&mut self, _timeout: Duration) -> crate::Result<()> {
+        Err(Error::new(
+            ErrorKind::WorkerFailed,
+            "test runtime token cannot process reconnect commands",
         ))
     }
 

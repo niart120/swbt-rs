@@ -17,8 +17,9 @@ use std::{
 use bumble_transport::Error as BumbleError;
 
 use crate::{
-    CreateProfileOptions, DirectJoyConL, DirectJoyConR, DirectProController, Error, ErrorKind,
-    JoyConL, JoyConLButton, JoyConR, JoyConRButton, ProButton, ProController, ProfileIdentity,
+    ConnectOptions, ConnectionPath, ConnectionStatus, CreateProfileOptions, DirectJoyConL,
+    DirectJoyConR, DirectProController, Error, ErrorKind, JoyConL, JoyConLButton, JoyConR,
+    JoyConRButton, ProButton, ProController, ProfileIdentity,
     controller::Controller,
     diagnostics::LifecycleState,
     input::{Button, InputState},
@@ -53,6 +54,11 @@ use super::{
     },
 };
 
+#[cfg(feature = "bumble")]
+use super::runtime::RuntimeFactoryConfig;
+#[cfg(feature = "bumble")]
+use crate::profile::PairingProfile;
+
 const DEVICE_INFO_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
 const PAIR_TIMEOUT: Duration = Duration::from_secs(2);
 const PERIODIC_READY_AT: Duration = Duration::from_millis(300);
@@ -67,6 +73,28 @@ fn production_pair_driver_leaves_the_worker_pair_command_in_control() {
     driver
         .after_pair_enqueued()
         .expect("production pairing needs no test-only continuation");
+}
+
+#[cfg(feature = "bumble")]
+#[test]
+fn runtime_factory_projects_only_persistent_profiles_to_the_key_store() {
+    let profile_bytes = ProfileDocument::empty_adapter_default::<crate::model::Pro>()
+        .to_json_bytes()
+        .expect("serialize test profile");
+    let persistent = ProController::builder("usb:0")
+        .profile_path("profiles/runtime-key-store.json")
+        .validate()
+        .expect("validate persistent builder")
+        .finalize_with_profile(|_| PairingProfile::from_json(&profile_bytes))
+        .expect("finalize persistent profile");
+    let ephemeral = ProController::builder("usb:0")
+        .validate()
+        .expect("validate ephemeral builder")
+        .finalize_with_profile(|_| panic!("ephemeral builder must not load a profile"))
+        .expect("finalize ephemeral profile");
+
+    assert!(RuntimeFactoryConfig::from_controller(&persistent).has_profile_key_store());
+    assert!(!RuntimeFactoryConfig::from_controller(&ephemeral).has_profile_key_store());
 }
 
 #[cfg(not(feature = "bumble"))]
@@ -219,6 +247,24 @@ fn public_pair_requires_open_runtime_and_reports_timeout_and_disconnect() {
 }
 
 #[test]
+fn public_pair_preserves_profile_key_store_failure_category() {
+    let (mut controller, control) =
+        open_public_pair_controller([PublicPairScript::InvalidKeyStore]);
+
+    let error = controller
+        .pair(PAIR_TIMEOUT)
+        .expect_err("key-store terminal must fail public pairing");
+
+    assert_eq!(error.kind(), ErrorKind::InvalidKeyStore);
+    assert_eq!(
+        error.to_string(),
+        "controller pairing key store could not be read or updated"
+    );
+    assert_eq!(control.pairing_starts(), 1);
+    wait_for_lifecycle(&controller, LifecycleState::Failed);
+}
+
+#[test]
 fn public_pair_can_start_a_new_session_after_disconnect() {
     let (mut controller, control) =
         open_public_pair_controller([PublicPairScript::Ready, PublicPairScript::Ready]);
@@ -240,6 +286,197 @@ fn public_pair_can_start_a_new_session_after_disconnect() {
     controller
         .close_without_neutral()
         .expect("close repeated-pair runtime");
+}
+
+#[test]
+fn public_reconnect_classifies_recoverable_and_terminal_failures() {
+    let mut closed = DirectProController::builder("fake-adapter")
+        .build()
+        .expect("build configured controller");
+    assert_eq!(
+        closed
+            .reconnect(PAIR_TIMEOUT)
+            .expect_err("reconnect requires an open runtime")
+            .kind(),
+        ErrorKind::TransportClosed
+    );
+
+    for (script, expected) in [
+        (PublicPairScript::NoBond, ErrorKind::NoBond),
+        (PublicPairScript::Timeout, ErrorKind::ConnectionTimeout),
+        (PublicPairScript::Disconnect, ErrorKind::ConnectionFailed),
+    ] {
+        let (mut controller, _control, operations) = open_public_connection_controller([script]);
+        let error = controller
+            .reconnect(PAIR_TIMEOUT)
+            .expect_err("scripted reconnect must fail");
+        assert_eq!(error.kind(), expected);
+        assert_eq!(*lock(&operations), [PublicConnectionOperation::Reconnect]);
+        assert_eq!(controller.status().lifecycle, LifecycleState::Open);
+        controller
+            .close_without_neutral()
+            .expect("close recoverable reconnect runtime");
+    }
+
+    let (mut terminal, _control, operations) =
+        open_public_connection_controller([PublicPairScript::InvalidKeyStore]);
+    assert_eq!(
+        terminal
+            .reconnect(PAIR_TIMEOUT)
+            .expect_err("invalid key store is terminal")
+            .kind(),
+        ErrorKind::InvalidKeyStore
+    );
+    assert_eq!(*lock(&operations), [PublicConnectionOperation::Reconnect]);
+    wait_for_lifecycle(&terminal, LifecycleState::Failed);
+}
+
+#[test]
+fn public_connect_reconnects_first_and_pairs_only_when_no_bond_is_allowed() {
+    let (mut reconnected, _control, operations) =
+        open_public_connection_controller([PublicPairScript::Ready]);
+    assert_eq!(
+        reconnected
+            .connect(ConnectOptions {
+                timeout: PAIR_TIMEOUT,
+                allow_pairing: true,
+            })
+            .expect("usable bond reconnects"),
+        ConnectionPath::Reconnected
+    );
+    assert_eq!(*lock(&operations), [PublicConnectionOperation::Reconnect]);
+    reconnected
+        .close_without_neutral()
+        .expect("close reconnected runtime");
+
+    let (mut paired, _control, operations) =
+        open_public_connection_controller([PublicPairScript::NoBond, PublicPairScript::Ready]);
+    assert_eq!(
+        paired
+            .connect(ConnectOptions {
+                timeout: PAIR_TIMEOUT,
+                allow_pairing: true,
+            })
+            .expect("NoBond may enter explicit pairing"),
+        ConnectionPath::Paired
+    );
+    assert_eq!(
+        *lock(&operations),
+        [
+            PublicConnectionOperation::Reconnect,
+            PublicConnectionOperation::Pair
+        ]
+    );
+    paired
+        .close_without_neutral()
+        .expect("close paired runtime");
+
+    let (mut forbidden, _control, operations) =
+        open_public_connection_controller([PublicPairScript::NoBond]);
+    assert_eq!(
+        forbidden
+            .connect(ConnectOptions {
+                timeout: PAIR_TIMEOUT,
+                allow_pairing: false,
+            })
+            .expect_err("pairing fallback is disabled")
+            .kind(),
+        ErrorKind::NoBond
+    );
+    assert_eq!(*lock(&operations), [PublicConnectionOperation::Reconnect]);
+    forbidden
+        .close_without_neutral()
+        .expect("close no-bond runtime");
+
+    let (mut stale, _control, operations) =
+        open_public_connection_controller([PublicPairScript::Disconnect, PublicPairScript::Ready]);
+    assert_eq!(
+        stale
+            .connect(ConnectOptions {
+                timeout: PAIR_TIMEOUT,
+                allow_pairing: true,
+            })
+            .expect_err("stale bond must not fall back to fresh pairing")
+            .kind(),
+        ErrorKind::ConnectionFailed
+    );
+    assert_eq!(*lock(&operations), [PublicConnectionOperation::Reconnect]);
+    stale
+        .pair(PAIR_TIMEOUT)
+        .expect("caller may explicitly re-pair after stale-bond failure");
+    assert_eq!(
+        *lock(&operations),
+        [
+            PublicConnectionOperation::Reconnect,
+            PublicConnectionOperation::Pair
+        ]
+    );
+    stale
+        .close_without_neutral()
+        .expect("close stale-bond runtime");
+}
+
+#[test]
+fn public_try_connection_methods_return_only_recoverable_outcomes() {
+    for (script, expected_status) in [
+        (PublicPairScript::NoBond, ConnectionStatus::NoBond),
+        (PublicPairScript::Timeout, ConnectionStatus::TimedOut),
+        (PublicPairScript::Disconnect, ConnectionStatus::Failed),
+    ] {
+        let (mut controller, _control, _operations) = open_public_connection_controller([script]);
+        let result = controller
+            .try_reconnect(PAIR_TIMEOUT)
+            .expect("recoverable reconnect becomes a result");
+        assert_eq!(result.status, expected_status);
+        assert_eq!(result.path, None);
+        assert!(result.message.is_some());
+        controller
+            .close_without_neutral()
+            .expect("close recoverable try-reconnect runtime");
+    }
+
+    let (mut ready, _control, _operations) =
+        open_public_connection_controller([PublicPairScript::Ready]);
+    let result = ready
+        .try_reconnect(PAIR_TIMEOUT)
+        .expect("ready reconnect result");
+    assert_eq!(result.status, ConnectionStatus::Connected);
+    assert_eq!(result.path, Some(ConnectionPath::Reconnected));
+    assert_eq!(result.message, None);
+    ready
+        .close_without_neutral()
+        .expect("close ready try-reconnect runtime");
+
+    let (mut fallback, _control, operations) =
+        open_public_connection_controller([PublicPairScript::NoBond, PublicPairScript::Ready]);
+    let result = fallback
+        .try_connect(ConnectOptions {
+            timeout: PAIR_TIMEOUT,
+            allow_pairing: true,
+        })
+        .expect("try-connect may explicitly pair after NoBond");
+    assert_eq!(result.status, ConnectionStatus::Connected);
+    assert_eq!(result.path, Some(ConnectionPath::Paired));
+    assert_eq!(
+        *lock(&operations),
+        [
+            PublicConnectionOperation::Reconnect,
+            PublicConnectionOperation::Pair
+        ]
+    );
+    fallback
+        .close_without_neutral()
+        .expect("close fallback try-connect runtime");
+
+    let (mut terminal, _control, _operations) =
+        open_public_connection_controller([PublicPairScript::InvalidKeyStore]);
+    assert_eq!(
+        terminal
+            .try_reconnect(PAIR_TIMEOUT)
+            .expect_err("terminal profile failure remains an error")
+            .kind(),
+        ErrorKind::InvalidKeyStore
+    );
 }
 
 #[test]
@@ -1135,6 +1372,17 @@ where
 fn open_public_pair_controller(
     scripts: impl IntoIterator<Item = PublicPairScript>,
 ) -> (DirectProController, TestTransportControl) {
+    let (controller, control, _operations) = open_public_connection_controller(scripts);
+    (controller, control)
+}
+
+fn open_public_connection_controller(
+    scripts: impl IntoIterator<Item = PublicPairScript>,
+) -> (
+    DirectProController,
+    TestTransportControl,
+    Arc<Mutex<Vec<PublicConnectionOperation>>>,
+) {
     let mut controller = DirectProController::builder("fake-adapter")
         .build()
         .expect("build configured direct controller");
@@ -1143,6 +1391,8 @@ fn open_public_pair_controller(
     let clock = ManualClock::at(Duration::ZERO);
     let worker_clock = clock.clone();
     let scripts = scripts.into_iter().collect();
+    let operations = Arc::new(Mutex::new(Vec::new()));
+    let observed_operations = Arc::clone(&operations);
     let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         Ok::<_, Error>(RuntimeComponents::new(
             Box::new(PublicPairTransport {
@@ -1151,6 +1401,8 @@ fn open_public_pair_controller(
                 clock,
                 scripts,
                 advance_timeout_on_poll: false,
+                fail_key_store_on_poll: false,
+                operations,
             }),
             worker_clock,
             ChannelWorkerWaiter::new(activity_receiver),
@@ -1160,7 +1412,7 @@ fn open_public_pair_controller(
     controller
         .open_with(|config, status| open_controller_runtime(config, status, factory))
         .expect("open scripted public-pair runtime");
-    (controller, observed_control)
+    (controller, observed_control, observed_operations)
 }
 
 fn wait_for_lifecycle<M, R>(controller: &Controller<M, R>, expected: LifecycleState)
@@ -1201,8 +1453,16 @@ struct FakePairDriver {
 #[derive(Clone, Copy)]
 enum PublicPairScript {
     Ready,
+    NoBond,
     Timeout,
     Disconnect,
+    InvalidKeyStore,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PublicConnectionOperation {
+    Pair,
+    Reconnect,
 }
 
 struct PublicPairTransport {
@@ -1211,6 +1471,8 @@ struct PublicPairTransport {
     clock: ManualClock,
     scripts: VecDeque<PublicPairScript>,
     advance_timeout_on_poll: bool,
+    fail_key_store_on_poll: bool,
+    operations: Arc<Mutex<Vec<PublicConnectionOperation>>>,
 }
 
 struct DisconnectingPairDriver {
@@ -1381,34 +1643,19 @@ impl TransportPort for PublicPairTransport {
 
     fn start_pairing(&mut self) -> TransportResult<()> {
         self.inner.start_pairing()?;
-        match self
-            .scripts
-            .pop_front()
-            .expect("each public pair call has a scripted outcome")
-        {
-            PublicPairScript::Ready => {
-                self.control.inject_connected()?;
-                self.control
-                    .inject_hid_channel_opened(HidChannel::Control)?;
-                self.control
-                    .inject_hid_channel_opened(HidChannel::Interrupt)?;
-                self.control
-                    .inject_hid_output(HidChannel::Control, &subcommand_report(0x03, &[0x30]))?;
-                self.control
-                    .inject_hid_output(HidChannel::Interrupt, &subcommand_report(0x30, &[0x01]))?;
-            }
-            PublicPairScript::Timeout => {
-                self.advance_timeout_on_poll = true;
-            }
-            PublicPairScript::Disconnect => {
-                self.control.inject_connected()?;
-                self.control.inject_disconnected(Some(0x13))?;
-            }
-        }
-        Ok(())
+        lock(&self.operations).push(PublicConnectionOperation::Pair);
+        self.start_scripted_connection()
+    }
+
+    fn start_reconnect(&mut self) -> TransportResult<()> {
+        lock(&self.operations).push(PublicConnectionOperation::Reconnect);
+        self.start_scripted_connection()
     }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+        if self.fail_key_store_on_poll {
+            return Err(TransportError::new(TransportErrorKind::InvalidKeyStore));
+        }
         let events = self.inner.poll(timeout)?;
         if self.advance_timeout_on_poll {
             self.advance_timeout_on_poll = false;
@@ -1431,6 +1678,42 @@ impl TransportPort for PublicPairTransport {
 
     fn close(&mut self) -> TransportResult<()> {
         self.inner.close()
+    }
+}
+
+impl PublicPairTransport {
+    fn start_scripted_connection(&mut self) -> TransportResult<()> {
+        match self
+            .scripts
+            .pop_front()
+            .expect("each public connection call has a scripted outcome")
+        {
+            PublicPairScript::Ready => {
+                self.control.inject_connected()?;
+                self.control
+                    .inject_hid_channel_opened(HidChannel::Control)?;
+                self.control
+                    .inject_hid_channel_opened(HidChannel::Interrupt)?;
+                self.control
+                    .inject_hid_output(HidChannel::Control, &subcommand_report(0x03, &[0x30]))?;
+                self.control
+                    .inject_hid_output(HidChannel::Interrupt, &subcommand_report(0x30, &[0x01]))?;
+            }
+            PublicPairScript::NoBond => {
+                return Err(TransportError::new(TransportErrorKind::NoBond));
+            }
+            PublicPairScript::Timeout => {
+                self.advance_timeout_on_poll = true;
+            }
+            PublicPairScript::Disconnect => {
+                self.control.inject_connected()?;
+                self.control.inject_disconnected(Some(0x13))?;
+            }
+            PublicPairScript::InvalidKeyStore => {
+                self.fail_key_store_on_poll = true;
+            }
+        }
+        Ok(())
     }
 }
 

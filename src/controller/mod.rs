@@ -33,7 +33,10 @@ use crate::runtime::{
     status::{StatusPublisher, StatusReader, status_projection},
     worker::{CommonCommand, DirectCommand, PeriodicCommand, WorkerReporting},
 };
-use crate::{AdapterSelector, CreateProfileOptions};
+use crate::{
+    AdapterSelector, ConnectOptions, ConnectionPath, ConnectionResult, ConnectionStatus,
+    CreateProfileOptions,
+};
 
 use build::{FileProfileReader, ProfileReadPort, read_typed_profile};
 #[cfg(test)]
@@ -167,6 +170,69 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     /// returned as structured [`crate::Error`] values.
     pub fn pair(&mut self, timeout: Duration) -> crate::Result<()> {
         self.runtime_mut()?.pair(timeout)
+    }
+
+    /// Reconnects with the configured profile's stored Classic bond.
+    ///
+    /// The call blocks until the same connection session completes the NX
+    /// readiness handshake. It never deletes a failed bond or falls back to
+    /// fresh pairing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::TransportClosed`] when no runtime is open,
+    /// [`ErrorKind::NoBond`] when the profile has no usable Classic bond,
+    /// [`ErrorKind::ConnectionTimeout`] when readiness misses `timeout`, and
+    /// [`ErrorKind::ConnectionFailed`] when the stored-key connection ends
+    /// before readiness. Profile, protocol, shutdown, and worker failures
+    /// remain errors.
+    pub fn reconnect(&mut self, timeout: Duration) -> crate::Result<()> {
+        self.runtime_mut()?.reconnect(timeout)
+    }
+
+    /// Connects by trying a stored bond before any allowed pairing attempt.
+    ///
+    /// Pairing is attempted only when reconnect returns
+    /// [`ErrorKind::NoBond`] and [`ConnectOptions::allow_pairing`] is `true`.
+    /// Timeout, stale-bond, protocol, and worker failures do not fall back to
+    /// pairing.
+    ///
+    /// # Errors
+    ///
+    /// Returns the reconnect or pairing error when the selected path does not
+    /// reach readiness. A missing bond remains [`ErrorKind::NoBond`] when
+    /// pairing is disabled.
+    pub fn connect(&mut self, options: ConnectOptions) -> crate::Result<ConnectionPath> {
+        match self.reconnect(options.timeout) {
+            Ok(()) => Ok(ConnectionPath::Reconnected),
+            Err(error) if error.kind() == ErrorKind::NoBond && options.allow_pairing => {
+                self.pair(options.timeout)?;
+                Ok(ConnectionPath::Paired)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Attempts stored-key reconnect and returns recoverable connection
+    /// outcomes as data.
+    ///
+    /// No-bond, timeout, and pre-readiness disconnect become a
+    /// [`ConnectionResult`]. Profile corruption, protocol inconsistency,
+    /// shutdown, and worker failures remain errors.
+    pub fn try_reconnect(&mut self, timeout: Duration) -> crate::Result<ConnectionResult> {
+        recoverable_connection_result(
+            self.reconnect(timeout)
+                .map(|()| ConnectionPath::Reconnected),
+        )
+    }
+
+    /// Runs [`Self::connect`] and returns recoverable connection outcomes as
+    /// data.
+    ///
+    /// Profile corruption, protocol inconsistency, shutdown, and worker
+    /// failures remain errors.
+    pub fn try_connect(&mut self, options: ConnectOptions) -> crate::Result<ConnectionResult> {
+        recoverable_connection_result(self.connect(options))
     }
 
     /// Presses one or more model-valid buttons.
@@ -328,6 +394,31 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
             return Ok(());
         };
         runtime.close(mode)
+    }
+}
+
+fn recoverable_connection_result(
+    result: crate::Result<ConnectionPath>,
+) -> crate::Result<ConnectionResult> {
+    match result {
+        Ok(path) => Ok(ConnectionResult {
+            status: ConnectionStatus::Connected,
+            path: Some(path),
+            message: None,
+        }),
+        Err(error) => {
+            let status = match error.kind() {
+                ErrorKind::NoBond => ConnectionStatus::NoBond,
+                ErrorKind::ConnectionTimeout => ConnectionStatus::TimedOut,
+                ErrorKind::ConnectionFailed => ConnectionStatus::Failed,
+                _ => return Err(error),
+            };
+            Ok(ConnectionResult {
+                status,
+                path: None,
+                message: Some(error.to_string()),
+            })
+        }
     }
 }
 

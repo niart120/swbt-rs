@@ -4,6 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use bumble::{Address, AddressType};
 use bumble_hci::{Command, ReturnParameters};
 use bumble_host::{Device, DeviceConfiguration};
 use bumble_transport::{
@@ -14,6 +15,7 @@ use bumble_transport::{
 use crate::adapter::AdapterSelector;
 
 use super::classic::ClassicDeviceSession;
+use super::profile_key_store::ProfileKeyStoreFactory;
 use super::{
     ActivityNotifier, ClassicAclBufferInfo, ControllerVersionInfo, SendAcceptance,
     TransportCapabilities, TransportConfig, TransportError, TransportErrorKind, TransportEvent,
@@ -58,14 +60,30 @@ struct BumbleRuntime {
 pub(crate) struct BumbleTransportPort {
     selector: AdapterSelector,
     config: TransportConfig,
+    profile_key_store: Option<ProfileKeyStoreFactory>,
     session: Option<BumbleSession>,
 }
 
 impl BumbleTransportPort {
+    #[cfg(test)]
     pub(crate) const fn new(selector: AdapterSelector, config: TransportConfig) -> Self {
         Self {
             selector,
             config,
+            profile_key_store: None,
+            session: None,
+        }
+    }
+
+    pub(crate) const fn with_profile_key_store(
+        selector: AdapterSelector,
+        config: TransportConfig,
+        profile_key_store: Option<ProfileKeyStoreFactory>,
+    ) -> Self {
+        Self {
+            selector,
+            config,
+            profile_key_store,
             session: None,
         }
     }
@@ -75,6 +93,7 @@ impl BumbleTransportPort {
         Self {
             selector: AdapterSelector::from("usb:0"),
             config: TransportConfig::for_model::<crate::model::Pro>(),
+            profile_key_store: None,
             session: Some(session),
         }
     }
@@ -85,7 +104,12 @@ impl TransportPort for BumbleTransportPort {
         if let Some(session) = self.session.as_ref() {
             return Ok(session.capabilities());
         }
-        let session = initialize_bumble_session(&self.selector, &self.config, activity)?;
+        let session = initialize_bumble_session(
+            &self.selector,
+            &self.config,
+            activity,
+            self.profile_key_store.as_ref(),
+        )?;
         let capabilities = session.capabilities();
         self.session = Some(session);
         Ok(capabilities)
@@ -96,6 +120,13 @@ impl TransportPort for BumbleTransportPort {
             .as_mut()
             .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
             .start_pairing()
+    }
+
+    fn start_reconnect(&mut self) -> TransportResult<()> {
+        self.session
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?
+            .start_reconnect()
     }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
@@ -160,6 +191,37 @@ impl BumbleSession {
         runtime
             .classic
             .start_pairing(&mut runtime.device, &mut runtime.host)
+    }
+
+    pub(super) fn start_reconnect(&mut self) -> TransportResult<()> {
+        if let Some(terminal) = self.terminal_error() {
+            return Err(terminal);
+        }
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or_else(|| TransportError::new(TransportErrorKind::Closed))?;
+        let bonds = runtime
+            .device
+            .bonds()
+            .map_err(|_| TransportError::new(TransportErrorKind::InvalidKeyStore))?;
+        let mut classic_peers = bonds.into_iter().filter_map(|(peer, keys)| {
+            keys.link_key
+                .as_ref()
+                .is_some_and(|key| key.value.len() == 16)
+                .then_some(peer)
+        });
+        let Some(peer) = classic_peers.next() else {
+            return Err(TransportError::new(TransportErrorKind::NoBond));
+        };
+        if classic_peers.next().is_some() {
+            return Err(TransportError::new(TransportErrorKind::InvalidKeyStore));
+        }
+        let peer_address = Address::parse(&peer, AddressType::PUBLIC_DEVICE)
+            .map_err(|_| TransportError::new(TransportErrorKind::InvalidKeyStore))?;
+        runtime
+            .classic
+            .start_reconnect(&mut runtime.device, &mut runtime.host, peer_address, true)
     }
 
     pub(super) fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
@@ -318,15 +380,36 @@ pub(super) fn initialize_bumble_session(
     selector: &AdapterSelector,
     config: &TransportConfig,
     activity: ActivityNotifier,
+    profile_key_store: Option<&ProfileKeyStoreFactory>,
 ) -> TransportResult<BumbleSession> {
-    initialize_bumble_session_with(&mut SystemSplitTransportOpener, selector, config, activity)
+    initialize_bumble_session_with_profile(
+        &mut SystemSplitTransportOpener,
+        selector,
+        config,
+        activity,
+        profile_key_store,
+    )
 }
 
+#[cfg(test)]
 pub(super) fn initialize_bumble_session_with<O>(
     opener: &mut O,
     selector: &AdapterSelector,
     config: &TransportConfig,
     activity: ActivityNotifier,
+) -> TransportResult<BumbleSession>
+where
+    O: SplitTransportOpener,
+{
+    initialize_bumble_session_with_profile(opener, selector, config, activity, None)
+}
+
+pub(super) fn initialize_bumble_session_with_profile<O>(
+    opener: &mut O,
+    selector: &AdapterSelector,
+    config: &TransportConfig,
+    activity: ActivityNotifier,
+    profile_key_store: Option<&ProfileKeyStoreFactory>,
 ) -> TransportResult<BumbleSession>
 where
     O: SplitTransportOpener,
@@ -347,6 +430,9 @@ where
         .map_err(map_bumble_error)?;
     let local_address = read_local_address(&mut host)?;
     let capabilities = controller_capabilities(&controller, &device, local_address, usb)?;
+    if let Some(factory) = profile_key_store {
+        device.set_key_store(factory.create(local_address));
+    }
 
     for command in identity_commands(config) {
         send_successful_command_complete(&mut host, command)?;

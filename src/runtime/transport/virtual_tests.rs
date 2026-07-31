@@ -1,13 +1,17 @@
 use std::collections::VecDeque;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use bumble::keys::{Key, KeyStore, MemoryKeyStore, PairingKeys};
+use bumble::keys::{Key, KeyStore, KeyStoreResult, MemoryKeyStore, PairingKeys};
 use bumble::{Address, AddressType, Uuid};
-use bumble_controller::{Controller as LinkController, LocalLink};
+use bumble_controller::{Controller as LinkController, LocalLink, ROLE_CENTRAL, ROLE_PERIPHERAL};
 use bumble_host::{Device, DeviceConfiguration, pump};
 use bumble_l2cap::{ClassicChannelSpec, ClassicChannelState};
 use bumble_sdp::{DataElement, SdpPdu};
+use serde_json::json;
 
 use crate::diagnostics::LifecycleState;
 use crate::input::{InputState, ProButton};
@@ -17,12 +21,13 @@ use crate::reporting::{Direct, Periodic, ReportingMode};
 use crate::runtime::cleanup::CloseMode;
 use crate::runtime::status::{StatusReader, status_projection};
 use crate::runtime::worker::{
-    CommandSource, CommonCommand, MonotonicClock, PeriodicCommand, PriorityShutdown,
+    CommandSource, CommonCommand, DirectCommand, MonotonicClock, PeriodicCommand, PriorityShutdown,
     RuntimeCommand, ShutdownRequest, WorkerBudget, WorkerCommandProgress, WorkerCore,
     WorkerReporting, WorkerStep,
 };
 
 use super::classic::{ClassicDeviceSession, HID_CONTROL_PSM, HID_INTERRUPT_PSM, SDP_PSM};
+use super::profile_key_store::SwbtProfileKeyStore;
 use super::{
     ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities, TransportConfig,
     TransportError, TransportErrorKind, TransportEvent, TransportPort, TransportResult,
@@ -36,6 +41,7 @@ const REPORT_PERIOD: Duration = Duration::from_millis(8);
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(2);
 const STEP: Duration = Duration::from_millis(10);
 const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
+static NEXT_PROFILE_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn pro_periodic_reaches_ready_and_emits_typed_then_neutral_input() {
@@ -174,6 +180,267 @@ fn all_model_reporting_combinations_reach_ready_over_the_virtual_packet_path() {
 #[test]
 fn reverse_channels_malformed_packets_and_stored_key_reconnect_remain_isolated() {
     run_resilience_case(VirtualScenario::resilient());
+}
+
+#[test]
+fn stored_key_active_and_incoming_reconnect_reach_ready_without_fresh_pairing() {
+    run_reconnect_case(VirtualReconnectDirection::Active, ROLE_CENTRAL);
+    run_reconnect_case(VirtualReconnectDirection::Incoming, ROLE_PERIPHERAL);
+}
+
+#[test]
+fn same_pro_profile_reconnects_periodic_then_direct_without_reporting_state_leakage() {
+    let directory = VirtualProfileDirectory::new();
+    let profile_path = directory.path().join("pro.json");
+    let original_profile = file_backed_profile_bytes();
+    fs::write(&profile_path, &original_profile).expect("write virtual Pro profile");
+
+    let (periodic_transport, periodic_trace) =
+        VirtualClassicTransport::new_reconnect_with_profile::<Pro>(
+            VirtualReconnectDirection::Active,
+            profile_path.clone(),
+        );
+    let (periodic_status, periodic_reader) = status_projection();
+    let mut periodic_worker = WorkerCore::new_periodic_with_status(
+        SwitchHidProtocol::<Pro>::new(None, DEVICE_INFO_ADDRESS),
+        Box::new(periodic_transport),
+        REPORT_PERIOD,
+        WorkerBudget::new(2, 4),
+        Box::new(|_| {}),
+        periodic_status,
+    )
+    .expect("valid Periodic worker");
+    let mut periodic_commands =
+        QueuedCommands::from([RuntimeCommand::<Pro, Periodic>::Reconnect {
+            timeout: CONNECTION_TIMEOUT,
+        }]);
+    let mut periodic_clock = ManualClock::default();
+    let mut periodic_shutdown = ShutdownLatch::default();
+
+    drive_until_ready(
+        &mut periodic_worker,
+        &periodic_reader,
+        &mut periodic_clock,
+        &mut periodic_shutdown,
+        &mut periodic_commands,
+    );
+    periodic_commands.push(RuntimeCommand::Input(PeriodicCommand::Common(
+        CommonCommand::Press(vec![ProButton::A]),
+    )));
+    periodic_clock.advance(REPORT_PERIOD);
+    let WorkerStep::Continue(mut periodic_progress) = periodic_worker.step_runtime(
+        &periodic_clock,
+        &mut periodic_shutdown,
+        &mut periodic_commands,
+    ) else {
+        panic!("Periodic input must keep the worker running");
+    };
+    assert_command_successes(&mut periodic_progress);
+    assert_eq!(
+        periodic_reader.snapshot(),
+        InputState::<Pro>::neutral().with_buttons([ProButton::A])
+    );
+    close_ready_worker(
+        &mut periodic_worker,
+        &periodic_reader,
+        &periodic_clock,
+        &mut periodic_shutdown,
+        &mut periodic_commands,
+    );
+    assert!(lock(&periodic_trace).stored_key_reconnect_complete);
+    assert_eq!(
+        fs::read(&profile_path).expect("read profile after Periodic reconnect"),
+        original_profile
+    );
+
+    let (direct_transport, direct_trace) = VirtualClassicTransport::new_reconnect_with_profile::<Pro>(
+        VirtualReconnectDirection::Active,
+        profile_path.clone(),
+    );
+    let (direct_status, direct_reader) = status_projection();
+    let mut direct_worker = WorkerCore::new_direct_with_status(
+        SwitchHidProtocol::<Pro>::new(None, DEVICE_INFO_ADDRESS),
+        Box::new(direct_transport),
+        WorkerBudget::new(2, 4),
+        Box::new(|_| {}),
+        direct_status,
+    );
+    let mut direct_commands = QueuedCommands::from([RuntimeCommand::<Pro, Direct>::Reconnect {
+        timeout: CONNECTION_TIMEOUT,
+    }]);
+    let mut direct_clock = ManualClock::default();
+    let mut direct_shutdown = ShutdownLatch::default();
+
+    drive_until_ready(
+        &mut direct_worker,
+        &direct_reader,
+        &mut direct_clock,
+        &mut direct_shutdown,
+        &mut direct_commands,
+    );
+    let ready_report_count = user_input_report_count(&direct_trace);
+    for _ in 0..5 {
+        direct_clock.advance(REPORT_PERIOD);
+        let WorkerStep::Continue(mut idle_progress) =
+            direct_worker.step_runtime(&direct_clock, &mut direct_shutdown, &mut direct_commands)
+        else {
+            panic!("Direct idle must keep the worker running");
+        };
+        assert_command_successes(&mut idle_progress);
+    }
+    assert_eq!(
+        user_input_report_count(&direct_trace),
+        ready_report_count,
+        "Direct idle must not emit periodic 0x30 reports"
+    );
+
+    let accepted = InputState::<Pro>::neutral().with_buttons([ProButton::A]);
+    direct_commands.push(RuntimeCommand::Input(DirectCommand::Send(accepted.clone())));
+    let WorkerStep::Continue(mut accepted_progress) =
+        direct_worker.step_runtime(&direct_clock, &mut direct_shutdown, &mut direct_commands)
+    else {
+        panic!("accepted Direct send must keep the worker running");
+    };
+    assert_command_successes(&mut accepted_progress);
+    assert_eq!(direct_reader.snapshot(), accepted);
+
+    lock(&direct_trace).reject_next_interrupt = true;
+    let rejected = InputState::<Pro>::neutral().with_buttons([ProButton::L, ProButton::R]);
+    direct_commands.push(RuntimeCommand::Input(DirectCommand::Send(rejected)));
+    let WorkerStep::Continue(mut rejected_progress) =
+        direct_worker.step_runtime(&direct_clock, &mut direct_shutdown, &mut direct_commands)
+    else {
+        panic!("rejected Direct send must remain command-local");
+    };
+    assert!(matches!(
+        rejected_progress.take_command_results().as_slice(),
+        [WorkerCommandProgress::Complete(Err(_))]
+    ));
+    assert_eq!(direct_reader.snapshot(), accepted);
+
+    direct_commands.push(RuntimeCommand::Input(DirectCommand::Common(
+        CommonCommand::Tap {
+            buttons: vec![ProButton::L, ProButton::R],
+            duration: Duration::ZERO,
+        },
+    )));
+    let mut tap_completed = false;
+    for _ in 0..5 {
+        let WorkerStep::Continue(mut tap_progress) =
+            direct_worker.step_runtime(&direct_clock, &mut direct_shutdown, &mut direct_commands)
+        else {
+            panic!("Direct tap must keep the worker running");
+        };
+        for completion in tap_progress.take_command_results() {
+            match completion {
+                WorkerCommandProgress::Pending => {}
+                WorkerCommandProgress::Complete(Ok(())) => tap_completed = true,
+                WorkerCommandProgress::Complete(Err(error)) => {
+                    panic!("Direct tap failed: {error:?}")
+                }
+            }
+        }
+        if tap_completed {
+            break;
+        }
+    }
+    assert!(tap_completed);
+    assert_eq!(direct_reader.snapshot(), accepted);
+
+    direct_commands.push(RuntimeCommand::Input(DirectCommand::Common(
+        CommonCommand::Neutral,
+    )));
+    let WorkerStep::Continue(mut neutral_progress) =
+        direct_worker.step_runtime(&direct_clock, &mut direct_shutdown, &mut direct_commands)
+    else {
+        panic!("Direct neutral must keep the worker running");
+    };
+    assert_command_successes(&mut neutral_progress);
+    assert_eq!(direct_reader.snapshot(), InputState::<Pro>::neutral());
+
+    close_ready_worker(
+        &mut direct_worker,
+        &direct_reader,
+        &direct_clock,
+        &mut direct_shutdown,
+        &mut direct_commands,
+    );
+
+    let direct_reports = user_input_reports_after(&direct_trace, ready_report_count);
+    let pressed_then_tapped =
+        InputState::<Pro>::neutral().with_buttons([ProButton::A, ProButton::L, ProButton::R]);
+    assert_eq!(direct_reports.len(), 5);
+    assert!(is_report_with_buttons(&direct_reports[0], pro_a_buttons()));
+    assert!(is_report_with_buttons(
+        &direct_reports[1],
+        input_button_bytes(&pressed_then_tapped)
+    ));
+    assert!(is_report_with_buttons(&direct_reports[2], pro_a_buttons()));
+    assert!(is_report_with_buttons(
+        &direct_reports[3],
+        neutral_buttons()
+    ));
+    assert!(is_report_with_buttons(
+        &direct_reports[4],
+        neutral_buttons()
+    ));
+    assert!(lock(&direct_trace).stored_key_reconnect_complete);
+    assert_eq!(
+        fs::read(&profile_path).expect("read profile after Direct reconnect"),
+        original_profile,
+        "reporting mode must not change the shared profile document"
+    );
+}
+
+fn run_reconnect_case(direction: VirtualReconnectDirection, expected_swbt_role: u8) {
+    let (transport, trace) = VirtualClassicTransport::new_reconnect::<Pro>(direction);
+    let (status, reader) = status_projection();
+    let mut worker = WorkerCore::new_direct_with_status(
+        SwitchHidProtocol::<Pro>::new(None, DEVICE_INFO_ADDRESS),
+        Box::new(transport),
+        WorkerBudget::new(2, 4),
+        Box::new(|_| {}),
+        status,
+    );
+    let mut commands = QueuedCommands::from([RuntimeCommand::<Pro, Direct>::Reconnect {
+        timeout: CONNECTION_TIMEOUT,
+    }]);
+    let mut clock = ManualClock::default();
+    let mut shutdown = ShutdownLatch::default();
+
+    drive_until_ready(
+        &mut worker,
+        &reader,
+        &mut clock,
+        &mut shutdown,
+        &mut commands,
+    );
+
+    {
+        let trace = lock(&trace);
+        assert_eq!(trace.pairing_completions, 0);
+        assert!(trace.stored_key_reconnect_complete);
+        assert_eq!(trace.reconnect_completions, 1);
+        assert_eq!(trace.reconnect_directions, [direction]);
+        assert_eq!(trace.swbt_connection_roles, [expected_swbt_role]);
+        assert!(trace.sdp_record_complete);
+        assert_eq!(
+            trace
+                .input_reports
+                .iter()
+                .filter(|report| report.first() == Some(&0x21))
+                .count(),
+            2,
+            "report-mode and player-light replies belong to the reconnect session"
+        );
+    }
+    close_ready_worker(&mut worker, &reader, &clock, &mut shutdown, &mut commands);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VirtualReconnectDirection {
+    Active,
+    Incoming,
 }
 
 fn run_periodic_case<M: ControllerModel>() {
@@ -410,7 +677,11 @@ impl VirtualScenario {
 #[derive(Default)]
 struct VirtualTrace {
     stored_key_pairing_complete: bool,
+    stored_key_reconnect_complete: bool,
     pairing_completions: usize,
+    reconnect_completions: usize,
+    reconnect_directions: Vec<VirtualReconnectDirection>,
+    swbt_connection_roles: Vec<u8>,
     sdp_rounds: usize,
     sdp_completions: usize,
     sdp_record_complete: bool,
@@ -418,6 +689,7 @@ struct VirtualTrace {
     malformed_sdp_rejected: bool,
     malformed_hidp_rejected: bool,
     input_reports: Vec<Vec<u8>>,
+    reject_next_interrupt: bool,
     request_peer_disconnect: bool,
     peer_disconnects: usize,
     disconnected: bool,
@@ -433,6 +705,9 @@ struct VirtualClassicTransport {
     scenario: VirtualScenario,
     pairing_started: bool,
     pairing_recorded: bool,
+    reconnect_direction: Option<VirtualReconnectDirection>,
+    reconnect_started: bool,
+    reconnect_recorded: bool,
     connection_requested: bool,
     encryption_started: bool,
     ctkd_started: bool,
@@ -445,6 +720,7 @@ struct VirtualClassicTransport {
     control_cid: Option<u16>,
     interrupt_cid: Option<u16>,
     peer_outputs_sent: bool,
+    key_store_reads: [Arc<AtomicUsize>; 2],
     trace: Arc<Mutex<VirtualTrace>>,
     closed: bool,
 }
@@ -452,6 +728,26 @@ struct VirtualClassicTransport {
 impl VirtualClassicTransport {
     fn new<M: ControllerModel>() -> (Self, Arc<Mutex<VirtualTrace>>) {
         Self::new_with_scenario::<M>(VirtualScenario::default())
+    }
+
+    fn new_reconnect<M: ControllerModel>(
+        direction: VirtualReconnectDirection,
+    ) -> (Self, Arc<Mutex<VirtualTrace>>) {
+        let (mut transport, trace) = Self::new::<M>();
+        transport.reconnect_direction = Some(direction);
+        (transport, trace)
+    }
+
+    fn new_reconnect_with_profile<M: ControllerModel>(
+        direction: VirtualReconnectDirection,
+        profile_path: PathBuf,
+    ) -> (Self, Arc<Mutex<VirtualTrace>>) {
+        let (mut transport, trace) = Self::new_reconnect::<M>(direction);
+        let (store, reads) =
+            observed_key_store(SwbtProfileKeyStore::<M>::new(profile_path, [0x22; 6]));
+        transport.devices[1].set_key_store(store);
+        transport.key_store_reads[1] = reads;
+        (transport, trace)
     }
 
     fn new_with_scenario<M: ControllerModel>(
@@ -481,8 +777,10 @@ impl VirtualClassicTransport {
             Device::from_config(swbt_id, swbt_config).expect("configured virtual swbt device"),
         ];
         let link_key = [0xC7; 16];
-        devices[0].set_key_store(stored_link_key(&swbt_address, link_key));
-        devices[1].set_key_store(stored_link_key(&peer_address, link_key));
+        let (peer_store, peer_key_store_reads) = observed_stored_link_key(&swbt_address, link_key);
+        let (swbt_store, swbt_key_store_reads) = observed_stored_link_key(&peer_address, link_key);
+        devices[0].set_key_store(peer_store);
+        devices[1].set_key_store(swbt_store);
         devices[0].power_on(&mut link).expect("power virtual peer");
         devices[1]
             .power_on(&mut link)
@@ -506,6 +804,9 @@ impl VirtualClassicTransport {
                 scenario,
                 pairing_started: false,
                 pairing_recorded: false,
+                reconnect_direction: None,
+                reconnect_started: false,
+                reconnect_recorded: false,
                 connection_requested: false,
                 encryption_started: false,
                 ctkd_started: false,
@@ -518,6 +819,7 @@ impl VirtualClassicTransport {
                 control_cid: None,
                 interrupt_cid: None,
                 peer_outputs_sent: false,
+                key_store_reads: [peer_key_store_reads, swbt_key_store_reads],
                 trace: Arc::clone(&trace),
                 closed: false,
             },
@@ -569,6 +871,8 @@ impl VirtualClassicTransport {
     fn reset_connection_state(&mut self) {
         self.pairing_started = false;
         self.pairing_recorded = false;
+        self.reconnect_started = false;
+        self.reconnect_recorded = false;
         self.connection_requested = false;
         self.encryption_started = false;
         self.ctkd_started = false;
@@ -584,7 +888,10 @@ impl VirtualClassicTransport {
     }
 
     fn advance_peer(&mut self) {
-        if self.pairing_started && !self.connection_requested {
+        let peer_should_initiate = self.pairing_started
+            || (self.reconnect_started
+                && self.reconnect_direction == Some(VirtualReconnectDirection::Incoming));
+        if peer_should_initiate && !self.connection_requested {
             self.devices[0].connect_classic(&mut self.link, self.swbt_address.clone());
             self.connection_requested = true;
             return;
@@ -603,21 +910,41 @@ impl VirtualClassicTransport {
         if !self.devices[0].is_classic_encrypted() || !self.devices[1].is_classic_encrypted() {
             return;
         }
-        if !self.ctkd_started {
-            self.devices[0]
-                .pair_classic(&mut self.link)
-                .expect("start virtual BR/EDR CTKD");
-            self.ctkd_started = true;
-            return;
-        }
-        if !self.stored_key_pairing_complete() {
-            return;
-        }
-        if !self.pairing_recorded {
-            let mut trace = lock(&self.trace);
-            trace.stored_key_pairing_complete = true;
-            trace.pairing_completions += 1;
-            self.pairing_recorded = true;
+        if self.reconnect_started {
+            if !self.reconnect_recorded {
+                if !self.stored_key_reconnect_complete() {
+                    return;
+                }
+                let direction = self
+                    .reconnect_direction
+                    .expect("reconnect direction is configured");
+                let role = self.devices[1]
+                    .classic_connection_role()
+                    .expect("virtual swbt Classic role is known");
+                let mut trace = lock(&self.trace);
+                trace.stored_key_reconnect_complete = true;
+                trace.reconnect_completions += 1;
+                trace.reconnect_directions.push(direction);
+                trace.swbt_connection_roles.push(role);
+                self.reconnect_recorded = true;
+            }
+        } else {
+            if !self.ctkd_started {
+                self.devices[0]
+                    .pair_classic(&mut self.link)
+                    .expect("start virtual BR/EDR CTKD");
+                self.ctkd_started = true;
+                return;
+            }
+            if !self.stored_key_pairing_complete() {
+                return;
+            }
+            if !self.pairing_recorded {
+                let mut trace = lock(&self.trace);
+                trace.stored_key_pairing_complete = true;
+                trace.pairing_completions += 1;
+                self.pairing_recorded = true;
+            }
         }
 
         if self.sdp_cid.is_none() {
@@ -693,6 +1020,12 @@ impl VirtualClassicTransport {
         [peer_bond, swbt_bond]
             .into_iter()
             .all(|bond| bond.is_some_and(|keys| keys.link_key.is_some() && keys.ltk.is_some()))
+    }
+
+    fn stored_key_reconnect_complete(&self) -> bool {
+        self.key_store_reads
+            .iter()
+            .all(|reads| reads.load(Ordering::SeqCst) > 0)
     }
 
     fn advance_sdp(&mut self, peer_handle: u16) {
@@ -850,6 +1183,27 @@ impl TransportPort for VirtualClassicTransport {
         Ok(())
     }
 
+    fn start_reconnect(&mut self) -> TransportResult<()> {
+        if self.closed {
+            return Err(TransportError::new(TransportErrorKind::Closed));
+        }
+        let direction = self
+            .reconnect_direction
+            .ok_or_else(|| TransportError::new(TransportErrorKind::NoBond))?;
+        if !self.reconnect_started {
+            self.reset_connection_state();
+        }
+        self.session.start_reconnect(
+            &mut self.devices[1],
+            &mut self.link,
+            self.peer_address.clone(),
+            direction == VirtualReconnectDirection::Active,
+        )?;
+        self.reconnect_started = true;
+        self.connection_requested = direction == VirtualReconnectDirection::Active;
+        Ok(())
+    }
+
     fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
         if self.closed {
             return Err(TransportError::new(TransportErrorKind::Closed));
@@ -860,6 +1214,13 @@ impl TransportPort for VirtualClassicTransport {
     fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
         if self.closed {
             return Err(TransportError::new(TransportErrorKind::Closed));
+        }
+        let reject = {
+            let mut trace = lock(&self.trace);
+            std::mem::take(&mut trace.reject_next_interrupt)
+        };
+        if reject {
+            return Err(TransportError::new(TransportErrorKind::SendRejected));
         }
         let acceptance =
             self.session
@@ -970,6 +1331,48 @@ fn stored_link_key(peer_address: &Address, value: [u8; 16]) -> MemoryKeyStore {
     store
 }
 
+fn observed_stored_link_key(
+    peer_address: &Address,
+    value: [u8; 16],
+) -> (ObservedKeyStore, Arc<AtomicUsize>) {
+    observed_key_store(stored_link_key(peer_address, value))
+}
+
+fn observed_key_store(inner: impl KeyStore + 'static) -> (ObservedKeyStore, Arc<AtomicUsize>) {
+    let reads = Arc::new(AtomicUsize::new(0));
+    (
+        ObservedKeyStore {
+            inner: Box::new(inner),
+            reads: Arc::clone(&reads),
+        },
+        reads,
+    )
+}
+
+struct ObservedKeyStore {
+    inner: Box<dyn KeyStore>,
+    reads: Arc<AtomicUsize>,
+}
+
+impl KeyStore for ObservedKeyStore {
+    fn delete(&mut self, name: &str) -> KeyStoreResult<()> {
+        self.inner.delete(name)
+    }
+
+    fn update(&mut self, name: &str, keys: PairingKeys) -> KeyStoreResult<()> {
+        self.inner.update(name, keys)
+    }
+
+    fn get(&self, name: &str) -> KeyStoreResult<Option<PairingKeys>> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.inner.get(name)
+    }
+
+    fn get_all(&self) -> KeyStoreResult<Vec<(String, PairingKeys)>> {
+        self.inner.get_all()
+    }
+}
+
 fn public_address(value: &str) -> Address {
     Address::parse(value, AddressType::PUBLIC_DEVICE).expect("valid virtual public address")
 }
@@ -1012,6 +1415,81 @@ fn is_report_with_buttons(report: &[u8], buttons: [u8; 3]) -> bool {
 
 fn input_reports_after(trace: &Arc<Mutex<VirtualTrace>>, start: usize) -> Vec<Vec<u8>> {
     lock(trace).input_reports[start..].to_vec()
+}
+
+fn user_input_report_count(trace: &Arc<Mutex<VirtualTrace>>) -> usize {
+    lock(trace)
+        .input_reports
+        .iter()
+        .filter(|report| report.first() == Some(&0x30))
+        .count()
+}
+
+fn user_input_reports_after(trace: &Arc<Mutex<VirtualTrace>>, start: usize) -> Vec<Vec<u8>> {
+    lock(trace)
+        .input_reports
+        .iter()
+        .filter(|report| report.first() == Some(&0x30))
+        .skip(start)
+        .cloned()
+        .collect()
+}
+
+fn file_backed_profile_bytes() -> Vec<u8> {
+    let mut bytes = serde_json::to_vec_pretty(&json!({
+        "format": "swbt.profile",
+        "schema_version": 2,
+        "controller_kind": "pro",
+        "identity": {
+            "kind": "adapter-default"
+        },
+        "key_store": {
+            "namespaces": {
+                SWBT_ADDRESS: {
+                    PEER_ADDRESS: {
+                        "address_type": 0,
+                        "link_key": {
+                            "authenticated": true,
+                            "value": "C7C7C7C7C7C7C7C7C7C7C7C7C7C7C7C7"
+                        },
+                        "link_key_type": 8
+                    }
+                }
+            }
+        },
+        "future_top": {
+            "reporting_sentinel": "must-not-change"
+        }
+    }))
+    .expect("serialize virtual file-backed profile");
+    bytes.push(b'\n');
+    bytes
+}
+
+struct VirtualProfileDirectory {
+    path: PathBuf,
+}
+
+impl VirtualProfileDirectory {
+    fn new() -> Self {
+        let sequence = NEXT_PROFILE_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "swbt-rs-virtual-profile-{}-{sequence}",
+            std::process::id()
+        ));
+        fs::create_dir(&path).expect("create virtual profile directory");
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for VirtualProfileDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
 }
 
 fn assert_command_successes(progress: &mut crate::runtime::worker::StepProgress) {

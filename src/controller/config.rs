@@ -132,10 +132,10 @@ pub(super) enum ProfileConfig<M: ControllerModel> {
     Ephemeral,
     Persistent {
         #[cfg_attr(
-            not(test),
+            not(any(test, feature = "bumble")),
             allow(
                 dead_code,
-                reason = "M6 uses the profile path for atomic key persistence"
+                reason = "feature-disabled builds retain but do not persist profile paths"
             )
         )]
         path: PathBuf,
@@ -143,11 +143,21 @@ pub(super) enum ProfileConfig<M: ControllerModel> {
             not(test),
             allow(
                 dead_code,
-                reason = "M6 adapts the validated profile to the Bumble key store"
+                reason = "the controller config retains the profile validated during build"
             )
         )]
         profile: PairingProfile<M>,
     },
+}
+
+impl<M: ControllerModel> ProfileConfig<M> {
+    #[cfg(feature = "bumble")]
+    pub(super) fn persistent_path(&self) -> Option<&Path> {
+        match self {
+            Self::Ephemeral => None,
+            Self::Persistent { path, .. } => Some(path),
+        }
+    }
 }
 
 impl<M: ControllerModel> ControllerConfig<M, reporting::Periodic> {

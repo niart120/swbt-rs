@@ -1,5 +1,8 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::error::Error as _;
+use std::fs::{self, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
@@ -13,17 +16,24 @@ use bumble_transport::{
     Error as BumbleError, PacketSink, PacketSource, PacketSourceShutdown, Result as BumbleResult,
     SplitOpenedTransport,
 };
+use fs2::FileExt as _;
 
 use crate::adapter::AdapterSelector;
 use crate::model::Pro;
 
 use super::bumble::{
     BumbleSession, BumbleTransportPort, SplitTransportOpener, initialize_bumble_session_with,
+    initialize_bumble_session_with_profile,
 };
+use super::profile_key_store::ProfileKeyStoreFactory;
 use super::{TransportConfig, TransportErrorKind, TransportEvent, TransportPort, activity_channel};
 
 const DISPLAY_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
 const HCI_ADDRESS: [u8; 6] = [0x7d, 0x9f, 0xf9, 0xdc, 0x1b, 0x00];
+const PROFILE_NAMESPACE: &str = "00:1B:DC:F9:9F:7D";
+const PROFILE_PEER: &str = "11:22:33:44:55:66";
+const PROFILE_SECRET_SENTINEL: &str = "PAIRING-KEY-PROFILE-SECRET";
+static NEXT_PROFILE_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(feature = "adapter-tests")]
 #[test]
@@ -138,6 +148,117 @@ fn bumble_initialization_uses_configured_device_and_exact_hci_order() {
     assert_eq!(usb.product_id(), 0x0001);
     assert_eq!(usb.bus_number(), 1);
     assert_eq!(usb.device_address(), 7);
+}
+
+#[test]
+fn production_profile_key_store_persists_classic_link_key_notification() {
+    let temp = ProfileTempDirectory::new("persist");
+    let path = temp.path().join("pro.json");
+    fs::write(&path, empty_profile_bytes()).expect("write empty profile");
+    let factory = ProfileKeyStoreFactory::for_model::<Pro>(path.clone());
+    let ControlledSession {
+        mut session,
+        source,
+        wakes,
+        drops: _drops,
+        commands: _commands,
+        acl_packets: _acl_packets,
+    } = controlled_session_with_key_store(Some(&factory));
+    wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("initialization activity");
+    let peer =
+        Address::parse(PROFILE_PEER, AddressType::PUBLIC_DEVICE).expect("valid test peer address");
+
+    source.push(Ok(Some(HciPacket::Event(Event::LinkKeyNotification {
+        bd_addr: peer,
+        link_key: [0xA5; 16],
+        key_type: 0x04,
+    }))));
+    wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("link-key notification activity");
+
+    assert!(
+        session
+            .poll(Duration::ZERO)
+            .expect("persist link key through production profile store")
+            .is_empty()
+    );
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).expect("read persisted profile"))
+            .expect("persisted profile remains JSON");
+    let stored = &saved["key_store"]["namespaces"][PROFILE_NAMESPACE][PROFILE_PEER];
+    assert_eq!(stored["link_key"]["value"], "a5".repeat(16));
+    assert_eq!(stored["link_key_type"], 0x04);
+    session.close().expect("close scripted session");
+}
+
+#[test]
+fn production_profile_key_store_failure_is_a_secret_free_typed_terminal() {
+    let temp = ProfileTempDirectory::new("failure-secret-path");
+    let path = temp.path().join("secret-profile-name.json");
+    fs::write(&path, empty_profile_bytes()).expect("write empty profile");
+    let factory = ProfileKeyStoreFactory::for_model::<Pro>(path.clone());
+    let ControlledSession {
+        mut session,
+        source,
+        wakes,
+        drops: _drops,
+        commands: _commands,
+        acl_packets: _acl_packets,
+    } = controlled_session_with_key_store(Some(&factory));
+    wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("initialization activity");
+    let mut secret_profile: serde_json::Value =
+        serde_json::from_slice(&empty_profile_bytes()).expect("empty profile is JSON");
+    secret_profile["future_secret"] = PROFILE_SECRET_SENTINEL.into();
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&secret_profile).expect("serialize secret-bearing profile"),
+    )
+    .expect("write valid secret-bearing profile");
+    let update_lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .expect("open profile lock");
+    update_lock
+        .try_lock_exclusive()
+        .expect("hold profile update lock");
+    let peer =
+        Address::parse(PROFILE_PEER, AddressType::PUBLIC_DEVICE).expect("valid test peer address");
+    source.push(Ok(Some(HciPacket::Event(Event::LinkKeyNotification {
+        bd_addr: peer,
+        link_key: [0xB6; 16],
+        key_type: 0x04,
+    }))));
+    wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("failed link-key notification activity");
+
+    let first = session
+        .poll(Duration::ZERO)
+        .expect_err("profile persistence failure must terminate the transport");
+    assert_eq!(first.kind(), TransportErrorKind::InvalidKeyStore);
+    for rendered in [first.to_string(), format!("{first:?}")] {
+        assert!(!rendered.contains(PROFILE_SECRET_SENTINEL));
+        assert!(!rendered.contains(PROFILE_PEER));
+        assert!(!rendered.contains(&path.to_string_lossy().into_owned()));
+        assert!(!rendered.contains("secret-profile-name"));
+    }
+    let repeated = session
+        .poll(Duration::ZERO)
+        .expect_err("profile persistence terminal must remain sticky");
+    assert_eq!(repeated.kind(), TransportErrorKind::InvalidKeyStore);
+    drop(update_lock);
+    let unchanged: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).expect("read unchanged profile"))
+            .expect("locked profile remains valid");
+    assert_eq!(unchanged["future_secret"], PROFILE_SECRET_SENTINEL);
+    assert_eq!(unchanged["key_store"]["namespaces"], serde_json::json!({}));
+    session.close().expect("close failed scripted session");
 }
 
 #[test]
@@ -850,6 +971,12 @@ struct ControlledSession {
 }
 
 fn controlled_session_with_recording() -> ControlledSession {
+    controlled_session_with_key_store(None)
+}
+
+fn controlled_session_with_key_store(
+    profile_key_store: Option<&ProfileKeyStoreFactory>,
+) -> ControlledSession {
     let config = TransportConfig::for_model::<Pro>();
     let commands = Arc::new(Mutex::new(Vec::new()));
     let acl_packets = Arc::new(Mutex::new(Vec::new()));
@@ -861,11 +988,12 @@ fn controlled_session_with_recording() -> ControlledSession {
     let selectors = Arc::new(Mutex::new(Vec::new()));
     let mut opener = ScriptedOpener::new(transport, selectors);
     let (activity, wakes) = activity_channel();
-    let session = initialize_bumble_session_with(
+    let session = initialize_bumble_session_with_profile(
         &mut opener,
         &AdapterSelector::from("usb:0A12:0001"),
         &config,
         activity,
+        profile_key_store,
     )
     .expect("controlled Bumble initialization");
     ControlledSession {
@@ -875,6 +1003,47 @@ fn controlled_session_with_recording() -> ControlledSession {
         drops,
         commands,
         acl_packets,
+    }
+}
+
+fn empty_profile_bytes() -> Vec<u8> {
+    serde_json::to_vec_pretty(&serde_json::json!({
+        "format": "swbt.profile",
+        "schema_version": 2,
+        "controller_kind": "pro",
+        "identity": {
+            "kind": "adapter-default"
+        },
+        "key_store": {
+            "namespaces": {}
+        }
+    }))
+    .expect("serialize empty test profile")
+}
+
+struct ProfileTempDirectory {
+    path: PathBuf,
+}
+
+impl ProfileTempDirectory {
+    fn new(label: &str) -> Self {
+        let sequence = NEXT_PROFILE_TEMP_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "swbt-rs-production-key-store-{label}-{}-{sequence}",
+            std::process::id()
+        ));
+        fs::create_dir(&path).expect("create profile test directory");
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for ProfileTempDirectory {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.path).expect("remove profile test directory");
     }
 }
 
