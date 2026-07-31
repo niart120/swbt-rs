@@ -543,10 +543,10 @@ impl<M: ControllerModel> PairingProfile<M> {
     }
 
     #[cfg_attr(
-        not(test),
+        not(feature = "bumble"),
         allow(
             dead_code,
-            reason = "T05 projects persisted identity into the runtime transport"
+            reason = "feature-disabled builds do not project identity into a transport"
         )
     )]
     pub(crate) const fn identity(&self) -> ProfileIdentity {

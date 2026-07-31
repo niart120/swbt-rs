@@ -12,9 +12,15 @@ use bumble_transport::{
     ExternalHostActivity, SplitOpenedTransport, open_split_transport,
 };
 
-use crate::adapter::AdapterSelector;
+use crate::{adapter::AdapterSelector, profile::ProfileIdentity};
 
 use super::classic::ClassicDeviceSession;
+use super::csr::{CsrVendorCommand, matches_csr_vendor_response};
+use super::identity::{
+    AdapterIdentityBackend, AdapterIdentityPreparation, AdapterIdentitySession,
+    IdentityPreparationError, IdentityPreparationErrorKind, IdentityPreparationOptions,
+    prepare_adapter_identity,
+};
 use super::profile_key_store::ProfileKeyStoreFactory;
 use super::{
     ActivityNotifier, ClassicAclBufferInfo, ControllerVersionInfo, SendAcceptance,
@@ -24,6 +30,8 @@ use super::{
 
 const CONTROLLER_ID: usize = 0;
 const HCI_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+const IDENTITY_REENUMERATION_TIMEOUT: Duration = Duration::from_secs(10);
+const IDENTITY_REENUMERATION_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const LOCAL_NAME_LENGTH: usize = 248;
 // Preserve the reference host's role-switch and sniff-mode policy.
 const DEFAULT_CLASSIC_LINK_POLICY_SETTINGS: u16 = 0x0005;
@@ -60,6 +68,7 @@ struct BumbleRuntime {
 pub(crate) struct BumbleTransportPort {
     selector: AdapterSelector,
     config: TransportConfig,
+    identity: ProfileIdentity,
     profile_key_store: Option<ProfileKeyStoreFactory>,
     session: Option<BumbleSession>,
 }
@@ -70,6 +79,7 @@ impl BumbleTransportPort {
         Self {
             selector,
             config,
+            identity: ProfileIdentity::AdapterDefault,
             profile_key_store: None,
             session: None,
         }
@@ -78,11 +88,13 @@ impl BumbleTransportPort {
     pub(crate) const fn with_profile_key_store(
         selector: AdapterSelector,
         config: TransportConfig,
+        identity: ProfileIdentity,
         profile_key_store: Option<ProfileKeyStoreFactory>,
     ) -> Self {
         Self {
             selector,
             config,
+            identity,
             profile_key_store,
             session: None,
         }
@@ -93,6 +105,7 @@ impl BumbleTransportPort {
         Self {
             selector: AdapterSelector::from("usb:0"),
             config: TransportConfig::for_model::<crate::model::Pro>(),
+            identity: ProfileIdentity::AdapterDefault,
             profile_key_store: None,
             session: Some(session),
         }
@@ -104,9 +117,10 @@ impl TransportPort for BumbleTransportPort {
         if let Some(session) = self.session.as_ref() {
             return Ok(session.capabilities());
         }
-        let session = initialize_bumble_session(
+        let session = initialize_bumble_transport(
             &self.selector,
             &self.config,
+            self.identity,
             activity,
             self.profile_key_store.as_ref(),
         )?;
@@ -376,19 +390,75 @@ fn drive_runtime(runtime: &mut BumbleRuntime) -> TransportResult<Vec<TransportEv
     runtime.classic.poll(&mut runtime.device, &mut runtime.host)
 }
 
-pub(super) fn initialize_bumble_session(
+fn initialize_bumble_transport(
     selector: &AdapterSelector,
     config: &TransportConfig,
+    identity: ProfileIdentity,
     activity: ActivityNotifier,
     profile_key_store: Option<&ProfileKeyStoreFactory>,
 ) -> TransportResult<BumbleSession> {
-    initialize_bumble_session_with_profile(
+    initialize_bumble_transport_with(
         &mut SystemSplitTransportOpener,
+        selector,
+        config,
+        identity,
+        activity,
+        profile_key_store,
+    )
+}
+
+pub(super) fn initialize_bumble_transport_with<O>(
+    opener: &mut O,
+    selector: &AdapterSelector,
+    config: &TransportConfig,
+    identity: ProfileIdentity,
+    activity: ActivityNotifier,
+    profile_key_store: Option<&ProfileKeyStoreFactory>,
+) -> TransportResult<BumbleSession>
+where
+    O: SplitTransportOpener,
+{
+    let preparation = match identity {
+        ProfileIdentity::AdapterDefault => None,
+        ProfileIdentity::LocalAddress(address) => {
+            let mut backend = BumbleIdentityBackend::new(opener, selector);
+            Some(
+                prepare_adapter_identity(
+                    &mut backend,
+                    address.octets(),
+                    IdentityPreparationOptions {
+                        response_timeout: HCI_COMMAND_TIMEOUT,
+                        reenumeration_timeout: IDENTITY_REENUMERATION_TIMEOUT,
+                        reenumeration_poll_interval: IDENTITY_REENUMERATION_POLL_INTERVAL,
+                    },
+                )
+                .map_err(map_identity_preparation_error)?,
+            )
+        }
+    };
+    let expected_address = match identity {
+        ProfileIdentity::AdapterDefault => None,
+        ProfileIdentity::LocalAddress(address) => Some(address.octets()),
+    };
+    match initialize_bumble_session_with_profile_and_expected(
+        opener,
         selector,
         config,
         activity,
         profile_key_store,
-    )
+        expected_address,
+    ) {
+        Err(source)
+            if source.kind() == TransportErrorKind::IdentityMismatch
+                && preparation == Some(AdapterIdentityPreparation::Rewritten) =>
+        {
+            Err(TransportError::with_source(
+                TransportErrorKind::AdapterIdentityRecoveryRequired,
+                Arc::new(source),
+            ))
+        }
+        result => result,
+    }
 }
 
 #[cfg(test)]
@@ -404,12 +474,34 @@ where
     initialize_bumble_session_with_profile(opener, selector, config, activity, None)
 }
 
+#[cfg(test)]
 pub(super) fn initialize_bumble_session_with_profile<O>(
     opener: &mut O,
     selector: &AdapterSelector,
     config: &TransportConfig,
     activity: ActivityNotifier,
     profile_key_store: Option<&ProfileKeyStoreFactory>,
+) -> TransportResult<BumbleSession>
+where
+    O: SplitTransportOpener,
+{
+    initialize_bumble_session_with_profile_and_expected(
+        opener,
+        selector,
+        config,
+        activity,
+        profile_key_store,
+        None,
+    )
+}
+
+fn initialize_bumble_session_with_profile_and_expected<O>(
+    opener: &mut O,
+    selector: &AdapterSelector,
+    config: &TransportConfig,
+    activity: ActivityNotifier,
+    profile_key_store: Option<&ProfileKeyStoreFactory>,
+    expected_address: Option<[u8; 6]>,
 ) -> TransportResult<BumbleSession>
 where
     O: SplitTransportOpener,
@@ -429,6 +521,9 @@ where
         .initialize_device(&mut device, HCI_COMMAND_TIMEOUT)
         .map_err(map_bumble_error)?;
     let local_address = read_local_address(&mut host)?;
+    if expected_address.is_some_and(|expected| expected != local_address) {
+        return Err(TransportError::new(TransportErrorKind::IdentityMismatch));
+    }
     let capabilities = controller_capabilities(&controller, &device, local_address, usb)?;
     if let Some(factory) = profile_key_store {
         device.set_key_store(factory.create(local_address));
@@ -453,20 +548,10 @@ where
 }
 
 fn trace_initialized_controller(capabilities: TransportCapabilities) {
-    let local_address = capabilities.local_address();
     let version = capabilities.local_version();
     let usb = capabilities.usb();
     tracing::debug!(
         target: "swbt::transport::bumble",
-        local_address = %format_args!(
-            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-            local_address[0],
-            local_address[1],
-            local_address[2],
-            local_address[3],
-            local_address[4],
-            local_address[5],
-        ),
         hci_version = ?version.map(ControllerVersionInfo::hci_version),
         hci_subversion = ?version.map(ControllerVersionInfo::hci_subversion),
         lmp_version = ?version.map(ControllerVersionInfo::lmp_version),
@@ -527,8 +612,15 @@ fn controller_capabilities(
 }
 
 fn read_local_address(host: &mut ExternalHost) -> TransportResult<[u8; 6]> {
+    read_local_address_with(host, HCI_COMMAND_TIMEOUT)
+}
+
+fn read_local_address_with(
+    host: &mut ExternalHost,
+    response_timeout: Duration,
+) -> TransportResult<[u8; 6]> {
     let response = host
-        .send_command(Command::ReadBdAddr, HCI_COMMAND_TIMEOUT)
+        .send_command(Command::ReadBdAddr, response_timeout)
         .map_err(map_bumble_error)?;
     let CommandResponse::Complete {
         return_parameters: ReturnParameters::ReadBdAddr { status: 0, bd_addr },
@@ -543,6 +635,133 @@ fn read_local_address(host: &mut ExternalHost) -> TransportResult<[u8; 6]> {
     let mut local_address = *bd_addr.address_bytes();
     local_address.reverse();
     Ok(local_address)
+}
+
+struct BumbleIdentityBackend<'a, O> {
+    opener: &'a mut O,
+    selector: &'a AdapterSelector,
+    origin: Instant,
+}
+
+impl<'a, O> BumbleIdentityBackend<'a, O> {
+    fn new(opener: &'a mut O, selector: &'a AdapterSelector) -> Self {
+        Self {
+            opener,
+            selector,
+            origin: Instant::now(),
+        }
+    }
+}
+
+impl<O> AdapterIdentityBackend for BumbleIdentityBackend<'_, O>
+where
+    O: SplitTransportOpener,
+{
+    type Error = TransportError;
+    type Session = BumbleIdentitySession;
+
+    fn open(&mut self) -> Result<Self::Session, Self::Error> {
+        self.selector
+            .parse_usb()
+            .map_err(|_| TransportError::new(TransportErrorKind::OpenFailed))?;
+        let split = self
+            .opener
+            .open_split(self.selector.as_str())
+            .map_err(map_bumble_error)?;
+        Ok(BumbleIdentitySession {
+            host: ExternalHost::new(split),
+        })
+    }
+
+    fn now(&self) -> Duration {
+        self.origin.elapsed()
+    }
+
+    fn sleep(&mut self, duration: Duration) {
+        std::thread::sleep(duration);
+    }
+}
+
+struct BumbleIdentitySession {
+    host: ExternalHost,
+}
+
+impl AdapterIdentitySession for BumbleIdentitySession {
+    type Error = TransportError;
+
+    fn initialize(&mut self, response_timeout: Duration) -> Result<u16, Self::Error> {
+        let response = self
+            .host
+            .send_command(Command::ReadLocalVersionInformation, response_timeout)
+            .map_err(map_bumble_error)?;
+        let CommandResponse::Complete {
+            return_parameters:
+                ReturnParameters::ReadLocalVersionInformation {
+                    status: 0,
+                    company_identifier,
+                    ..
+                },
+            ..
+        } = response
+        else {
+            return Err(map_initialization_error(
+                InitializationError::InvalidVersionResponse,
+            ));
+        };
+        Ok(company_identifier)
+    }
+
+    fn read_address(&mut self, response_timeout: Duration) -> Result<[u8; 6], Self::Error> {
+        read_local_address_with(&mut self.host, response_timeout)
+    }
+
+    fn send_vendor_command(
+        &mut self,
+        command: &CsrVendorCommand,
+        response_timeout: Duration,
+    ) -> Result<Box<[u8]>, Self::Error> {
+        self.host
+            .send_vendor_command(csr_command(command), response_timeout, |response| {
+                matches_csr_vendor_response(command, response)
+            })
+            .map(Vec::into_boxed_slice)
+            .map_err(map_bumble_error)
+    }
+
+    fn send_command_without_response(
+        &mut self,
+        command: &CsrVendorCommand,
+    ) -> Result<(), Self::Error> {
+        self.host
+            .send_command_without_response(csr_command(command))
+            .map_err(map_bumble_error)
+    }
+
+    fn close(&mut self) -> Result<(), Self::Error> {
+        self.host
+            .shutdown_reader(HCI_COMMAND_TIMEOUT)
+            .map_err(map_close_source)
+    }
+}
+
+fn csr_command(command: &CsrVendorCommand) -> Command {
+    Command::Generic {
+        op_code: command.op_code(),
+        parameters: command.parameters().to_vec(),
+    }
+}
+
+fn map_identity_preparation_error(error: IdentityPreparationError) -> TransportError {
+    let kind = match error.kind() {
+        IdentityPreparationErrorKind::UnsupportedController => {
+            TransportErrorKind::UnsupportedController
+        }
+        IdentityPreparationErrorKind::FailedBeforeWrite => TransportErrorKind::OpenFailed,
+        IdentityPreparationErrorKind::RecoveryRequired => {
+            TransportErrorKind::AdapterIdentityRecoveryRequired
+        }
+    };
+    TransportError::with_source(kind, Arc::new(error))
 }
 
 fn identity_commands(config: &TransportConfig) -> [Command; 6] {
@@ -635,6 +854,7 @@ fn map_initialization_error(error: InitializationError) -> TransportError {
 enum InitializationError {
     InvalidUsbMetadata { key: &'static str },
     InvalidIdentityResponse,
+    InvalidVersionResponse,
     CommandDidNotComplete { opcode: u16 },
 }
 
@@ -646,6 +866,9 @@ impl fmt::Display for InitializationError {
             }
             Self::InvalidIdentityResponse => {
                 formatter.write_str("controller returned an invalid identity response")
+            }
+            Self::InvalidVersionResponse => {
+                formatter.write_str("controller returned an invalid version response")
             }
             Self::CommandDidNotComplete { opcode } => {
                 write!(

@@ -7,24 +7,10 @@ mod capabilities;
 mod classic;
 mod config;
 #[cfg(any(test, feature = "bumble"))]
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T03 consumes the pure CSR command codec from identity preparation"
-    )
-)]
 mod csr;
 #[cfg(feature = "bumble")]
 mod hidp;
 #[cfg(any(test, feature = "bumble"))]
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T05 connects identity preparation to the Bumble transport open path"
-    )
-)]
 mod identity;
 #[cfg(feature = "bumble")]
 mod profile_key_store;
@@ -141,6 +127,24 @@ pub(crate) enum TransportErrorKind {
     OpenFailed,
     /// The controller returned an unusable all-zero public address.
     InvalidControllerIdentity,
+    /// The initialized controller address differs from the persisted identity.
+    #[cfg_attr(
+        not(feature = "bumble"),
+        allow(
+            dead_code,
+            reason = "explicit identity guards require the Bumble transport"
+        )
+    )]
+    IdentityMismatch,
+    /// An explicit identity write started, but the final adapter state is uncertain.
+    #[cfg_attr(
+        not(feature = "bumble"),
+        allow(
+            dead_code,
+            reason = "explicit identity writes require the Bumble transport"
+        )
+    )]
+    AdapterIdentityRecoveryRequired,
     /// The controller lacks the Classic feature or ACL buffers required by NX.
     UnsupportedController,
     /// The configured pairing profile could not supply or persist key material.
@@ -236,6 +240,12 @@ impl fmt::Display for TransportError {
             TransportErrorKind::OpenFailed => "transport could not be opened or initialized",
             TransportErrorKind::InvalidControllerIdentity => {
                 "transport controller returned an invalid identity"
+            }
+            TransportErrorKind::IdentityMismatch => {
+                "transport controller identity does not match the pairing profile"
+            }
+            TransportErrorKind::AdapterIdentityRecoveryRequired => {
+                "transport adapter identity is uncertain after a write"
             }
             TransportErrorKind::UnsupportedController => {
                 "transport controller lacks required Classic ACL capability"

@@ -145,6 +145,8 @@ pub(super) struct RuntimeFactoryConfig {
     transport: TransportConfig,
     #[cfg(feature = "bumble")]
     profile_key_store: Option<ProfileKeyStoreFactory>,
+    #[cfg(feature = "bumble")]
+    identity: crate::ProfileIdentity,
 }
 
 #[cfg_attr(
@@ -169,6 +171,7 @@ impl RuntimeFactoryConfig {
                     .profile
                     .persistent_path()
                     .map(|path| ProfileKeyStoreFactory::for_model::<M>(path.to_owned())),
+                identity: config.profile.identity(),
             }
         }
         #[cfg(not(feature = "bumble"))]
@@ -181,6 +184,11 @@ impl RuntimeFactoryConfig {
     #[cfg(all(test, feature = "bumble"))]
     pub(super) const fn has_profile_key_store(&self) -> bool {
         self.profile_key_store.is_some()
+    }
+
+    #[cfg(all(test, feature = "bumble"))]
+    pub(super) const fn identity(&self) -> crate::ProfileIdentity {
+        self.identity
     }
 }
 
@@ -357,13 +365,7 @@ where
             .open(activity.clone())
         {
             Ok(capabilities) => capabilities,
-            Err(source) => {
-                return Err(Error::with_source(
-                    ErrorKind::TransportOpen,
-                    "controller transport could not be opened and initialized",
-                    source,
-                ));
-            }
+            Err(source) => return Err(map_transport_open_error(source)),
         };
         if !capabilities.classic_capable() {
             return Err(Error::with_source(
@@ -512,6 +514,7 @@ fn bumble_runtime_components(
             crate::runtime::transport::BumbleTransportPort::with_profile_key_store(
                 config.selector,
                 config.transport,
+                config.identity,
                 config.profile_key_store,
             ),
         ),
@@ -519,6 +522,21 @@ fn bumble_runtime_components(
         ChannelWorkerWaiter::new(activity_receiver),
         ProductionPairDriver,
     ))
+}
+
+fn map_transport_open_error(source: TransportError) -> Error {
+    if source.kind() == TransportErrorKind::AdapterIdentityRecoveryRequired {
+        return Error::with_source(
+            ErrorKind::AdapterIdentityRecoveryRequired,
+            "adapter identity is uncertain; physically power cycle the USB adapter and verify its original identity before retrying",
+            source,
+        );
+    }
+    Error::with_source(
+        ErrorKind::TransportOpen,
+        "controller transport could not be opened and initialized",
+        source,
+    )
 }
 
 #[cfg(feature = "bumble")]

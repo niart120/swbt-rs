@@ -40,6 +40,11 @@ pub enum ErrorKind {
     UnsupportedInput,
     /// The requested operation requires a capability unavailable in this build.
     UnsupportedCapability,
+    /// An explicit adapter identity write started, but its final state could not be verified.
+    ///
+    /// The USB adapter must be physically power-cycled and its original
+    /// identity checked before retrying.
+    AdapterIdentityRecoveryRequired,
     /// The bounded worker command queue has no remaining capacity.
     Busy,
     /// The controller worker terminated or could not complete the operation.

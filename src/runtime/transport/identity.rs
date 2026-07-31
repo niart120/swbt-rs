@@ -80,6 +80,7 @@ impl IdentityPreparationError {
         self.kind
     }
 
+    #[cfg(test)]
     pub(super) const fn stage(&self) -> IdentityPreparationStage {
         self.stage
     }

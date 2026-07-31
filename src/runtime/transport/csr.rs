@@ -41,12 +41,14 @@ impl CsrBdAddrRewritePlan {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct CsrBdAddrReadResponse {
     address: [u8; 6],
     status: u16,
 }
 
+#[cfg(test)]
 impl CsrBdAddrReadResponse {
     pub(super) const fn address(&self) -> [u8; 6] {
         self.address
@@ -76,6 +78,7 @@ impl fmt::Display for CsrCodecError {
 
 impl std::error::Error for CsrCodecError {}
 
+#[cfg(test)]
 pub(super) fn build_csr_bd_addr_read_command(sequence_number: u16) -> CsrVendorCommand {
     let value_words = (BD_ADDR_VALUE_LENGTH / 2) as u16;
     let payload_words = value_words + 8;
@@ -155,6 +158,7 @@ pub(super) fn parse_csr_bccmd_response(event_parameters: &[u8]) -> Result<u16, C
     ]))
 }
 
+#[cfg(test)]
 pub(super) fn parse_csr_bd_addr_read_response(
     event_parameters: &[u8],
 ) -> Result<CsrBdAddrReadResponse, CsrCodecError> {
