@@ -1,6 +1,6 @@
 # M7 Joy-Con L/R Periodic、Direct、実機
 
-- 状態: **着手中**
+- 状態: **完了**
 - milestone: M7
 - branch: `feat/unit-008-m7-joy-con`
 - 正本:
@@ -143,7 +143,7 @@ address、link key、USB serial、error source を出力しない。command acce
 | refactor-done | T04 L/R 別の同一 profile を Periodic→Direct で再利用し、Direct idle、profile不変、cross-model rejectを検査する | new/regression | integration | Pro-only M6 testを一般化 |
 | refactor-done | T05 hardware runner で Joy-Con L の Periodic pairing、Direct reconnect、入力、close を記録する | new | hardware | machine/UIを別 recordにする |
 | refactor-done | T06 hardware runner で Joy-Con R の Periodic pairing、Direct reconnect、入力、close を記録する | new | hardware | Lと別 profile/evidence |
-| todo | T07 completion gate、public docs、beta.1 criteria note、self-review を確定する | new | docs/package | 未検証事項を明記 |
+| refactor-skipped | T07 completion gate、public docs、beta.1 criteria note、self-review を確定する | new | docs/package | 未検証事項を明記 |
 
 ### 6.1 TDD cycle evidence
 
@@ -158,6 +158,7 @@ address、link key、USB serial、error source を出力しない。command acce
 | refactor-done | T04 | regression-green: 初回の `cargo +1.87.0 test same_joycon_profiles_reconnect_periodic_then_direct_without_model_leakage --all-features --locked` から成功し、既存の model-generic profile key-store/runtime に製品コード不足はなかった。Joy-Con L/R を別 schema v2 fileで検査し、反対側 model の public builder が `ProfileControllerMismatch` を adapter open 前に返すこと、Periodic stored-key reconnect と全対応button、同じfileのDirect reconnect、5 idle stepで追加 `0x30` なし、Direct input、明示neutral、final neutral、各run前後の完全bytes一致を確認。virtual transport 6 test、all-feature clippy `-D warnings`、rustfmt、diff checkが成功。refactor: file-backed profile fixtureをmodel generic化し、L/R共通のreuse helperへ集約 |
 | refactor-done | T05 | red: `cargo test --all-features --example joycon_profile_hardware --locked` は runner target がなく失敗。green: model、reporting、pair/reconnect、timeout、run indexを明示し、adapter selector、profile path、raw profile、key materialを出力しない NDJSON runnerを追加した。Joy-Con L run 1はfresh Periodic Pairが5.808秒でReadyとなり、D-pad 4方向、L+ZL、SL+SR、left stick 4方向、中立close、adapter reopen、新規profileのmodel検査を完了した。run 2は同じprofileのDirect reconnectが3.336秒でReadyとなり、Ready後idleのuser input 0件、各操作のpress/release 2件、明示neutral、close、adapter reopen、profile完全一致を確認した。ユーザは両runで全入力のUI反映と残留入力なしを報告した。runner unit 3 test、rustfmt、secret-free evidence検査が成功。refactor: L/RとPeriodic/Directのdispatch、machine/UI record、profile pre/postflight、操作ごとの受理数と接続維持検査を共通化 |
 | refactor-done | T06 | red: Joy-Con R fresh Pairのrun 3/6は120秒でtimeoutしたがschema v2 bondは保存され、run 7のPeriodic reconnectは通常入力を1,732件受理しながら30秒でReadyにならなかった。statusはreply 14件、最後のsubcommand `0x22`、worker failureなしを示した。pinned Python `0.6.0` / commit `84d2723...` の実装と過去のJoy-Con R実機記録を照合し、RustだけがNFC/IR MCU state `0x22`を未対応と特定した。`nfc_ir_mcu_state_reply_accepts_the_python_supported_modes` は最初、stateless replyが`None`のため失敗した。green: mode `0x00`–`0x02`をACK `0x80`、追加dataなしで受け、payload欠落と未知modeをtyped `ProtocolError`にした。targeted subcommand 14 test、facade routing、all-feature lib clippy `-D warnings`が成功した。修正後run 13は既存bondのPeriodic reconnectが2.303秒でReadyとなり、3秒idleと全入力の間も接続を維持し、中立close、adapter reopen、profile完全一致を完了した。run 14は同じprofileのDirect reconnectが2.027秒でReady、2回の500 ms idleでuser input 0件、各操作2 report、全入力のUI反映、残留入力なしを確認した。Switch登録解除後のrun 15はfresh Periodic Pairが10.588秒でReadyとなり、全入力、中立close、adapter reopen、新規profileと反対側model拒否を完了し、ユーザはJoy-Con R登録と残留入力なしを確認した。500 msのX押下でremote reason `0x13`の切断を再現し、200 msではrun 13–15が成功したためface buttonだけ200 msへ短縮したが、Switch UIの長押し終了条件だったかは未検証。refactor: stateless replyのerror検査helper、接続喪失/入力未受理の即時failure、Periodicのpress/releaseとDirectのtapをrunner内で分離 |
+| refactor-skipped | T07 | red: READMEはM6まで、crate rustdocはPro実機だけ、hardware matrixはJoy-Con L/Rを未検証としており、M7の達成範囲とbeta.1の未達項目を判別できなかった。completion test初回は、`0x22`を未対応caseとして固定した既存facade testが`InvalidNfcIrMcuState`を受けて失敗した。green: unsupported caseを`0x23`へ移し、README、crate rustdoc、hardware matrixをJoy-Con L/R Periodic/Direct、runner手順、UI/machine境界へ更新した。beta.1はJoy-Con対象だけ達成し、Linux、dependency/license inventory、公開API review、semver freeze候補は未達と明記した。Rust 1.87 all-feature libraryは294 passed / 2 ignored、default/no-defaultは各250 passed / 1 ignoredで、integrationとdoc testも成功した。all-target/all-feature check、stable all/default clippy `-D warnings`、Rust 1.87 all/default/no-default build、all-feature rustdoc `-D warnings`、rustfmt、diff checkが成功した。仮テキストとevidence秘密情報の`rg`は該当なし。文書・test期待値の更新でproduction behaviorを追加変更していないためrefactorは省略 |
 
 ## 7. 対象ファイル
 
@@ -168,6 +169,7 @@ address、link key、USB serial、error source を出力しない。command acce
 - `src/runtime/transport/virtual_tests.rs`
 - `examples/`
 - `README.md`、crate rustdoc
+- `spec/initial/testing.md`
 - `evidence/` の Joy-Con L/R secret-free 実機証跡
 - 本作業仕様
 
@@ -203,22 +205,71 @@ network、cross compile、publish は実行しない。
 - explicit local address: 独立 milestone
 - Bumble upstream contribution: ユーザが明示的に許可するまで実施しない
 
-## 10. 完了チェックリスト
+## 10. beta.1 criteria note
 
-- [ ] T01–T07 が個別 commit で完了している
-- [ ] Joy-Con L supported集合にAを含めない
-- [ ] Joy-Con R supported集合にD-padを含めない
-- [ ] stick capabilityとneutral opposite sideがmodelに一致する
-- [ ] SL/SR mappingがL/RそれぞれのPython fixtureと一致する
-- [ ] device info、SPI colors、SDP identityがmodelに一致する
-- [ ] L/R×Periodic/Directがfake/virtual Readyとtyped inputを通る
-- [ ] cross-model profileをadapter open前に拒否する
-- [ ] L/Rそれぞれで同一profileをPeriodic/Direct利用する
-- [ ] Direct idleで周期user input reportを送らない
-- [ ] L/R別の実機machine evidenceとUI observationを記録する
-- [ ] key material、raw profile、secretがerror、trace、evidenceに残らない
-- [ ] `JoyConPair`を追加していない
-- [ ] beta.1 criteria、未実行条件、residual riskを記録する
-- [ ] upstream Bumble PR / issueを作成していない
-- [ ] self-reviewとcompletion gateを通す
-- [ ] `spec/complete/unit_008/`へ移動する
+M7は`0.1.0-beta.1`追加対象のうち、Joy-Con L/R Periodic/Direct、model-specific button/state、
+model固有wire/identity、profile再利用、Windows実機経路を満たした。common IMU conversionと
+wire parityは既存fixtureで維持しているが、M8のIMU実機・診断・probeは本作業では実行していない。
+
+`0.1.0-beta.1`全体のrelease-ready判定ではない。limited Linux bring-up、dependency/license inventory、
+公開API reviewとsemver freeze候補はM9まで未達である。Windows実機も1台のSwitch 2、ユーザ報告
+system version 22.5.0、CSR8510 A10、WinUSBに限定され、長時間・反復成功率は測定していない。
+
+## 11. Self-review
+
+### 11.1 Work
+
+- spec: `unit_008`のJoy-Con L/R Periodic/Direct、profile再利用、実機経路
+- intent delta: Joy-Con L/R profile fixture、左右固有fake/virtual input、同一profileのreporting再利用、
+  Joy-Con実機runner、NFC/IR MCU state `0x22`互換reply、公開文書とhardware matrix
+- non-goals: `JoyConPair`、左右同時接続、M8 IMU/diagnostics/probe、M9 portability/release、upstream PR
+
+### 11.2 Findings and residual risk
+
+| severity | finding | evidence | disposition |
+|---|---|---|---|
+| medium | `0.1.0-beta.1`全体のLinux、dependency/license inventory、公開API review、semver freeze候補は未達 | roadmap 2.3、M9 | M7完了とrelease-ready判定を分離し、M9まで公開しない |
+| medium | `bumble` featureはpublic forkの固定SHAに依存する | `Cargo.lock`、固定revision | fork branch push以外へ権限を広げず、upstream PR / issueを作成しない |
+| low | Switch system version 22.5.0はユーザ報告で、runnerは機械検出していない | machine evidenceの`switch_system_version_machine_verified: false` | README、crate rustdoc、matrixでユーザ報告と明記 |
+| low | Joy-Con Rの500 ms X押下時にremote reason `0x13`で切断したが、Switch UIの終了条件だったかは未検証 | run 12診断、200 msのrun 13–15成功 | face buttonを200 msに限定し、原因を断定しない |
+| low | 実機はWindows 11、CSR8510 A10、WinUSB、Switch 2各1環境で、長時間・反復成功率を測っていない | T05/T06 evidence | M8/M9へ先送りし、成功runを信頼性指標にしない |
+
+critical/high findingはない。private protocol handlerの追加で公開API型は変更していない。model宣言、
+左右stick capability、profile model、Periodic/Directの型境界を維持し、`unsafe`、feature、filesystem schema、
+key出力を追加していない。
+
+### 11.3 Gates
+
+| gate | result | evidence |
+|---|---|---|
+| Requirements | pass | roadmap M7、initial API/type/architecture/testing、pinned Python 0.6.0、固定Bumble revisionを照合 |
+| Design | pass | `Controller<M,R>`、model固有mapping、別profile、reporting policyを維持。`JoyConPair`なし |
+| Test | pass | Rust 1.87 all-feature 294 passed / 2 ignored、default/no-default各250 passed / 1 ignored、integration/doc test成功 |
+| Static | pass | stable all/default clippy `-D warnings`、rustfmt、rustdoc `-D warnings`、仮テキスト/秘密情報該当なし |
+| Package | build pass / package not applicable | Rust 1.87 all/default/no-default build成功。release対象外のため`cargo package`未実行 |
+| Integration Review | pass | README、crate rustdoc、initial hardware matrix、work-unit、evidence、固定fork SHAを照合 |
+| Hardware | pass within M7 scope | L run 1/2、R run 13–15。UI observationはmachine NDJSONと別record |
+
+T07ではT05/T06の保存済み実機証跡を参照し、hardwareを再実行していない。Python writer、network、
+Linux、macOS、cross compile、long-run、package、publishは対象外。Bumble forkへの追加変更とbranch pushは
+不要で、upstream PR / issueは作成していない。
+
+## 12. 完了チェックリスト
+
+- [x] T01–T07 が個別 commit で完了している
+- [x] Joy-Con L supported集合にAを含めない
+- [x] Joy-Con R supported集合にD-padを含めない
+- [x] stick capabilityとneutral opposite sideがmodelに一致する
+- [x] SL/SR mappingがL/RそれぞれのPython fixtureと一致する
+- [x] device info、SPI colors、SDP identityがmodelに一致する
+- [x] L/R×Periodic/Directがfake/virtual Readyとtyped inputを通る
+- [x] cross-model profileをadapter open前に拒否する
+- [x] L/Rそれぞれで同一profileをPeriodic/Direct利用する
+- [x] Direct idleで周期user input reportを送らない
+- [x] L/R別の実機machine evidenceとUI observationを記録する
+- [x] key material、raw profile、secretがerror、trace、evidenceに残らない
+- [x] `JoyConPair`を追加していない
+- [x] beta.1 criteria、未実行条件、residual riskを記録する
+- [x] upstream Bumble PR / issueを作成していない
+- [x] self-reviewとcompletion gateを通す
+- [x] `spec/complete/unit_008/`へ移動する
