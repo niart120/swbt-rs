@@ -148,7 +148,7 @@ characterization で使った未割当 universal dummy address は製品経路�
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| pending | T01 CSR GETREQ / volatile SETREQ / warm reset bytes、address decode、response matching、status failure を固定 fixture で検査する | new/characterization | pure unit | adapter I/O なし |
+| refactor-skipped | T01 CSR GETREQ / volatile SETREQ / warm reset bytes、address decode、response matching、status failure を固定 fixture で検査する | new/characterization | pure unit | adapter I/O なし |
 | pending | T02 Bumble `ExternalHost` が generic command に一致する Vendor Event を期限付きで返し、warm reset command を応答待ちなしで送れることを fork 側 test で固定する | new | dependency unit | public fork branch。upstream PR なし |
 | pending | T03 identity preparation の already-active、rewrite→re-enumerate→read-back、非 CSR、write 前 failure、write 後 recovery-required を fake port で検査する | new/safety | transport unit | closed stage、bounded retry |
 | pending | T04 local-address empty profile を adapter open 前に create-new / typed reopen し、feature-disabled と concurrent target の順序を検査する | new/regression | profile/controller | persisted identity が正本 |
@@ -160,6 +160,12 @@ characterization で使った未割当 universal dummy address は製品経路�
 
 各 item は red、green、必要な refactor を完了してから、その item だけを Conventional Commit で commit する。
 Bumble fork 側 T02 は fork repository の専用 branch に独立 commit を作り、その commit SHA を本仕様と `Cargo.toml` に固定する。
+
+### 6.1 TDD cycle evidence
+
+| phase | item | evidence |
+|---|---|---|
+| refactor-skipped | T01 | red: CSR codec の6 itemを参照する4 unit testsは全item未定義の `E0432` で失敗した。green: opcode `0xFC00`、channel `0xC2`、PSKEY_BDADDR `0x0001`、volatile selector `0x0008` の GETREQ / SETREQ / warm reset bytes、GETRESP matching、status/address decodeをpure moduleへ実装し、targeted default/all-feature testは各4 passed。malformed/non-CSR errorはpayloadを保持しないclosed enumとした。`cargo fmt --check`、all-target/all-feature clippy `-D warnings`、`git diff --check`も成功した。refactor: codecはI/Oなしの単一moduleに分離済みで、重複や不要な公開境界がないため追加変更を行わなかった |
 
 ## 7. 対象ファイル
 
@@ -229,4 +235,3 @@ Bumble fork は変更 package の unit test、`cargo fmt --check`、対象 packa
 - [ ] `agentic-self-review` の指摘を採否記録した
 - [ ] `spec/complete/unit_011/` へ移動した
 - [ ] PR merge 後に default branch を同期し、作業 branch を削除した
-

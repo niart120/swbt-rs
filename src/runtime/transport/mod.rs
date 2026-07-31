@@ -6,6 +6,15 @@ mod capabilities;
 #[cfg(feature = "bumble")]
 mod classic;
 mod config;
+#[cfg(any(test, feature = "bumble"))]
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "T03 consumes the pure CSR command codec from identity preparation"
+    )
+)]
+mod csr;
 #[cfg(feature = "bumble")]
 mod hidp;
 #[cfg(feature = "bumble")]
