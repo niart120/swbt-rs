@@ -106,8 +106,8 @@ M8 着手時点で次は実装・検査済みである。
   `report_tx_accepted`、`reply_tx_accepted`、`session_ended`、`worker_failed`、
   `unsupported_button` のいずれか
 - 共通 field: `controller_kind`、`reporting_kind`。runtime event は `session_id` も持つ
-- event 固有 field: lifecycle、report mode、subcommand ID、累積受理数、disconnect reason、
-  failure category、button kind
+- event 固有 field: lifecycle、report mode、committed IMU mode、subcommand ID、累積受理数、
+  disconnect reason、failure category、button kind
 
 `environment` は session 開始前に発行し、package version、target OS、target architecture を持つ。
 event field は machine-readable な固定名と値を使い、人向け error message を契約にしない。`session_id` は
@@ -127,6 +127,8 @@ probe 開始 record に package version、target OS、target architecture、cont
 
 trace writer は `swbt::diagnostics` target だけを収集する。既存 transport debug event を混在させない。
 v1 は raw packet opt-in を実装しない。NDJSON は各行を独立した JSON object とし、中断後も完了行を読める。
+probe の writer は検査済み event に `trace_elapsed_ns` を追加する。この値は trace 開始から subscriber が
+event を観測するまでの単調増加時間であり、無線送信完了時刻や Switch 側の受信時刻ではない。
 
 ### 5.4 dynamic controller/profile 境界
 
@@ -161,6 +163,10 @@ swbt-probe profile verify path
   tapし、対象modelで非対応なら `UnsupportedInput` と `unsupported_button` eventを返してからcloseする
 - `pair` は既存 profile を上書きせず、`reconnect` は profile 不一致時に adapter を開かない
 - `--trace` は create-new とし、既存 trace を上書きしない
+- `reconnect --controller pro` の Periodic だけは `--imu-seconds 1..3600` を受ける。指定時は非中立 IMU
+  state を固定時間 commit し、少なくとも1 reportのtransport受理後に中立化して再度1 report以上の受理を
+  確認する。成功 record は実行秒数、apply command latency、各受理数、shutdown latency、profile bytes不変、
+  adapter再openを秘密値なしで返す。pair、Direct、Joy-Conへの指定はusage errorとする
 - `bumble`/probe feature なしの通常 library build と test を維持する
 
 ### 5.6 hardware evidence
@@ -170,7 +176,7 @@ stored-key reconnect を行う。runner/probe は timeout と run index を明�
 
 - machine: Ready、IMU mode、non-neutral IMU report 受理、session/counter/subcommand/reason、neutral close、
   adapter reopen、profile bytes 不変、trace parse/redaction
-- timing: 8 ms 周期の受理 timestamp、p50/p95/p99/max jitter、overrun、command/reply latency、
+- timing: 8 ms 周期のsubscriber観測 timestamp、p50/p95/p99/max interval error、overrun、command/reply latency、
   idle CPU、shutdown latency
 - UI: button/stick/IMU の観測と残留入力なし。machine evidence から推測しない
 

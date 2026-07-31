@@ -205,6 +205,93 @@ fn connection_commands_dispatch_known_models_without_fallback() {
 }
 
 #[test]
+fn imu_run_is_limited_to_pro_periodic_reconnect_and_valid_duration() {
+    let fixture = ProbeFixture::new();
+    let trace_text = fixture.trace_text();
+
+    let valid = run([
+        "reconnect",
+        "--controller",
+        "pro",
+        "--profile",
+        fixture.profile_text(),
+        "--trace",
+        trace_text,
+        "--imu-seconds",
+        "60",
+    ]);
+    assert_eq!(valid.status.code(), Some(1));
+    assert_eq!(
+        one_json_line(&valid.stderr)["error_kind"],
+        "profile_not_found"
+    );
+
+    for arguments in [
+        vec![
+            "pair",
+            "--controller",
+            "pro",
+            "--profile",
+            fixture.profile_text(),
+            "--trace",
+            trace_text,
+            "--imu-seconds",
+            "60",
+        ],
+        vec![
+            "reconnect",
+            "--controller",
+            "pro",
+            "--profile",
+            fixture.profile_text(),
+            "--trace",
+            trace_text,
+            "--reporting",
+            "direct",
+            "--imu-seconds",
+            "60",
+        ],
+        vec![
+            "reconnect",
+            "--controller",
+            "joycon-r",
+            "--profile",
+            fixture.profile_text(),
+            "--trace",
+            trace_text,
+            "--imu-seconds",
+            "60",
+        ],
+        vec![
+            "reconnect",
+            "--controller",
+            "pro",
+            "--profile",
+            fixture.profile_text(),
+            "--trace",
+            trace_text,
+            "--imu-seconds",
+            "0",
+        ],
+        vec![
+            "reconnect",
+            "--controller",
+            "pro",
+            "--profile",
+            fixture.profile_text(),
+            "--trace",
+            trace_text,
+            "--imu-seconds",
+            "3601",
+        ],
+    ] {
+        let output = run(&arguments);
+        assert_eq!(output.status.code(), Some(2), "arguments: {arguments:?}");
+        assert_eq!(one_json_line(&output.stderr)["error_kind"], "usage");
+    }
+}
+
+#[test]
 fn trace_is_create_new_valid_ndjson_and_redacted_on_operation_failure() {
     let fixture = ProbeFixture::new();
     fs::write(&fixture.profile, profile_json()).expect("write existing profile");

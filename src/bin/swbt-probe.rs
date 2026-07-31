@@ -1,9 +1,17 @@
-use std::{ffi::OsString, io, path::PathBuf, process::ExitCode, time::Duration};
+use std::{
+    ffi::OsString,
+    fs, io,
+    path::PathBuf,
+    process::ExitCode,
+    thread,
+    time::{Duration, Instant},
+};
 
 use serde_json::{Value, json};
 use swbt::{
     ButtonKind, Controller, ControllerKind, CreateProfileOptions, DirectProController, ErrorKind,
-    ProfileIdentity, ProfileIdentityKind, ProfileSummary, inspect_profile, list_adapters,
+    ImuFrame, InputState, ProfileIdentity, ProfileIdentityKind, ProfileSummary, inspect_profile,
+    list_adapters,
 };
 use swbt::{
     model::{self, ControllerModel},
@@ -22,12 +30,14 @@ const EXIT_USAGE: u8 = 2;
 const DEFAULT_ADAPTER: &str = "usb:0";
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(60);
 const BUTTON_TAP_DURATION: Duration = Duration::from_millis(100);
+const MIN_IMU_RUN_SECS: u64 = 1;
+const MAX_IMU_RUN_SECS: u64 = 3600;
 const HELP: &str = "\
 Usage:
   swbt-probe adapters
   swbt-probe open --adapter <selector>
   swbt-probe pair --controller <pro|joycon-l|joycon-r> --profile <path> --trace <path> [--button <button>]
-  swbt-probe reconnect --controller <pro|joycon-l|joycon-r> --profile <path> --trace <path> [--reporting <periodic|direct>] [--button <button>]
+  swbt-probe reconnect --controller <pro|joycon-l|joycon-r> --profile <path> --trace <path> [--reporting <periodic|direct>] [--button <button>] [--imu-seconds <1..3600>]
   swbt-probe profile inspect <path>
   swbt-probe profile verify <path>
   swbt-probe help
@@ -92,6 +102,7 @@ struct ConnectionRequest {
     profile: PathBuf,
     trace: PathBuf,
     button: Option<ButtonKind>,
+    imu_duration: Option<Duration>,
 }
 
 fn parse(arguments: Vec<OsString>) -> Result<Command, ()> {
@@ -140,6 +151,7 @@ fn parse_connection(
     let mut trace = None;
     let mut reporting = None;
     let mut button = None;
+    let mut imu_duration = None;
     for option in arguments.chunks_exact(2) {
         match option[0].to_str() {
             Some("--controller") => set_once(
@@ -162,6 +174,14 @@ fn parse_connection(
                 &mut button,
                 option[1].to_str().and_then(parse_button_kind).ok_or(())?,
             )?,
+            Some("--imu-seconds") => {
+                let seconds = option[1]
+                    .to_str()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .filter(|seconds| (MIN_IMU_RUN_SECS..=MAX_IMU_RUN_SECS).contains(seconds))
+                    .ok_or(())?;
+                set_once(&mut imu_duration, Duration::from_secs(seconds))?;
+            }
             _ => return Err(()),
         }
     }
@@ -173,13 +193,22 @@ fn parse_connection(
             reporting.unwrap_or(ReportingSelection::Periodic)
         }
     };
+    let controller = controller.ok_or(())?;
+    if imu_duration.is_some()
+        && (operation != ConnectionOperation::Reconnect
+            || controller != ControllerSelection::Pro
+            || reporting != ReportingSelection::Periodic)
+    {
+        return Err(());
+    }
     Ok(ConnectionRequest {
         operation,
-        controller: controller.ok_or(())?,
+        controller,
         reporting,
         profile: profile.ok_or(())?,
         trace: trace.ok_or(())?,
         button,
+        imu_duration,
     })
 }
 
@@ -241,9 +270,8 @@ fn execute(command: Command, backend: &mut impl ProbeBackend) -> Result<Value, E
         Command::Open(selector) => backend
             .open_adapter(&selector)
             .map(|()| adapter_opened_record()),
-        Command::Connection(request) => {
-            dispatch_connection(&request, backend).map(|()| connection_completed_record(&request))
-        }
+        Command::Connection(request) => dispatch_connection(&request, backend)
+            .map(|evidence| connection_completed_record(&request, evidence)),
         Command::ProfileInspect(path) => inspect_profile(path)
             .map(profile_inspected_record)
             .map_err(|error| error.kind()),
@@ -256,7 +284,7 @@ fn execute(command: Command, backend: &mut impl ProbeBackend) -> Result<Value, E
 fn dispatch_connection(
     request: &ConnectionRequest,
     backend: &mut impl ProbeBackend,
-) -> Result<(), ErrorKind> {
+) -> Result<ConnectionEvidence, ErrorKind> {
     match request.controller {
         ControllerSelection::Pro => dispatch_model::<model::Pro>(request, backend),
         ControllerSelection::JoyConL => dispatch_model::<model::JoyConL>(request, backend),
@@ -267,7 +295,7 @@ fn dispatch_connection(
 fn dispatch_model<M: ControllerModel>(
     request: &ConnectionRequest,
     backend: &mut impl ProbeBackend,
-) -> Result<(), ErrorKind> {
+) -> Result<ConnectionEvidence, ErrorKind> {
     match request.operation {
         ConnectionOperation::Pair => backend.pair::<M>(request),
         ConnectionOperation::Reconnect => match request.reporting {
@@ -282,14 +310,33 @@ struct SafeAdapter {
     product_id: u16,
 }
 
+#[derive(Default)]
+struct ConnectionEvidence {
+    imu: Option<ImuRunEvidence>,
+    shutdown_latency_ns: Option<u64>,
+    neutral_close: bool,
+    profile_unchanged: Option<bool>,
+    adapter_reopened: Option<bool>,
+}
+
+struct ImuRunEvidence {
+    duration_seconds: u64,
+    apply_command_latency_ns: u64,
+    non_neutral_reports_accepted: u64,
+    neutral_reports_accepted: u64,
+}
+
 trait ProbeBackend {
     fn list_adapters(&mut self) -> Result<Vec<SafeAdapter>, ErrorKind>;
     fn open_adapter(&mut self, selector: &str) -> Result<(), ErrorKind>;
-    fn pair<M: ControllerModel>(&mut self, request: &ConnectionRequest) -> Result<(), ErrorKind>;
-    fn reconnect<M: ControllerModel, R: ReportingMode>(
+    fn pair<M: ControllerModel>(
         &mut self,
         request: &ConnectionRequest,
-    ) -> Result<(), ErrorKind>;
+    ) -> Result<ConnectionEvidence, ErrorKind>;
+    fn reconnect<M: ControllerModel, R: ProbeReporting<M>>(
+        &mut self,
+        request: &ConnectionRequest,
+    ) -> Result<ConnectionEvidence, ErrorKind>;
 }
 
 struct SystemBackend;
@@ -316,7 +363,10 @@ impl ProbeBackend for SystemBackend {
         open_and_close(&mut controller)
     }
 
-    fn pair<M: ControllerModel>(&mut self, request: &ConnectionRequest) -> Result<(), ErrorKind> {
+    fn pair<M: ControllerModel>(
+        &mut self,
+        request: &ConnectionRequest,
+    ) -> Result<ConnectionEvidence, ErrorKind> {
         let trace = TraceSession::install(&request.trace)?;
         trace::emit_environment::<M, reporting::Periodic>();
         let operation = (|| {
@@ -327,18 +377,26 @@ impl ProbeBackend for SystemBackend {
                     pair_timeout: CONNECTION_TIMEOUT,
                 })
                 .map_err(|error| error.kind())?;
-            apply_button_and_close(&mut controller, request.button)
+            apply_button_and_close(&mut controller, request.button)?;
+            Ok(ConnectionEvidence {
+                neutral_close: true,
+                ..ConnectionEvidence::default()
+            })
         })();
         finish_trace(trace, operation)
     }
 
-    fn reconnect<M: ControllerModel, R: ReportingMode>(
+    fn reconnect<M: ControllerModel, R: ProbeReporting<M>>(
         &mut self,
         request: &ConnectionRequest,
-    ) -> Result<(), ErrorKind> {
+    ) -> Result<ConnectionEvidence, ErrorKind> {
         let trace = TraceSession::install(&request.trace)?;
         trace::emit_environment::<M, R>();
         let operation = (|| {
+            let profile_before = request
+                .imu_duration
+                .map(|_| read_profile_bytes(&request.profile))
+                .transpose()?;
             let mut controller = Controller::<M, R>::builder(DEFAULT_ADAPTER)
                 .profile_path(&request.profile)
                 .build()
@@ -347,14 +405,146 @@ impl ProbeBackend for SystemBackend {
             let connection = controller
                 .reconnect(CONNECTION_TIMEOUT)
                 .map_err(|error| error.kind())
-                .and_then(|()| apply_button(&mut controller, request.button));
-            finish_connection(&mut controller, connection)
+                .and_then(|()| R::run_ready(&mut controller, request));
+            let shutdown_started = Instant::now();
+            let imu = finish_connection(&mut controller, connection)?;
+            let mut evidence = ConnectionEvidence {
+                imu,
+                shutdown_latency_ns: Some(duration_ns(shutdown_started.elapsed())),
+                neutral_close: true,
+                ..ConnectionEvidence::default()
+            };
+            if let Some(profile_before) = profile_before {
+                let profile_after = read_profile_bytes(&request.profile)?;
+                if profile_after != profile_before {
+                    return Err(ErrorKind::InvalidProfile);
+                }
+                reopen_after_connection::<M, R>(request)?;
+                if read_profile_bytes(&request.profile)? != profile_before {
+                    return Err(ErrorKind::InvalidProfile);
+                }
+                evidence.profile_unchanged = Some(true);
+                evidence.adapter_reopened = Some(true);
+            }
+            Ok(evidence)
         })();
         finish_trace(trace, operation)
     }
 }
 
-fn finish_trace(trace: TraceSession, operation: Result<(), ErrorKind>) -> Result<(), ErrorKind> {
+fn read_profile_bytes(path: &std::path::Path) -> Result<Vec<u8>, ErrorKind> {
+    fs::read(path).map_err(|error| match error.kind() {
+        io::ErrorKind::NotFound => ErrorKind::ProfileNotFound,
+        _ => ErrorKind::InvalidProfile,
+    })
+}
+
+trait ProbeReporting<M: ControllerModel>: ReportingMode {
+    fn run_ready(
+        controller: &mut Controller<M, Self>,
+        request: &ConnectionRequest,
+    ) -> Result<Option<ImuRunEvidence>, ErrorKind>
+    where
+        Self: Sized;
+}
+
+impl<M: ControllerModel> ProbeReporting<M> for reporting::Periodic {
+    fn run_ready(
+        controller: &mut Controller<M, Self>,
+        request: &ConnectionRequest,
+    ) -> Result<Option<ImuRunEvidence>, ErrorKind> {
+        apply_button(controller, request.button)?;
+        request
+            .imu_duration
+            .map(|duration| run_periodic_imu(controller, duration))
+            .transpose()
+    }
+}
+
+impl<M: ControllerModel> ProbeReporting<M> for reporting::Direct {
+    fn run_ready(
+        controller: &mut Controller<M, Self>,
+        request: &ConnectionRequest,
+    ) -> Result<Option<ImuRunEvidence>, ErrorKind> {
+        if request.imu_duration.is_some() {
+            return Err(ErrorKind::UnsupportedCapability);
+        }
+        apply_button(controller, request.button)?;
+        Ok(None)
+    }
+}
+
+fn run_periodic_imu<M: ControllerModel>(
+    controller: &mut Controller<M, reporting::Periodic>,
+    duration: Duration,
+) -> Result<ImuRunEvidence, ErrorKind> {
+    let frame = ImuFrame::accel_g(0.25, -0.25, 1.25)
+        .and_then(|frame| frame.with_gyro_rate(0.5, -0.25, 0.125))
+        .map_err(|error| error.kind())?;
+    let started = Instant::now();
+    let apply_started = Instant::now();
+    controller
+        .apply(InputState::neutral().with_imu(frame))
+        .map_err(|error| error.kind())?;
+    let apply_command_latency_ns = duration_ns(apply_started.elapsed());
+    let non_neutral_baseline = controller.status().input_reports_accepted;
+    wait_for_periodic_report(controller, non_neutral_baseline)?;
+    thread::sleep(duration.saturating_sub(started.elapsed()));
+    let non_neutral_reports_accepted = controller
+        .status()
+        .input_reports_accepted
+        .saturating_sub(non_neutral_baseline);
+    controller.neutral().map_err(|error| error.kind())?;
+    let neutral_baseline = controller.status().input_reports_accepted;
+    wait_for_periodic_report(controller, neutral_baseline)?;
+    let neutral_reports_accepted = controller
+        .status()
+        .input_reports_accepted
+        .saturating_sub(neutral_baseline);
+    Ok(ImuRunEvidence {
+        duration_seconds: duration.as_secs(),
+        apply_command_latency_ns,
+        non_neutral_reports_accepted,
+        neutral_reports_accepted,
+    })
+}
+
+fn wait_for_periodic_report<M: ControllerModel>(
+    controller: &Controller<M, reporting::Periodic>,
+    accepted_before: u64,
+) -> Result<(), ErrorKind> {
+    let deadline = Instant::now()
+        + controller
+            .report_period()
+            .saturating_mul(4)
+            .max(Duration::from_secs(1));
+    while Instant::now() < deadline {
+        if controller.status().input_reports_accepted > accepted_before {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+    Err(ErrorKind::WorkerFailed)
+}
+
+fn duration_ns(duration: Duration) -> u64 {
+    u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
+}
+
+fn reopen_after_connection<M: ControllerModel, R: ReportingMode>(
+    request: &ConnectionRequest,
+) -> Result<(), ErrorKind> {
+    let mut controller = Controller::<M, R>::builder(DEFAULT_ADAPTER)
+        .profile_path(&request.profile)
+        .build()
+        .map_err(|error| error.kind())?;
+    controller.open().map_err(|error| error.kind())?;
+    controller
+        .close_without_neutral()
+        .map_err(|error| error.kind())
+}
+
+fn finish_trace<T>(trace: TraceSession, operation: Result<T, ErrorKind>) -> Result<T, ErrorKind> {
     match trace.finish() {
         Ok(()) => operation,
         Err(error) => Err(error),
@@ -382,14 +572,15 @@ fn apply_button<M: ControllerModel, R: ReportingMode>(
         .map_err(|error| error.kind())
 }
 
-fn finish_connection<M: ControllerModel, R: ReportingMode>(
+fn finish_connection<M: ControllerModel, R: ReportingMode, T>(
     controller: &mut Controller<M, R>,
-    operation: Result<(), ErrorKind>,
-) -> Result<(), ErrorKind> {
+    operation: Result<T, ErrorKind>,
+) -> Result<T, ErrorKind> {
     let close = controller.close().map_err(|error| error.kind());
     match (operation, close) {
         (Err(primary), _) => Err(primary),
-        (Ok(()), result) => result,
+        (Ok(value), Ok(())) => Ok(value),
+        (Ok(_), Err(error)) => Err(error),
     }
 }
 
@@ -441,7 +632,8 @@ fn adapter_opened_record() -> Value {
     })
 }
 
-fn connection_completed_record(request: &ConnectionRequest) -> Value {
+fn connection_completed_record(request: &ConnectionRequest, evidence: ConnectionEvidence) -> Value {
+    let imu = evidence.imu;
     json!({
         "schema": PROBE_SCHEMA,
         "schema_version": PROBE_SCHEMA_VERSION,
@@ -449,6 +641,14 @@ fn connection_completed_record(request: &ConnectionRequest) -> Value {
         "operation": connection_operation_name(request.operation),
         "controller_kind": controller_kind(request.controller).profile_name(),
         "reporting_kind": reporting_name(request.reporting),
+        "imu_run_seconds": imu.as_ref().map(|evidence| evidence.duration_seconds),
+        "imu_apply_command_latency_ns": imu.as_ref().map(|evidence| evidence.apply_command_latency_ns),
+        "imu_non_neutral_reports_accepted": imu.as_ref().map(|evidence| evidence.non_neutral_reports_accepted),
+        "neutral_reports_accepted": imu.as_ref().map(|evidence| evidence.neutral_reports_accepted),
+        "shutdown_latency_ns": evidence.shutdown_latency_ns,
+        "neutral_close": evidence.neutral_close,
+        "profile_unchanged": evidence.profile_unchanged,
+        "adapter_reopened": evidence.adapter_reopened,
     })
 }
 

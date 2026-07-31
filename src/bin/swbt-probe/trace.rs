@@ -6,6 +6,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
+    time::Instant,
 };
 
 use serde_json::{Map, Number, Value};
@@ -41,6 +42,7 @@ impl TraceSession {
         let state = Arc::new(TraceState {
             output: Mutex::new(BufWriter::new(file)),
             failed: AtomicBool::new(false),
+            started: Instant::now(),
         });
         Ok((
             Self {
@@ -91,11 +93,17 @@ const fn reporting_kind_name(kind: swbt::ReportingKind) -> &'static str {
 struct TraceState {
     output: Mutex<BufWriter<std::fs::File>>,
     failed: AtomicBool,
+    started: Instant,
 }
 
 impl TraceState {
-    fn write(&self, record: &Map<String, Value>) {
-        let Ok(mut bytes) = serde_json::to_vec(record) else {
+    fn write(&self, mut record: Map<String, Value>) {
+        let elapsed_ns = u64::try_from(self.started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        record.insert(
+            "trace_elapsed_ns".to_owned(),
+            Value::Number(elapsed_ns.into()),
+        );
+        let Ok(mut bytes) = serde_json::to_vec(&record) else {
             self.failed.store(true, Ordering::Release);
             return;
         };
@@ -142,7 +150,7 @@ impl Subscriber for NdjsonSubscriber {
             self.state.failed.store(true, Ordering::Release);
             return;
         }
-        self.state.write(&visitor.fields);
+        self.state.write(visitor.fields);
     }
 
     fn enter(&self, _span: &Id) {}
@@ -239,7 +247,7 @@ fn normalize_and_validate(record: &mut Map<String, Value>) -> bool {
                 .or_insert(Value::Null);
             exact_fields(
                 record,
-                &runtime_fields(&["report_mode", "input_reports_accepted"]),
+                &runtime_fields(&["report_mode", "imu_mode", "input_reports_accepted"]),
             )
         }
         "reply_tx_accepted" => {
@@ -248,7 +256,7 @@ fn normalize_and_validate(record: &mut Map<String, Value>) -> bool {
                 .or_insert(Value::Null);
             exact_fields(
                 record,
-                &runtime_fields(&["report_mode", "replies_accepted"]),
+                &runtime_fields(&["report_mode", "imu_mode", "replies_accepted"]),
             )
         }
         "session_ended" => {
@@ -312,6 +320,7 @@ mod tests {
                 reporting_kind = "periodic",
                 session_id = 7_u64,
                 report_mode,
+                imu_mode = 2_u64,
                 input_reports_accepted = 3_u64,
             );
         });
@@ -326,6 +335,15 @@ mod tests {
         assert_eq!(records[0]["event"], "environment");
         assert_eq!(records[1]["event"], "report_tx_accepted");
         assert!(records[1]["report_mode"].is_null());
+        assert!(
+            records
+                .iter()
+                .all(|record| record["trace_elapsed_ns"].is_u64())
+        );
+        assert!(
+            records[1]["trace_elapsed_ns"].as_u64().unwrap()
+                >= records[0]["trace_elapsed_ns"].as_u64().unwrap()
+        );
         assert!(!trace.contains("T08_SECRET_NOISE"));
 
         fs::remove_file(path).expect("remove trace");

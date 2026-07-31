@@ -351,7 +351,7 @@ impl CreateProfileRuntimeAttempt<Pro, Periodic> for FakeRuntimeAttempt {
             &InputState::neutral(),
         );
         self.status.set_connected(true);
-        self.status.set_sender_state(Some(0x30), 1, 2);
+        self.status.set_sender_state(Some(0x30), 0, 1, 2);
         self.status.record_subcommand(0x30);
         self.status.set_lifecycle(LifecycleState::Ready);
         lock(&self.events).push(CreateEvent::ProtocolReady);

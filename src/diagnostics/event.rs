@@ -77,11 +77,13 @@ pub(crate) enum DiagnosticEvent {
     ReportTxAccepted {
         context: DiagnosticContext,
         report_mode: Option<u8>,
+        imu_mode: u8,
         input_reports_accepted: u64,
     },
     ReplyTxAccepted {
         context: DiagnosticContext,
         report_mode: Option<u8>,
+        imu_mode: u8,
         replies_accepted: u64,
     },
     SessionEnded {
@@ -138,11 +140,13 @@ impl DiagnosticEvent {
     pub(crate) const fn report_tx_accepted(
         context: DiagnosticContext,
         report_mode: Option<u8>,
+        imu_mode: u8,
         input_reports_accepted: u64,
     ) -> Self {
         Self::ReportTxAccepted {
             context,
             report_mode,
+            imu_mode,
             input_reports_accepted,
         }
     }
@@ -150,11 +154,13 @@ impl DiagnosticEvent {
     pub(crate) const fn reply_tx_accepted(
         context: DiagnosticContext,
         report_mode: Option<u8>,
+        imu_mode: u8,
         replies_accepted: u64,
     ) -> Self {
         Self::ReplyTxAccepted {
             context,
             report_mode,
+            imu_mode,
             replies_accepted,
         }
     }
@@ -246,6 +252,7 @@ impl DiagnosticEvent {
             Self::ReportTxAccepted {
                 context,
                 report_mode,
+                imu_mode,
                 input_reports_accepted,
             } => tracing::event!(
                 target: DIAGNOSTICS_TARGET,
@@ -257,11 +264,13 @@ impl DiagnosticEvent {
                 reporting_kind = reporting_name(context.reporting_kind),
                 session_id = context.session_id.get(),
                 report_mode,
+                imu_mode,
                 input_reports_accepted,
             ),
             Self::ReplyTxAccepted {
                 context,
                 report_mode,
+                imu_mode,
                 replies_accepted,
             } => tracing::event!(
                 target: DIAGNOSTICS_TARGET,
@@ -273,6 +282,7 @@ impl DiagnosticEvent {
                 reporting_kind = reporting_name(context.reporting_kind),
                 session_id = context.session_id.get(),
                 report_mode,
+                imu_mode,
                 replies_accepted,
             ),
             Self::SessionEnded {
@@ -355,24 +365,28 @@ impl DiagnosticEvent {
             Self::ReportTxAccepted {
                 context,
                 report_mode,
+                imu_mode,
                 input_reports_accepted,
             } => record(
                 context,
                 "report_tx_accepted",
                 fields([
                     ("report_mode", json!(report_mode)),
+                    ("imu_mode", json!(imu_mode)),
                     ("input_reports_accepted", json!(input_reports_accepted)),
                 ]),
             ),
             Self::ReplyTxAccepted {
                 context,
                 report_mode,
+                imu_mode,
                 replies_accepted,
             } => record(
                 context,
                 "reply_tx_accepted",
                 fields([
                     ("report_mode", json!(report_mode)),
+                    ("imu_mode", json!(imu_mode)),
                     ("replies_accepted", json!(replies_accepted)),
                 ]),
             ),
@@ -524,18 +538,18 @@ mod tests {
                 record_with_context("subcommand_observed", json!({"subcommand_id": 0x40}), 7),
             ),
             (
-                DiagnosticEvent::report_tx_accepted(context, Some(0x30), 12),
+                DiagnosticEvent::report_tx_accepted(context, Some(0x30), 0x02, 12),
                 record_with_context(
                     "report_tx_accepted",
-                    json!({"report_mode": 0x30, "input_reports_accepted": 12}),
+                    json!({"report_mode": 0x30, "imu_mode": 0x02, "input_reports_accepted": 12}),
                     7,
                 ),
             ),
             (
-                DiagnosticEvent::reply_tx_accepted(context, Some(0x30), 4),
+                DiagnosticEvent::reply_tx_accepted(context, Some(0x30), 0x02, 4),
                 record_with_context(
                     "reply_tx_accepted",
-                    json!({"report_mode": 0x30, "replies_accepted": 4}),
+                    json!({"report_mode": 0x30, "imu_mode": 0x02, "replies_accepted": 4}),
                     7,
                 ),
             ),
@@ -577,8 +591,8 @@ mod tests {
             DiagnosticEvent::session_started(context),
             DiagnosticEvent::lifecycle_changed(context, LifecycleState::Connecting),
             DiagnosticEvent::subcommand_observed(context, 0x03),
-            DiagnosticEvent::report_tx_accepted(context, None, u64::MAX),
-            DiagnosticEvent::reply_tx_accepted(context, None, u64::MAX),
+            DiagnosticEvent::report_tx_accepted(context, None, 0x05, u64::MAX),
+            DiagnosticEvent::reply_tx_accepted(context, None, 0x05, u64::MAX),
             DiagnosticEvent::session_ended(context, LifecycleState::Open, None),
             DiagnosticEvent::worker_failed(context, WorkerFailureCategory::Panicked),
             DiagnosticEvent::unsupported_button(context, ButtonKind::A),

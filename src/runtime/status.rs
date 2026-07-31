@@ -143,6 +143,7 @@ impl<M: ControllerModel> StatusPublisher<M> {
     pub(crate) fn set_sender_state(
         &self,
         report_mode: Option<u8>,
+        imu_mode: u8,
         input_reports_accepted: u64,
         replies_accepted: u64,
     ) {
@@ -159,6 +160,7 @@ impl<M: ControllerModel> StatusPublisher<M> {
                     DiagnosticEvent::report_tx_accepted(
                         context.expect("active session context"),
                         report_mode,
+                        imu_mode,
                         input_reports_accepted,
                     )
                 }),
@@ -166,6 +168,7 @@ impl<M: ControllerModel> StatusPublisher<M> {
                     DiagnosticEvent::reply_tx_accepted(
                         context.expect("active session context"),
                         report_mode,
+                        imu_mode,
                         replies_accepted,
                     )
                 }),

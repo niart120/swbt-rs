@@ -1,7 +1,7 @@
 use super::{
     ButtonKind, Command, ConnectionOperation, ConnectionRequest, ControllerKind, ControllerModel,
-    ControllerSelection, ErrorKind, ProbeBackend, ProbeController, ReportingMode,
-    ReportingSelection, SafeAdapter, execute, open_and_close,
+    ControllerSelection, ErrorKind, ImuRunEvidence, ProbeBackend, ProbeController, ReportingMode,
+    ReportingSelection, SafeAdapter, connection_completed_record, execute, open_and_close,
 };
 use swbt::{Button, ReportingKind};
 
@@ -163,6 +163,43 @@ fn fake_dynamic_button_rejects_model_mismatch_without_typed_fallback() {
     );
 }
 
+#[test]
+fn imu_connection_completion_reports_only_safe_machine_evidence() {
+    let request = connection_request(
+        ConnectionOperation::Reconnect,
+        ControllerSelection::Pro,
+        ReportingSelection::Periodic,
+        None,
+    );
+    let record = connection_completed_record(
+        &request,
+        super::ConnectionEvidence {
+            imu: Some(ImuRunEvidence {
+                duration_seconds: 60,
+                apply_command_latency_ns: 12_345,
+                non_neutral_reports_accepted: 7_500,
+                neutral_reports_accepted: 1,
+            }),
+            shutdown_latency_ns: Some(98_765),
+            neutral_close: true,
+            profile_unchanged: Some(true),
+            adapter_reopened: Some(true),
+        },
+    );
+
+    assert_eq!(record["imu_run_seconds"], 60);
+    assert_eq!(record["imu_apply_command_latency_ns"], 12_345);
+    assert_eq!(record["imu_non_neutral_reports_accepted"], 7_500);
+    assert_eq!(record["neutral_reports_accepted"], 1);
+    assert_eq!(record["shutdown_latency_ns"], 98_765);
+    assert_eq!(record["neutral_close"], true);
+    assert_eq!(record["profile_unchanged"], true);
+    assert_eq!(record["adapter_reopened"], true);
+    let text = record.to_string();
+    assert!(!text.contains("T07_SECRET_PROFILE"));
+    assert!(!text.contains("T07_SECRET_TRACE"));
+}
+
 fn connection_request(
     operation: ConnectionOperation,
     controller: ControllerSelection,
@@ -176,6 +213,7 @@ fn connection_request(
         profile: "T07_SECRET_PROFILE".into(),
         trace: "T07_SECRET_TRACE".into(),
         button,
+        imu_duration: None,
     }
 }
 
@@ -209,18 +247,23 @@ impl ProbeBackend for FakeBackend {
         Ok(())
     }
 
-    fn pair<M: ControllerModel>(&mut self, request: &ConnectionRequest) -> Result<(), ErrorKind> {
+    fn pair<M: ControllerModel>(
+        &mut self,
+        request: &ConnectionRequest,
+    ) -> Result<super::ConnectionEvidence, ErrorKind> {
         self.record_connection::<M, swbt::reporting::Periodic>(
             ConnectionOperation::Pair,
             request.button,
-        )
+        )?;
+        Ok(super::ConnectionEvidence::default())
     }
 
-    fn reconnect<M: ControllerModel, R: ReportingMode>(
+    fn reconnect<M: ControllerModel, R: super::ProbeReporting<M>>(
         &mut self,
         request: &ConnectionRequest,
-    ) -> Result<(), ErrorKind> {
-        self.record_connection::<M, R>(ConnectionOperation::Reconnect, request.button)
+    ) -> Result<super::ConnectionEvidence, ErrorKind> {
+        self.record_connection::<M, R>(ConnectionOperation::Reconnect, request.button)?;
+        Ok(super::ConnectionEvidence::default())
     }
 }
 
