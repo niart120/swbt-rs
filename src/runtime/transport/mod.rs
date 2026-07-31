@@ -17,6 +17,15 @@ mod config;
 mod csr;
 #[cfg(feature = "bumble")]
 mod hidp;
+#[cfg(any(test, feature = "bumble"))]
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "T05 connects identity preparation to the Bumble transport open path"
+    )
+)]
+mod identity;
 #[cfg(feature = "bumble")]
 mod profile_key_store;
 #[cfg(feature = "bumble")]
