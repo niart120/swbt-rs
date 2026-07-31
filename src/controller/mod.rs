@@ -25,7 +25,7 @@ use std::time::Duration;
 use crate::diagnostics::GamepadStatus;
 use crate::error::{Error, ErrorKind};
 use crate::input::{Button, InputState};
-use crate::model::{self, ControllerModel};
+use crate::model::{self, ButtonKind, ControllerModel};
 use crate::profile::{ControllerColors, FileProfileStore};
 use crate::reporting::{self, ReportingMode};
 use crate::runtime::{
@@ -139,6 +139,28 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     #[must_use]
     pub fn snapshot(&self) -> InputState<M> {
         self.status_reader.snapshot()
+    }
+
+    /// Converts a model-independent button identity into a button for this
+    /// controller model.
+    ///
+    /// When an active connection session exists, rejecting an unsupported
+    /// button also emits the stable `unsupported_button` diagnostics event for
+    /// that session. Calling this method does not open a transport or change
+    /// controller input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::UnsupportedInput`] when `kind` is not available on
+    /// model `M`.
+    pub fn button(&self, kind: ButtonKind) -> crate::Result<Button<M>> {
+        match Button::try_from(kind) {
+            Ok(button) => Ok(button),
+            Err(error) => {
+                self.status_publisher.record_unsupported_button(kind);
+                Err(error)
+            }
+        }
     }
 
     /// Opens the configured controller transport.

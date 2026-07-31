@@ -121,6 +121,89 @@ fn adapter_commands_use_strict_usage_and_redact_operation_errors() {
     }
 }
 
+#[test]
+fn connection_commands_dispatch_known_models_without_fallback() {
+    let fixture = ProbeFixture::new();
+    let trace = fixture.directory.join("T07_SECRET_TRACE.jsonl");
+    let trace_text = trace.to_str().expect("test path must be UTF-8");
+    fs::write(&fixture.profile, profile_json()).expect("write existing profile");
+
+    let pair = run([
+        "pair",
+        "--controller",
+        "pro",
+        "--profile",
+        fixture.profile_text(),
+        "--trace",
+        trace_text,
+    ]);
+    assert_eq!(pair.status.code(), Some(1));
+    assert_eq!(
+        one_json_line(&pair.stderr)["error_kind"],
+        "profile_already_exists"
+    );
+    assert_safe_output(&pair, &fixture);
+    assert!(!String::from_utf8_lossy(&pair.stderr).contains(trace_text));
+
+    fs::remove_file(&fixture.profile).expect("remove profile before reconnect preflight");
+    let reconnect = run([
+        "reconnect",
+        "--controller",
+        "joycon-r",
+        "--profile",
+        fixture.profile_text(),
+        "--trace",
+        trace_text,
+        "--reporting",
+        "direct",
+    ]);
+    assert_eq!(reconnect.status.code(), Some(1));
+    assert_eq!(
+        one_json_line(&reconnect.stderr)["error_kind"],
+        "profile_not_found"
+    );
+    assert_safe_output(&reconnect, &fixture);
+    assert!(!String::from_utf8_lossy(&reconnect.stderr).contains(trace_text));
+
+    for arguments in [
+        vec![
+            "pair",
+            "--controller",
+            "unknown",
+            "--profile",
+            fixture.profile_text(),
+            "--trace",
+            trace_text,
+        ],
+        vec![
+            "reconnect",
+            "--controller",
+            "pro",
+            "--profile",
+            fixture.profile_text(),
+            "--trace",
+            trace_text,
+            "--reporting",
+            "unknown",
+        ],
+        vec![
+            "pair",
+            "--controller",
+            "pro",
+            "--profile",
+            fixture.profile_text(),
+            "--trace",
+            trace_text,
+            "--reporting",
+            "direct",
+        ],
+    ] {
+        let output = run(&arguments);
+        assert_eq!(output.status.code(), Some(2), "arguments: {arguments:?}");
+        assert_eq!(one_json_line(&output.stderr)["error_kind"], "usage");
+    }
+}
+
 fn run<I, S>(arguments: I) -> Output
 where
     I: IntoIterator<Item = S>,

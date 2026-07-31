@@ -181,13 +181,6 @@ impl DiagnosticEvent {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "M8 T07 wires dynamic unsupported input into probe dispatch"
-        )
-    )]
     pub(crate) const fn unsupported_button(
         context: DiagnosticContext,
         button_kind: ButtonKind,

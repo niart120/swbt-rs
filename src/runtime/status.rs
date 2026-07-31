@@ -186,6 +186,15 @@ impl<M: ControllerModel> StatusPublisher<M> {
         self.emit(event);
     }
 
+    pub(crate) fn record_unsupported_button(&self, button_kind: crate::ButtonKind) {
+        let event = {
+            let state = read(&self.shared);
+            self.context(&state)
+                .map(|context| DiagnosticEvent::unsupported_button(context, button_kind))
+        };
+        self.emit(event);
+    }
+
     pub(crate) fn end_session(&self, lifecycle: LifecycleState, disconnect_reason: Option<u8>) {
         let event = {
             let mut state = write(&self.shared);
@@ -290,4 +299,53 @@ fn write<M: ControllerModel>(
 ) -> RwLockWriteGuard<'_, ProjectionState<M>> {
     lock.write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        num::NonZeroU64,
+        sync::{Arc, Mutex},
+    };
+
+    use crate::{ButtonKind, LifecycleState, model, reporting};
+
+    use super::status_projection_with_emitter;
+
+    #[test]
+    fn unsupported_button_event_uses_the_active_session_context() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        let (publisher, _) = status_projection_with_emitter::<model::JoyConL, reporting::Direct>(
+            Arc::new(move |event| {
+                captured.lock().unwrap().push(event);
+            }),
+        );
+
+        publisher.record_unsupported_button(ButtonKind::A);
+        assert!(events.lock().unwrap().is_empty());
+
+        publisher.begin_session(
+            NonZeroU64::new(7).unwrap(),
+            LifecycleState::Ready,
+            &crate::JoyConLInputState::neutral(),
+        );
+        events.lock().unwrap().clear();
+        publisher.record_unsupported_button(ButtonKind::A);
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].to_value(),
+            serde_json::json!({
+                "schema": "swbt.diagnostics",
+                "schema_version": 1,
+                "event": "unsupported_button",
+                "controller_kind": "joycon_l",
+                "reporting_kind": "direct",
+                "session_id": 7,
+                "button_kind": "a",
+            })
+        );
+    }
 }

@@ -157,6 +157,8 @@ swbt-probe profile verify path
 - `adapters` は claim/open せず候補を列挙し、selector や serial を出力しない
 - `open` は指定 adapter の open/close と resource cleanup を検査する
 - `pair` は Periodic、`reconnect` は `--reporting periodic|direct` を受け、既定は Periodic とする
+- `pair` / `reconnect` は `usb:0` と60秒の接続期限を使う。任意の `--button` は Ready 後に100 msだけ
+  tapし、対象modelで非対応なら `UnsupportedInput` と `unsupported_button` eventを返してからcloseする
 - `pair` は既存 profile を上書きせず、`reconnect` は profile 不一致時に adapter を開かない
 - `--trace` は create-new とし、既存 trace を上書きしない
 - `bumble`/probe feature なしの通常 library build と test を維持する
@@ -185,7 +187,7 @@ hardware 実行前にユーザへ準備を依頼し、各 UI 観測を受け取�
 | refactor-done | T04 profile JSON を動的に検査し、秘密値を含まない summary を返す | new | public boundary | cross-model情報を保持 |
 | refactor-done | T05 probe の profile inspect/verify、usage、終了コード、safe output を検査する | new | CLI integration | hardwareを開かない |
 | refactor-done | T06 probe の adapters/open と feature-disabled build/error を検査する | new | CLI/package | fake境界を使う |
-| todo | T07 pair/reconnect の3 model dispatch、reporting選択、unsupported button、fallback禁止を検査する | new | CLI/runtime | fake/virtual transport |
+| refactor-done | T07 pair/reconnect の3 model dispatch、reporting選択、unsupported button、fallback禁止を検査する | new | CLI/runtime | fake/virtual transport |
 | todo | T08 trace writer が diagnostics target だけを有効な NDJSON へ保存し、秘密値を除外する | new | integration | create-new |
 | todo | T09 Pro実機で IMU/diagnostics/long-run trace と期限付き cleanup を記録する | new | hardware | machine/UI分離 |
 | todo | T10 completion gate、公開文書、criteria note、self-review を確定する | new | docs/package | releaseはしない |
@@ -204,6 +206,7 @@ machine evidence を先に確定し、人手 UI 観測を別に追記する。
 | refactor-done | T04 | red: 外部crate視点で`ProfileSummary`、`ProfileIdentityKind`、`inspect_profile`を要求すると3 public itemが未定義のため`E0432`で失敗した。green: schema v2の完全validation後にschema version、controller kind、address-free identity kind、namespace/bond件数だけをコピーするnon-exhaustive summaryを追加した。raw JSON、unknown field、namespace/peer address、key、pathはsummaryに保持しない。valid local-address profile、malformed file、missing fileを2 integration testsで検査し、ErrorKindは`InvalidProfile`/`ProfileNotFound`、Display/Debugは秘密pathなしとなった。refactor: dynamic inspectionを`profile::summary`へ分離し、秘密を保持する`ProfileDocument`はcrate-privateのままにした。公開fieldなし、getterは値返し、filesystem error sourceは既存chainへ保持する。all-feature test 2、default/no-default check、all-feature clippy `-D warnings`、all-feature rustdoc、rustfmt、diff checkが成功 |
 | refactor-done | T05 | red: `swbt-probe` の profile inspect/verify、usage、終了コード、秘密値非表示を要求するCLI integration testを追加すると、Cargo packageに`probe` featureがなくcommandを実行できなかった。green: `probe` featureでだけ構築するbinaryを追加し、profile inspectはschema version、controller kind、identity kind、namespace/bond件数、verifyはcontroller kindとvalidだけをversion 1 NDJSONへ出力する。malformed/missing profileは分類済みerrorで終了1、欠落・過剰・未知引数はusage errorで終了2、helpは終了0とした。3 integration testsが成功し、profile path、Bluetooth address、link keyはstdout/stderrに出ない。featureなしでは同test targetが0件で成功し、binaryを通常buildへ含めない。refactor: parse、実行、record生成、writerを分離した。gateで検出した既存adapter selectorの不要なclosure参照は別commitで除去し、selector正常/異常2 testsとall-feature clippy `-D warnings`、rustfmt、diff checkが成功した。hardwareは開いていない |
 | refactor-done | T06 | red: `open --adapter` の分類済み失敗と厳密な引数検査を要求すると、command未実装のため終了1ではなくusageの終了2になった。green: `adapters` は1個のversion 1 NDJSONにcandidate件数とVID/PIDだけを出し、selector、serial、bus、portを出さない。`open` はephemeralなDirect Pro controllerを構築し、open後の`close_without_neutral()`成功までを1操作として扱い、selectorを成功/error recordへ出さない。CLI integration 4 testsとbinary fake 3 testsが成功した。fakeは安全なadapter列挙、selector非表示、open→close順とclose失敗の伝播を固定する。実USB descriptor-only列挙はCSR8510 A10を1件返し、出力は件数とVID/PIDだけだった。`cargo check --no-default-features --locked`は成功し、同条件で`--bin swbt-probe`を指定すると`probe` feature必須のCargo errorで停止した。refactor: platform操作を`SystemBackend`、open/close順を`ProbeController`境界へ分離した。実adapterのclaim/openはこのitemでは未実行。all-feature clippy `-D warnings`、rustfmt、diff checkが成功 |
+| refactor-done | T07 | red: `Controller::button(ButtonKind)`の型付き動的境界を要求するとmethod未定義の`E0599`となり、有効なpair/reconnect CLIは未知commandとして操作失敗の終了1ではなくusageの終了2になった。green: controller名を入口で`Pro`/`JoyConL`/`JoyConR`へ、reconnect reportingを`Periodic`/`Direct`へ分岐し、pair 3経路とreconnect 6経路がそれぞれ`Controller<M, R>`を構築する。fake backend 5 tests、CLI integration 5 tests、button contract 4 testsが成功した。未知controller/reportingとpairへのreporting指定は終了2で、Proへfallbackしない。既存pair targetは`ProfileAlreadyExists`、missing reconnect profileは`ProfileNotFound`となりadapterを開かず、path/traceをerrorへ出さない。任意のdynamic buttonはReady後に`Controller::button`で変換し、非対応なら`UnsupportedInput`を返す。有効sessionのstatus projectionはsession ID付き`unsupported_button` eventを発行し、session前は発行しないことをunit testで確認した。refactor: parse、model dispatch、platform backend、接続後button、primary errorを保つcloseを分離した。trace writerと実pair/reconnectはT08/T09へ先送り。all-feature rustdoc、all-feature clippy `-D warnings`、rustfmt、diff checkが成功 |
 
 ## 7. 対象ファイル
 

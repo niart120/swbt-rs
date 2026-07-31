@@ -1,19 +1,28 @@
-use std::{ffi::OsString, io, path::PathBuf, process::ExitCode};
+use std::{ffi::OsString, io, path::PathBuf, process::ExitCode, time::Duration};
 
 use serde_json::{Value, json};
 use swbt::{
-    DirectProController, ErrorKind, ProfileIdentityKind, ProfileSummary, inspect_profile,
-    list_adapters,
+    ButtonKind, Controller, ControllerKind, CreateProfileOptions, DirectProController, ErrorKind,
+    ProfileIdentity, ProfileIdentityKind, ProfileSummary, inspect_profile, list_adapters,
+};
+use swbt::{
+    model::{self, ControllerModel},
+    reporting::{self, ReportingMode},
 };
 
 const PROBE_SCHEMA: &str = "swbt.probe";
 const PROBE_SCHEMA_VERSION: u64 = 1;
 const EXIT_OPERATION_ERROR: u8 = 1;
 const EXIT_USAGE: u8 = 2;
+const DEFAULT_ADAPTER: &str = "usb:0";
+const CONNECTION_TIMEOUT: Duration = Duration::from_secs(60);
+const BUTTON_TAP_DURATION: Duration = Duration::from_millis(100);
 const HELP: &str = "\
 Usage:
   swbt-probe adapters
   swbt-probe open --adapter <selector>
+  swbt-probe pair --controller <pro|joycon-l|joycon-r> --profile <path> --trace <path> [--button <button>]
+  swbt-probe reconnect --controller <pro|joycon-l|joycon-r> --profile <path> --trace <path> [--reporting <periodic|direct>] [--button <button>]
   swbt-probe profile inspect <path>
   swbt-probe profile verify <path>
   swbt-probe help
@@ -47,11 +56,44 @@ enum Command {
     Help,
     Adapters,
     Open(String),
+    Connection(ConnectionRequest),
     ProfileInspect(PathBuf),
     ProfileVerify(PathBuf),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConnectionOperation {
+    Pair,
+    Reconnect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControllerSelection {
+    Pro,
+    JoyConL,
+    JoyConR,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReportingSelection {
+    Periodic,
+    Direct,
+}
+
+struct ConnectionRequest {
+    operation: ConnectionOperation,
+    controller: ControllerSelection,
+    reporting: ReportingSelection,
+    profile: PathBuf,
+    trace: PathBuf,
+    button: Option<ButtonKind>,
+}
+
 fn parse(arguments: Vec<OsString>) -> Result<Command, ()> {
+    if let Some(operation) = arguments.first().and_then(parse_connection_operation) {
+        return parse_connection(operation, &arguments[1..]).map(Command::Connection);
+    }
+
     match arguments.as_slice() {
         [command] if matches!(command.to_str(), Some("help" | "--help" | "-h")) => {
             Ok(Command::Help)
@@ -72,6 +114,121 @@ fn parse(arguments: Vec<OsString>) -> Result<Command, ()> {
     }
 }
 
+fn parse_connection_operation(value: &OsString) -> Option<ConnectionOperation> {
+    match value.to_str()? {
+        "pair" => Some(ConnectionOperation::Pair),
+        "reconnect" => Some(ConnectionOperation::Reconnect),
+        _ => None,
+    }
+}
+
+fn parse_connection(
+    operation: ConnectionOperation,
+    arguments: &[OsString],
+) -> Result<ConnectionRequest, ()> {
+    if !arguments.len().is_multiple_of(2) {
+        return Err(());
+    }
+
+    let mut controller = None;
+    let mut profile = None;
+    let mut trace = None;
+    let mut reporting = None;
+    let mut button = None;
+    for option in arguments.chunks_exact(2) {
+        match option[0].to_str() {
+            Some("--controller") => set_once(
+                &mut controller,
+                option[1]
+                    .to_str()
+                    .and_then(parse_controller_selection)
+                    .ok_or(())?,
+            )?,
+            Some("--profile") => set_once(&mut profile, PathBuf::from(&option[1]))?,
+            Some("--trace") => set_once(&mut trace, PathBuf::from(&option[1]))?,
+            Some("--reporting") => set_once(
+                &mut reporting,
+                option[1]
+                    .to_str()
+                    .and_then(parse_reporting_selection)
+                    .ok_or(())?,
+            )?,
+            Some("--button") => set_once(
+                &mut button,
+                option[1].to_str().and_then(parse_button_kind).ok_or(())?,
+            )?,
+            _ => return Err(()),
+        }
+    }
+
+    let reporting = match (operation, reporting) {
+        (ConnectionOperation::Pair, None) => ReportingSelection::Periodic,
+        (ConnectionOperation::Pair, Some(_)) => return Err(()),
+        (ConnectionOperation::Reconnect, reporting) => {
+            reporting.unwrap_or(ReportingSelection::Periodic)
+        }
+    };
+    Ok(ConnectionRequest {
+        operation,
+        controller: controller.ok_or(())?,
+        reporting,
+        profile: profile.ok_or(())?,
+        trace: trace.ok_or(())?,
+        button,
+    })
+}
+
+fn set_once<T>(slot: &mut Option<T>, value: T) -> Result<(), ()> {
+    if slot.is_some() {
+        return Err(());
+    }
+    *slot = Some(value);
+    Ok(())
+}
+
+const fn parse_controller_selection(value: &str) -> Option<ControllerSelection> {
+    match value.as_bytes() {
+        b"pro" => Some(ControllerSelection::Pro),
+        b"joycon-l" => Some(ControllerSelection::JoyConL),
+        b"joycon-r" => Some(ControllerSelection::JoyConR),
+        _ => None,
+    }
+}
+
+const fn parse_reporting_selection(value: &str) -> Option<ReportingSelection> {
+    match value.as_bytes() {
+        b"periodic" => Some(ReportingSelection::Periodic),
+        b"direct" => Some(ReportingSelection::Direct),
+        _ => None,
+    }
+}
+
+const fn parse_button_kind(value: &str) -> Option<ButtonKind> {
+    match value.as_bytes() {
+        b"a" => Some(ButtonKind::A),
+        b"b" => Some(ButtonKind::B),
+        b"x" => Some(ButtonKind::X),
+        b"y" => Some(ButtonKind::Y),
+        b"l" => Some(ButtonKind::L),
+        b"r" => Some(ButtonKind::R),
+        b"zl" => Some(ButtonKind::ZL),
+        b"zr" => Some(ButtonKind::ZR),
+        b"plus" => Some(ButtonKind::Plus),
+        b"minus" => Some(ButtonKind::Minus),
+        b"home" => Some(ButtonKind::Home),
+        b"capture" => Some(ButtonKind::Capture),
+        b"left-stick" => Some(ButtonKind::LeftStick),
+        b"right-stick" => Some(ButtonKind::RightStick),
+        b"sl" => Some(ButtonKind::SL),
+        b"sr" => Some(ButtonKind::SR),
+        b"dpad-up" => Some(ButtonKind::DpadUp),
+        b"dpad-down" => Some(ButtonKind::DpadDown),
+        b"dpad-left" => Some(ButtonKind::DpadLeft),
+        b"dpad-right" => Some(ButtonKind::DpadRight),
+        _ => None,
+    }
+}
+
 fn execute(command: Command, backend: &mut impl ProbeBackend) -> Result<Value, ErrorKind> {
     match command {
         Command::Help => unreachable!("help bypasses command execution"),
@@ -79,12 +236,39 @@ fn execute(command: Command, backend: &mut impl ProbeBackend) -> Result<Value, E
         Command::Open(selector) => backend
             .open_adapter(&selector)
             .map(|()| adapter_opened_record()),
+        Command::Connection(request) => {
+            dispatch_connection(&request, backend).map(|()| connection_completed_record(&request))
+        }
         Command::ProfileInspect(path) => inspect_profile(path)
             .map(profile_inspected_record)
             .map_err(|error| error.kind()),
         Command::ProfileVerify(path) => inspect_profile(path)
             .map(profile_verified_record)
             .map_err(|error| error.kind()),
+    }
+}
+
+fn dispatch_connection(
+    request: &ConnectionRequest,
+    backend: &mut impl ProbeBackend,
+) -> Result<(), ErrorKind> {
+    match request.controller {
+        ControllerSelection::Pro => dispatch_model::<model::Pro>(request, backend),
+        ControllerSelection::JoyConL => dispatch_model::<model::JoyConL>(request, backend),
+        ControllerSelection::JoyConR => dispatch_model::<model::JoyConR>(request, backend),
+    }
+}
+
+fn dispatch_model<M: ControllerModel>(
+    request: &ConnectionRequest,
+    backend: &mut impl ProbeBackend,
+) -> Result<(), ErrorKind> {
+    match request.operation {
+        ConnectionOperation::Pair => backend.pair::<M>(request),
+        ConnectionOperation::Reconnect => match request.reporting {
+            ReportingSelection::Periodic => backend.reconnect::<M, reporting::Periodic>(request),
+            ReportingSelection::Direct => backend.reconnect::<M, reporting::Direct>(request),
+        },
     }
 }
 
@@ -96,6 +280,11 @@ struct SafeAdapter {
 trait ProbeBackend {
     fn list_adapters(&mut self) -> Result<Vec<SafeAdapter>, ErrorKind>;
     fn open_adapter(&mut self, selector: &str) -> Result<(), ErrorKind>;
+    fn pair<M: ControllerModel>(&mut self, request: &ConnectionRequest) -> Result<(), ErrorKind>;
+    fn reconnect<M: ControllerModel, R: ReportingMode>(
+        &mut self,
+        request: &ConnectionRequest,
+    ) -> Result<(), ErrorKind>;
 }
 
 struct SystemBackend;
@@ -120,6 +309,67 @@ impl ProbeBackend for SystemBackend {
             .build()
             .map_err(|error| error.kind())?;
         open_and_close(&mut controller)
+    }
+
+    fn pair<M: ControllerModel>(&mut self, request: &ConnectionRequest) -> Result<(), ErrorKind> {
+        let _trace = &request.trace;
+        let mut controller = Controller::<M, reporting::Periodic>::builder(DEFAULT_ADAPTER)
+            .profile_path(&request.profile)
+            .create_profile(CreateProfileOptions {
+                identity: ProfileIdentity::AdapterDefault,
+                pair_timeout: CONNECTION_TIMEOUT,
+            })
+            .map_err(|error| error.kind())?;
+        apply_button_and_close(&mut controller, request.button)
+    }
+
+    fn reconnect<M: ControllerModel, R: ReportingMode>(
+        &mut self,
+        request: &ConnectionRequest,
+    ) -> Result<(), ErrorKind> {
+        let _trace = &request.trace;
+        let mut controller = Controller::<M, R>::builder(DEFAULT_ADAPTER)
+            .profile_path(&request.profile)
+            .build()
+            .map_err(|error| error.kind())?;
+        controller.open().map_err(|error| error.kind())?;
+        let operation = controller
+            .reconnect(CONNECTION_TIMEOUT)
+            .map_err(|error| error.kind())
+            .and_then(|()| apply_button(&mut controller, request.button));
+        finish_connection(&mut controller, operation)
+    }
+}
+
+fn apply_button_and_close<M: ControllerModel, R: ReportingMode>(
+    controller: &mut Controller<M, R>,
+    button: Option<ButtonKind>,
+) -> Result<(), ErrorKind> {
+    let operation = apply_button(controller, button);
+    finish_connection(controller, operation)
+}
+
+fn apply_button<M: ControllerModel, R: ReportingMode>(
+    controller: &mut Controller<M, R>,
+    button: Option<ButtonKind>,
+) -> Result<(), ErrorKind> {
+    let Some(kind) = button else {
+        return Ok(());
+    };
+    let button = controller.button(kind).map_err(|error| error.kind())?;
+    controller
+        .tap([button], BUTTON_TAP_DURATION)
+        .map_err(|error| error.kind())
+}
+
+fn finish_connection<M: ControllerModel, R: ReportingMode>(
+    controller: &mut Controller<M, R>,
+    operation: Result<(), ErrorKind>,
+) -> Result<(), ErrorKind> {
+    let close = controller.close().map_err(|error| error.kind());
+    match (operation, close) {
+        (Err(primary), _) => Err(primary),
+        (Ok(()), result) => result,
     }
 }
 
@@ -169,6 +419,39 @@ fn adapter_opened_record() -> Value {
         "schema_version": PROBE_SCHEMA_VERSION,
         "event": "adapter_opened",
     })
+}
+
+fn connection_completed_record(request: &ConnectionRequest) -> Value {
+    json!({
+        "schema": PROBE_SCHEMA,
+        "schema_version": PROBE_SCHEMA_VERSION,
+        "event": "connection_completed",
+        "operation": connection_operation_name(request.operation),
+        "controller_kind": controller_kind(request.controller).profile_name(),
+        "reporting_kind": reporting_name(request.reporting),
+    })
+}
+
+const fn connection_operation_name(operation: ConnectionOperation) -> &'static str {
+    match operation {
+        ConnectionOperation::Pair => "pair",
+        ConnectionOperation::Reconnect => "reconnect",
+    }
+}
+
+const fn controller_kind(controller: ControllerSelection) -> ControllerKind {
+    match controller {
+        ControllerSelection::Pro => ControllerKind::Pro,
+        ControllerSelection::JoyConL => ControllerKind::JoyConL,
+        ControllerSelection::JoyConR => ControllerKind::JoyConR,
+    }
+}
+
+const fn reporting_name(reporting: ReportingSelection) -> &'static str {
+    match reporting {
+        ReportingSelection::Periodic => "periodic",
+        ReportingSelection::Direct => "direct",
+    }
 }
 
 fn profile_inspected_record(summary: ProfileSummary) -> Value {
@@ -261,107 +544,5 @@ fn operation_write_failure() -> ExitCode {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        Command, ErrorKind, ProbeBackend, ProbeController, SafeAdapter, execute, open_and_close,
-    };
-
-    #[test]
-    fn fake_adapter_listing_emits_only_safe_descriptor_fields() {
-        let mut backend = FakeBackend {
-            adapters: vec![SafeAdapter {
-                vendor_id: 0x0a12,
-                product_id: 0x0001,
-            }],
-            ..FakeBackend::default()
-        };
-
-        let record = execute(Command::Adapters, &mut backend).expect("list fake adapters");
-        assert_eq!(record["event"], "adapters_listed");
-        assert_eq!(record["adapter_count"], 1);
-        assert_eq!(record["adapters"][0]["vendor_id"], 0x0a12);
-        assert_eq!(record["adapters"][0]["product_id"], 0x0001);
-        let text = record.to_string();
-        for forbidden in ["selector", "serial", "bus", "port"] {
-            assert!(
-                !text.contains(forbidden),
-                "record contains {forbidden}: {text}"
-            );
-        }
-    }
-
-    #[test]
-    fn fake_adapter_open_does_not_echo_the_selector() {
-        let mut backend = FakeBackend::default();
-        let selector = "usb:T06_SECRET_SELECTOR";
-
-        let record =
-            execute(Command::Open(selector.to_owned()), &mut backend).expect("open fake adapter");
-
-        assert_eq!(backend.opened_selectors, [selector]);
-        assert_eq!(record["event"], "adapter_opened");
-        assert!(!record.to_string().contains(selector));
-    }
-
-    #[test]
-    fn adapter_open_success_requires_explicit_close_success() {
-        let mut success = FakeController::default();
-        assert_eq!(open_and_close(&mut success), Ok(()));
-        assert_eq!(success.calls, ["open", "close"]);
-
-        let mut close_failure = FakeController {
-            close_result: Err(ErrorKind::WorkerFailed),
-            ..FakeController::default()
-        };
-        assert_eq!(
-            open_and_close(&mut close_failure),
-            Err(ErrorKind::WorkerFailed)
-        );
-        assert_eq!(close_failure.calls, ["open", "close"]);
-    }
-
-    #[derive(Default)]
-    struct FakeBackend {
-        adapters: Vec<SafeAdapter>,
-        opened_selectors: Vec<String>,
-    }
-
-    impl ProbeBackend for FakeBackend {
-        fn list_adapters(&mut self) -> Result<Vec<SafeAdapter>, ErrorKind> {
-            Ok(std::mem::take(&mut self.adapters))
-        }
-
-        fn open_adapter(&mut self, selector: &str) -> Result<(), ErrorKind> {
-            self.opened_selectors.push(selector.to_owned());
-            Ok(())
-        }
-    }
-
-    struct FakeController {
-        calls: Vec<&'static str>,
-        open_result: Result<(), ErrorKind>,
-        close_result: Result<(), ErrorKind>,
-    }
-
-    impl Default for FakeController {
-        fn default() -> Self {
-            Self {
-                calls: Vec::new(),
-                open_result: Ok(()),
-                close_result: Ok(()),
-            }
-        }
-    }
-
-    impl ProbeController for FakeController {
-        fn open(&mut self) -> Result<(), ErrorKind> {
-            self.calls.push("open");
-            self.open_result
-        }
-
-        fn close(&mut self) -> Result<(), ErrorKind> {
-            self.calls.push("close");
-            self.close_result
-        }
-    }
-}
+#[path = "swbt-probe/tests.rs"]
+mod tests;
