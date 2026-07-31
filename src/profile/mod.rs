@@ -4,6 +4,7 @@ mod colors;
 mod document;
 mod identity;
 mod store;
+mod summary;
 
 #[cfg(test)]
 mod document_tests;
@@ -21,3 +22,4 @@ pub(crate) use store::{
     FileProfileStore, ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState,
     ProfileReadPort,
 };
+pub use summary::{ProfileIdentityKind, ProfileSummary, inspect_profile};

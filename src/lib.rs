@@ -99,6 +99,7 @@ pub use input::{
 };
 pub use model::{ControllerModel, HasDualSticks, HasLeftStick, HasRightStick};
 pub use profile::{
-    ControllerColors, ControllerKind, LocalAddress, PairingProfile, ProfileIdentity, Rgb24,
+    ControllerColors, ControllerKind, LocalAddress, PairingProfile, ProfileIdentity,
+    ProfileIdentityKind, ProfileSummary, Rgb24, inspect_profile,
 };
 pub use reporting::{ReportingKind, ReportingMode};
