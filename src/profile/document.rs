@@ -7,7 +7,7 @@ use crate::{
     model::ControllerModel,
 };
 
-use super::{ControllerKind, LocalAddress, ProfileIdentityKind, ProfileSummary};
+use super::{ControllerKind, LocalAddress, ProfileIdentity, ProfileIdentityKind, ProfileSummary};
 
 const PROFILE_FORMAT: &str = "swbt.profile";
 const PROFILE_SCHEMA_VERSION: u64 = 2;
@@ -32,20 +32,34 @@ const KNOWN_PAIRING_KEY_FIELDS: [&str; 9] = [
 
 pub(crate) struct ProfileDocument {
     controller_kind: ControllerKind,
+    identity: ProfileIdentity,
     value: Value,
 }
 
 impl ProfileDocument {
+    #[cfg(test)]
     pub(crate) fn empty_adapter_default<M: ControllerModel>() -> Self {
+        Self::empty::<M>(ProfileIdentity::AdapterDefault)
+    }
+
+    pub(crate) fn empty<M: ControllerModel>(identity: ProfileIdentity) -> Self {
+        let identity_value = match identity {
+            ProfileIdentity::AdapterDefault => serde_json::json!({
+                "kind": "adapter-default"
+            }),
+            ProfileIdentity::LocalAddress(address) => serde_json::json!({
+                "kind": "exp-local-address",
+                "address": format_local_address(address)
+            }),
+        };
         Self {
             controller_kind: M::KIND,
+            identity,
             value: serde_json::json!({
                 "format": PROFILE_FORMAT,
                 "schema_version": PROFILE_SCHEMA_VERSION,
                 "controller_kind": M::KIND.profile_name(),
-                "identity": {
-                    "kind": "adapter-default"
-                },
+                "identity": identity_value,
                 "key_store": {
                     "namespaces": {}
                 }
@@ -74,7 +88,7 @@ impl ProfileDocument {
             )
         })?;
 
-        let controller_kind = {
+        let (controller_kind, profile_identity) = {
             let object = value.as_object().ok_or_else(|| {
                 Error::new(
                     ErrorKind::InvalidProfile,
@@ -125,8 +139,10 @@ impl ProfileDocument {
                         "profile identity must be a JSON object",
                     )
                 })?;
-            match identity.get("kind").and_then(Value::as_str) {
-                Some("adapter-default") if !identity.contains_key("address") => {}
+            let profile_identity = match identity.get("kind").and_then(Value::as_str) {
+                Some("adapter-default") if !identity.contains_key("address") => {
+                    ProfileIdentity::AdapterDefault
+                }
                 Some("exp-local-address") => {
                     let address =
                         identity
@@ -138,13 +154,14 @@ impl ProfileDocument {
                                     "profile identity address must be a string",
                                 )
                             })?;
-                    LocalAddress::parse(address).map_err(|source| {
+                    let address = LocalAddress::parse(address).map_err(|source| {
                         Error::with_source(
                             ErrorKind::InvalidProfile,
                             "profile identity address is invalid",
                             source,
                         )
                     })?;
+                    ProfileIdentity::LocalAddress(address)
                 }
                 _ => {
                     return Err(Error::new(
@@ -152,7 +169,7 @@ impl ProfileDocument {
                         "profile identity variant is invalid",
                     ));
                 }
-            }
+            };
 
             let key_store = object
                 .get("key_store")
@@ -171,11 +188,12 @@ impl ProfileDocument {
                 })?;
             validate_namespaces(namespaces)?;
 
-            controller_kind
+            (controller_kind, profile_identity)
         };
 
         Ok(Self {
             controller_kind,
+            identity: profile_identity,
             value,
         })
     }
@@ -186,10 +204,9 @@ impl ProfileDocument {
     }
 
     pub(super) fn summary(&self) -> ProfileSummary {
-        let identity_kind = match self.value["identity"]["kind"].as_str() {
-            Some("adapter-default") => ProfileIdentityKind::AdapterDefault,
-            Some("exp-local-address") => ProfileIdentityKind::LocalAddress,
-            _ => unreachable!("validated profile identity kind"),
+        let identity_kind = match self.identity {
+            ProfileIdentity::AdapterDefault => ProfileIdentityKind::AdapterDefault,
+            ProfileIdentity::LocalAddress(_) => ProfileIdentityKind::LocalAddress,
         };
         let namespaces = self
             .namespaces()
@@ -524,6 +541,25 @@ impl<M: ControllerModel> PairingProfile<M> {
     pub const fn controller_kind(&self) -> ControllerKind {
         M::KIND
     }
+
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "T05 projects persisted identity into the runtime transport"
+        )
+    )]
+    pub(crate) const fn identity(&self) -> ProfileIdentity {
+        self.document.identity
+    }
+}
+
+fn format_local_address(address: LocalAddress) -> String {
+    let octets = address.octets();
+    format!(
+        "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+        octets[0], octets[1], octets[2], octets[3], octets[4], octets[5]
+    )
 }
 
 #[cfg_attr(

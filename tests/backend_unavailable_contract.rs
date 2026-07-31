@@ -12,7 +12,10 @@ use std::error::Error as StdError;
 
 use swbt::{CreateProfileOptions, ErrorKind, ProController, ProfileIdentity};
 #[cfg(not(feature = "bumble"))]
-use swbt::{DirectJoyConL, DirectJoyConR, DirectProController, JoyConL, JoyConR, LifecycleState};
+use swbt::{
+    DirectJoyConL, DirectJoyConR, DirectProController, JoyConL, JoyConR, LifecycleState,
+    LocalAddress,
+};
 
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -91,6 +94,22 @@ fn public_create_profile_reports_missing_backend_without_creating_the_target() {
 
     assert_controller_error_kind(result, ErrorKind::UnsupportedCapability);
     assert_path_absent(&target);
+}
+
+#[cfg(not(feature = "bumble"))]
+#[test]
+fn public_local_address_is_rejected_before_target_inspection() {
+    let address = LocalAddress::parse("02:12:34:56:78:9A").expect("valid local address fixture");
+    let invalid_target = PathBuf::from("profile\0must-not-be-inspected.json");
+
+    let result = ProController::builder("unavailable:local-address")
+        .profile_path(&invalid_target)
+        .create_profile(CreateProfileOptions {
+            identity: ProfileIdentity::LocalAddress(address),
+            pair_timeout: Duration::from_secs(60),
+        });
+
+    assert_controller_error_kind(result, ErrorKind::UnsupportedCapability);
 }
 
 #[cfg(feature = "bumble")]

@@ -99,9 +99,9 @@ pub enum ProfileIdentity {
     AdapterDefault,
     /// Use an explicit locally administered address.
     ///
-    /// Create-profile validation rejects this variant with
-    /// [`ErrorKind::UnsupportedCapability`] before filesystem or adapter
-    /// changes.
+    /// Profile creation requires the `bumble` feature. Feature-disabled builds
+    /// reject this variant with [`ErrorKind::UnsupportedCapability`] before
+    /// target inspection or adapter changes.
     LocalAddress(LocalAddress),
 }
 
