@@ -21,16 +21,20 @@
 //! [`Controller::connect`] permits pairing only after `NoBond` when explicitly
 //! configured. The production USB runtime owns the same Classic pairing,
 //! reconnect, SDP, and HID session exercised by the virtual packet-path tests;
-//! pairing and input have been exercised on Windows 11 with a CSR8510 A10 and
-//! Switch 2 system version 22.5.0 (user-reported). Other operating systems,
-//! adapters, system versions, and long-run reliability remain unverified. With
+//! pairing, stored-key reconnect, and Periodic/Direct input have been exercised
+//! on Windows 11 with a CSR8510 A10 and Switch 2 system version 22.5.0
+//! (user-reported). Other operating systems, adapters, system versions, and
+//! long-run reliability remain unverified. With
 //! the `bumble` feature, profile creation publishes a valid empty envelope
 //! without replacing an existing target before it opens the adapter and waits
 //! for pairing readiness. Feature-disabled profile creation stops before
 //! creating a file. Pairing-key updates atomically preserve the complete
 //! profile, and stored-key active/incoming reconnect reaches same-session Ready
-//! in virtual Classic tests. Power-cycle reconnect on hardware remains
-//! unverified. [`PairingProfile`] parses and writes complete schema v2 JSON
+//! in virtual Classic tests. Three active Pro reconnect runs reached Ready and
+//! completed input, neutral close, adapter reopen, and exact profile equality on
+//! the hardware above. One Periodic run followed a user-reported power cycle;
+//! that setup action was not machine-verified. [`PairingProfile`] parses and
+//! writes complete schema v2 JSON
 //! without discarding unknown extension fields; filesystem update is not part
 //! of that value API. Explicit close waits for cleanup
 //! completion, joins the worker, and returns cleanup or join failures. Pending

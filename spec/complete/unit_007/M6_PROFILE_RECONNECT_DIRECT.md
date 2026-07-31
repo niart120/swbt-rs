@@ -1,6 +1,6 @@
 # M6 profile compatibility、reconnect、Pro Direct
 
-- 状態: **着手中**
+- 状態: **完了**
 - milestone: M6
 - branch: `feat/unit-007-m6-profile-reconnect`
 - 正本:
@@ -178,7 +178,7 @@ Switch UI の入力反映と残留入力なしは人が観測し、runner の機
 | refactor-done | T07 public connection API が no-bond、timeout、stale bond、明示 re-pair を仕様どおり分類する | new/edge | unit/integration | 暗黙削除・fallback なし |
 | refactor-done | T08 同じ Pro profile を Periodic/Direct で再利用し、Direct idle、send failure、tap、neutral close の契約を満たす | new/regression | integration | 既存単体挙動を profile 接続面で検査 |
 | refactor-done | T09 hardware runner で Periodic reconnect、power-cycle reconnect、Direct input と clean close を記録する | new | hardware | UI 観測を別 record にする |
-| todo | T10 completion gate と alpha.2 criteria note を確定する | new | docs/package | Rust 1.87、各 feature 組合せ、未検証事項 |
+| refactor-skipped | T10 completion gate と alpha.2 criteria note を確定する | new | docs/package | Rust 1.87、各 feature 組合せ、未検証事項 |
 
 ### 6.1 TDD cycle evidence
 
@@ -193,6 +193,7 @@ Switch UI の入力反映と残留入力なしは人が観測し、runner の機
 | refactor-done | T07 | red: `cargo +1.87.0 test public_reconnect_classifies_recoverable_and_terminal_failures --all-features --locked` は公開 `ConnectOptions` / `ConnectionPath` / `ConnectionStatus`、`ErrorKind::NoBond`、`Controller::reconnect` / `connect` / `try_*` が未定義で compile error。green: `reconnect` は no-bond、timeout、Ready 前 disconnect をそれぞれ `NoBond`、`ConnectionTimeout`、`ConnectionFailed` とし、invalid key-store と worker terminal を回復可能な成功値へ変換しない。`connect` は必ず reconnect を先に実行し、`NoBond` かつ `allow_pairing = true` の場合だけ明示 pairing へ進む。stale bond の disconnect では2番目に用意した pairing script を消費せず、bond の暗黙削除 API も呼ばない。`pair` は reconnect 判定を通らない明示 re-pair 入口を維持する。`try_*` は no-bond、timeout、Ready 前 disconnect だけを `ConnectionResult` に変換し、成功 path を `Reconnected` / `Paired` として返す。Rust 1.87 all-feature は287 passed / 2 ignored、default は247 passed / 1 ignored、all/default build、stable all/default clippy、all-feature rustdoc `-D warnings`、rustfmt、diff check が成功。refactor: worker が pending connection command の Pair/Reconnect 種別を保持し、同じ readiness failure を公開 API ごとの error 文脈へ写像するよう分離した。README と crate rustdoc から reconnect 未実装の記述を除き、virtual 検証済みと hardware power-cycle 未検証を分けた |
 | refactor-done | T08 | red: `cargo +1.87.0 test same_pro_profile_reconnects_periodic_then_direct --all-features --locked` は file-backed reconnect harness と次回 interrupt send の失敗注入が未定義で compile error。green: schema v2 の同一 Pro profile を production `SwbtProfileKeyStore` 経由で Periodic、Direct の順に stored-key reconnect し、両 session が Ready へ到達した。Direct Ready 後の idle 5 tick では user input 0件、受理された A は snapshot へ反映、次の L+R send failure は直前 snapshot を維持した。0 ms の L+R tap は A+L+R、A の2 report、明示 neutral と close は neutral 2 report を順に送り、profile bytes と未知 reporting sentinel は両 mode の close 後も不変だった。Rust 1.87 all-feature は288 passed / 2 ignored、default は247 passed / 1 ignored、all/default build、all-feature check、stable 1.96.1 all/default clippy、all-feature rustdoc `-D warnings`、rustfmt、diff check が成功。追加で実行した非 gate の Rust 1.87 clippy は T08 外の既存 `src/adapter.rs` に `needless_borrows_for_generic_args` 8件を検出して停止した。refactor: memory/file key-store の観測 wrapper を共通化し、全 HID report の位置と user input 0x30 の位置を別 helper に分離した |
 | refactor-done | T09 | red: `cargo +1.87.0 test --example pro_profile_hardware --all-features --locked` は example target がなく失敗。runner 単体 Green 後の初回実機 Periodic reconnect は保存鍵を読んで ACL を確立したが認証・暗号化せず失敗し、認証修正後も outgoing HID channel がなく失敗した。Classic active reconnect に認証、暗号化、Control→Interrupt の outgoing channel 開始を追加すると run 8 と user UI 観測が成功し、run 9 は user-reported power-cycle setup から Ready、入力、neutral、close、adapter reopen、profile 完全一致を満たした。Direct run 10–12 は ACL、暗号化、両 HID channel、bootstrap 後も protocol Ready に達せず timeout する genuine red を再現した。`direct_worker_retries_bootstrap_until_protocol_ready_then_stays_idle` は期待3 report に実際2 report で失敗し、Direct handshake だけを protocol-ready completion にすると Green。run 13 は3.160秒で Ready、Ready 前 bootstrap 3件、Ready 後 idle 500 ms の user input 0件、A、L+R、左右 stick、明示 neutral、neutral close、adapter reopen、同じ417-byte profileの完全一致を確認した。run 14 は1 nibbleだけ変えた別 stale targetを756 msで `ConnectionFailed` / reason `0x05` とし、入力0件、source/target不変、fallback/deleteなし、adapter reopenを確認した。追加 API boundary red は既暗号化 ACL にも再認証を要求し、Green では `encryption_enabled != 0` の active reconnect が再認証せず Control を開始した。UI観測3件は machine NDJSON と分離し、全件A、L+R、左右 stick反映、残留入力なしというユーザ報告である。Rust 1.87 all-feature library は291 passed / 2 ignored、default/no-default library は248 passed / 1 ignored。all-target/all-feature check、3 build構成、stable all/default clippy、all-feature rustdoc `-D warnings`、rustfmt、diff check が成功。refactor: mode別 runner dispatch と secret-free emitterを共通化し、Periodic は既存 handshake完了条件、Direct は protocol-ready完了条件として内部 policyだけを分けた。失敗を含む14 runと診断比較は `evidence/pro-profile-windows-20260731/` に保持 |
+| refactor-skipped | T10 | red: README と crate rustdoc に power-cycle reconnect は実機未検証という現在形が残り、alpha.2 の達成済み項目と未達項目を判別できる completion note がなかった。green: 公開文書を保存鍵 reconnect、Periodic/Direct 実機範囲、runner 手順、機械証跡とユーザ観測の境界へ更新し、alpha.2 は core profile/reconnect/Pro Direct criteria のみ達成、stable diagnostics と `swbt-probe` は M8 のため未達と明記した。Rust 1.87 all-target/all-feature check、all/default/no-default test と build、stable all/default clippy、all-feature rustdoc `-D warnings`、rustfmt、diff check は全て成功。lib test は all-feature 291 passed / 2 ignored、default/no-default 248 passed / 1 ignored。docs/spec の完了 item で production behavior を変更していないため refactor は追加していない |
 
 ## 7. 対象ファイル
 
@@ -242,9 +243,74 @@ Python compatibility test は pinned revision の reader を使い、実行 comm
 - explicit local address: 独立 milestone
 - Bumble upstream contribution: ユーザが明示的に許可するまで実施しない
 
-## 10. 完了チェックリスト
+## 10. alpha.2 criteria note
 
-- [ ] T01-T10 が個別 commit で完了している
+M6 終了時点で `0.1.0-alpha.2` の profile schema v2 read/write、typed Pro profile、profile
+round-trip、stored link key reconnect、`DirectProController` は実装済みである。Windows 11、
+CSR8510 A10、Switch 2 system version `22.5.0`（ユーザ報告）の Pro Controller では、保存済み
+profile を使う Periodic と Direct の Ready、入力、neutral close、adapter reopen、profile 完全
+一致を確認した。power-cycle 後という条件はユーザ報告であり、runner が機械検証した事実ではない。
+
+alpha.2 の公開条件全体は未達である。roadmap が alpha.2 の追加対象に含める stable diagnostics と
+`swbt-probe` は M8 のため未実装であり、長時間 reconnect、jitter、他 OS、他 adapter、他 system
+version も未検証である。したがって M6 完了は core profile/reconnect/Pro Direct criteria の達成を
+示すが、`0.1.0-alpha.2` の release-ready 判定や publish 承認を意味しない。
+
+## 11. Self-review
+
+### 11.1 Work
+
+- spec: `unit_007` の profile compatibility、stored-key reconnect、Pro Direct
+- intent delta: schema v2 typed profile、atomic update、production key persistence、active/incoming
+  reconnect、公開 connection API、同一 profile の Periodic/Direct、実機証跡
+- non-goals: Joy-Con、stable diagnostics、probe、long-run、他 OS、publish、Bumble upstream PR
+
+### 11.2 Findings
+
+| severity | finding | evidence | disposition |
+|---|---|---|---|
+| medium | 最終実装の成功は一つの host、adapter、profile、system version 上の Periodic 2件と Direct 1件で、長期成功率を示さない | T09 run 8、9、13と失敗を含む全14 run | M8 の long-run timing と diagnostics へ先送り |
+| medium | alpha.2 の追加対象である stable diagnostics と `swbt-probe` は未実装 | roadmap 2.2、M8 | M6 core criteria と release-ready 判定を分離し、M8 まで公開しない |
+| medium | `bumble` feature は public fork の固定 SHA に依存する | `Cargo.lock` と固定 revision | SHAを固定し、許可された fork branch 以外へ変更を広げない。upstream PR は作成しない |
+| low | run 9 の power-cycle 操作はユーザ報告で、runner は操作自体を機械検証していない | machine record の `operator_setup_machine_verified: false` と別 UI record | README、crate rustdoc、alpha.2 note に境界を明記 |
+| low | Joy-Con、他 adapter/system version、Linux、macOS は未検証 | hardware summary の environment と residual risk | M7、M9へ先送り |
+
+critical/high finding はない。M6 の判定は profile/reconnect/Pro Direct の exit criteria に限定し、
+alpha.2 公開や長期信頼性へ拡張しない。
+
+### 11.3 Gates
+
+| gate | result | evidence |
+|---|---|---|
+| Requirements | pass | roadmap M6、initial API/architecture/testing、T01–T10 と照合 |
+| Scope | pass | Joy-Con、diagnostics、probe、他 OS、publish、upstream PR に着手していない |
+| TDD / Tests | pass | 各 item の red/green 履歴、Rust 1.87 all/default/no-default test、T09 hardware runs |
+| Static | pass | stable all/default clippy `-D warnings`、rustfmt、rustdoc、secret/residue 検査 |
+| Package | build pass / package not applicable | Rust 1.87 all/default/no-default build。`cargo package` は release 対象外 |
+| Integration Review | pass | README、crate rustdoc、initial spec、work-unit、evidence、固定 fork SHA を照合 |
+| Hardware | pass within M6 scope | Periodic run 8/9、Direct run 13、stale-bond run 14。UI観測は別 record |
+
+T10 completion gate は 2026-07-31 に次の結果で完了した。
+
+- Rust 1.87 all-target/all-feature check: 成功
+- Rust 1.87 all-feature test: lib 291 passed / 2 ignored、integration と doc test 成功
+- Rust 1.87 default/no-default test: 各 lib 248 passed / 1 ignored、integration と doc test 成功
+- stable all/default clippy `-D warnings`: 成功
+- Rust 1.87 all/default/no-default build: 成功
+- Rust 1.87 all-feature rustdoc `-D warnings`: 成功
+- rustfmt、`git diff --check`: 成功
+
+未実行:
+
+- T10 では実機を再実行せず、T09 の保存済み run 1–14 と UI record 3件を参照した。
+- T02 の pinned Python reader を使う manual ignored writer は再実行せず、T02 の保存済み結果を
+  参照した。通常の profile compatibility integration test は completion gate で成功した。
+- Linux、macOS、cross compile、long-run、package、publish は M6 対象外。
+- Bumble fork への追加変更と branch push は不要だった。upstream PR は作成していない。
+
+## 12. 完了チェックリスト
+
+- [x] T01-T10 が個別 commit で完了している
 - [x] Python profile を typed Rust が lossless に読む
 - [x] Rust profile を pinned Python reader が読む
 - [x] update interruption 後の target が旧版または新版として有効である
@@ -258,7 +324,7 @@ Python compatibility test は pinned revision の reader を使い、実行 comm
 - [x] Direct send failure で直前 snapshot を維持する
 - [x] power-cycle reconnect と Direct input を実機確認する
 - [x] key material、raw profile、secret が error、trace、evidence に残らない
-- [ ] alpha.2 criteria、未実行条件、residual risk を記録する
+- [x] alpha.2 criteria、未実行条件、residual risk を記録する
 - [x] upstream PR を作成していない
-- [ ] self-review と completion gate を通す
-- [ ] `spec/complete/unit_007/` へ移動する
+- [x] self-review と completion gate を通す
+- [x] `spec/complete/unit_007/` へ移動する
