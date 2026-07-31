@@ -20,7 +20,7 @@ use crate::{
     ConnectOptions, ConnectionPath, ConnectionStatus, CreateProfileOptions, DirectJoyConL,
     DirectJoyConR, DirectProController, Error, ErrorKind, JoyConL, JoyConLButton, JoyConR,
     JoyConRButton, ProButton, ProController, ProfileIdentity,
-    controller::Controller,
+    controller::{Controller, ControllerBuilder},
     diagnostics::LifecycleState,
     input::{InputState, Stick},
     model::ControllerModel,
@@ -130,6 +130,64 @@ fn runtime_factory_projects_only_persistent_profiles_to_the_key_store() {
     assert_eq!(
         RuntimeFactoryConfig::from_controller(&local).identity(),
         ProfileIdentity::LocalAddress(local_address)
+    );
+}
+
+#[cfg(feature = "bumble")]
+#[test]
+fn local_identity_projects_for_every_model_and_reporting_mode_without_debug_disclosure() {
+    let address = LocalAddress::parse("02:12:34:56:78:9A").expect("valid local address fixture");
+
+    assert_runtime_identity(ProController::builder("usb:0"), address);
+    assert_runtime_identity(DirectProController::builder("usb:0"), address);
+    assert_runtime_identity(JoyConL::builder("usb:0"), address);
+    assert_runtime_identity(DirectJoyConL::builder("usb:0"), address);
+    assert_runtime_identity(JoyConR::builder("usb:0"), address);
+    assert_runtime_identity(DirectJoyConR::builder("usb:0"), address);
+}
+
+#[cfg(feature = "bumble")]
+fn assert_runtime_identity<M, R>(builder: ControllerBuilder<M, R>, address: LocalAddress)
+where
+    M: ControllerModel,
+    R: ReportingMode,
+{
+    let namespace = "02:12:34:56:78:9A";
+    let secret_key = "d8".repeat(16);
+    let mut value = serde_json::json!({
+        "format": "swbt.profile",
+        "schema_version": 2,
+        "controller_kind": M::KIND.profile_name(),
+        "identity": {
+            "kind": "exp-local-address",
+            "address": namespace
+        },
+        "key_store": { "namespaces": {} }
+    });
+    value["key_store"]["namespaces"][namespace] = serde_json::json!({
+        "98:B6:E9:11:22:33": {
+            "link_key": {
+                "authenticated": true,
+                "value": secret_key
+            },
+            "link_key_type": 4
+        }
+    });
+    let profile = PairingProfile::<M>::from_json(value.to_string().as_bytes())
+        .expect("parse typed local-address profile");
+    let rendered = format!("{profile:?}");
+    assert!(!rendered.contains(namespace));
+    assert!(!rendered.contains(&secret_key));
+    let config = builder
+        .profile_path("profiles/runtime-local.json")
+        .validate()
+        .expect("validate typed builder")
+        .finalize_with_profile(|_| Ok(profile))
+        .expect("finalize typed local-address profile");
+
+    assert_eq!(
+        RuntimeFactoryConfig::from_controller(&config).identity(),
+        ProfileIdentity::LocalAddress(address)
     );
 }
 

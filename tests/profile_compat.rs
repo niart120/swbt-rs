@@ -3,10 +3,13 @@ use std::{env, fs, path::PathBuf};
 use serde_json::{Value, json};
 use swbt::{ErrorKind, PairingProfile, model};
 
-const PROFILE_FIXTURE_IDS: [&str; 3] = [
+const PROFILE_FIXTURE_IDS: [&str; 6] = [
     "adapter_default_with_classic_link_key",
     "joycon_l_adapter_default_with_classic_link_key",
     "joycon_r_adapter_default_with_classic_link_key",
+    "local_address_with_classic_link_key",
+    "joycon_l_local_address_with_classic_link_key",
+    "joycon_r_local_address_with_classic_link_key",
 ];
 
 #[test]
@@ -17,6 +20,18 @@ fn typed_profile_preserves_unknown_fields_and_writes_deterministic_python_json()
     assert_typed_round_trip::<model::Pro>(&fixtures[0]);
     assert_typed_round_trip::<model::JoyConL>(&fixtures[1]);
     assert_typed_round_trip::<model::JoyConR>(&fixtures[2]);
+    assert_typed_round_trip::<model::Pro>(&fixtures[3]);
+    assert_typed_round_trip::<model::JoyConL>(&fixtures[4]);
+    assert_typed_round_trip::<model::JoyConR>(&fixtures[5]);
+}
+
+#[test]
+fn python_local_address_profiles_redact_identity_and_keys_from_debug() {
+    let fixtures = python_profile_fixtures();
+
+    assert_typed_debug_redaction::<model::Pro>(&fixtures[3], "04".repeat(16));
+    assert_typed_debug_redaction::<model::JoyConL>(&fixtures[4], "05".repeat(16));
+    assert_typed_debug_redaction::<model::JoyConR>(&fixtures[5], "06".repeat(16));
 }
 
 #[test]
@@ -45,7 +60,12 @@ fn assert_typed_round_trip<M: model::ControllerModel>(input: &Value) {
     input["future_extension"] = json!({
         "opaque": [3, 1, 2]
     });
-    input["key_store"]["namespaces"]["00:11:22:33:44:55"]["98:B6:E9:11:22:33"]["future_key_metadata"] = json!({
+    let namespace = input["key_store"]["namespaces"]
+        .as_object()
+        .and_then(|namespaces| namespaces.keys().next())
+        .expect("fixture has one local namespace")
+        .clone();
+    input["key_store"]["namespaces"][&namespace]["98:B6:E9:11:22:33"]["future_key_metadata"] = json!({
         "marker": "preserve-me"
     });
 
@@ -76,6 +96,18 @@ fn assert_typed_round_trip<M: model::ControllerModel>(input: &Value) {
         expected,
         "Rust output must use sorted keys, two-space indent, and one trailing newline"
     );
+}
+
+fn assert_typed_debug_redaction<M: model::ControllerModel>(input: &Value, key: String) {
+    let profile = PairingProfile::<M>::from_json(
+        &serde_json::to_vec(input).expect("serialize local-address fixture"),
+    )
+    .expect("matching local-address profile must parse");
+    let rendered = format!("{profile:?}");
+
+    assert!(!rendered.contains("02:12:34:56:78:9A"));
+    assert!(!rendered.contains(&key));
+    assert!(rendered.contains("<redacted>"));
 }
 
 #[test]
