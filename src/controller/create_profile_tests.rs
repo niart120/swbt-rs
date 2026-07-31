@@ -2,6 +2,7 @@ use std::{
     collections::VecDeque,
     error::Error as _,
     io,
+    num::NonZeroU64,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, MutexGuard,
@@ -344,8 +345,11 @@ impl CreateProfileRuntimeAttempt<Pro, Periodic> for FakeRuntimeAttempt {
                 "fake runtime pairing timed out",
             ));
         }
-        self.status
-            .begin_session(LifecycleState::Connecting, &InputState::neutral());
+        self.status.begin_session(
+            NonZeroU64::new(1).unwrap(),
+            LifecycleState::Connecting,
+            &InputState::neutral(),
+        );
         self.status.set_connected(true);
         self.status.set_sender_state(Some(0x30), 1, 2);
         self.status.record_subcommand(0x30);
@@ -605,7 +609,7 @@ fn dropping_an_acquired_attempt_uses_fallback_once_without_explicit_cleanup() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let probe = RuntimeProbe::new();
     let mut backend = FakeRuntimeBackend::succeeding(Arc::clone(&events), probe.clone());
-    let (status, _) = crate::runtime::status::status_projection::<Pro>();
+    let (status, _) = crate::runtime::status::status_projection::<Pro, Periodic>();
     let mut attempt = backend.begin_attempt(status);
 
     assert!(!probe.is_active());

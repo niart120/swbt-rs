@@ -100,6 +100,13 @@ pub(crate) enum DiagnosticEvent {
 }
 
 impl DiagnosticEvent {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "M8 T08 wires the probe environment event into trace capture"
+        )
+    )]
     pub(crate) const fn environment(
         controller_kind: ControllerKind,
         reporting_kind: ReportingKind,
@@ -174,6 +181,13 @@ impl DiagnosticEvent {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "M8 T07 wires dynamic unsupported input into probe dispatch"
+        )
+    )]
     pub(crate) const fn unsupported_button(
         context: DiagnosticContext,
         button_kind: ButtonKind,

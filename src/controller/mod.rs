@@ -61,7 +61,7 @@ pub struct Controller<M: ControllerModel, R: ReportingMode> {
     _runtime: Option<ControllerRuntime<M, R>>,
     config: ControllerConfig<M, R>,
     status_publisher: StatusPublisher<M>,
-    status_reader: StatusReader<M>,
+    status_reader: StatusReader<M, R>,
     _types: PhantomData<fn() -> (M, R)>,
     _not_sync: PhantomData<Cell<()>>,
 }
@@ -83,7 +83,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     }
 
     fn from_config(config: ControllerConfig<M, R>) -> Self {
-        let (status_publisher, status_reader) = status_projection();
+        let (status_publisher, status_reader) = status_projection::<M, R>();
 
         Self::from_parts(config, status_publisher, status_reader, None)
     }
@@ -91,7 +91,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     fn from_ready_runtime(
         config: ControllerConfig<M, R>,
         status_publisher: StatusPublisher<M>,
-        status_reader: StatusReader<M>,
+        status_reader: StatusReader<M, R>,
         runtime: ControllerRuntime<M, R>,
     ) -> Self {
         Self::from_parts(config, status_publisher, status_reader, Some(runtime))
@@ -100,7 +100,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     fn from_parts(
         config: ControllerConfig<M, R>,
         status_publisher: StatusPublisher<M>,
-        status_reader: StatusReader<M>,
+        status_reader: StatusReader<M, R>,
         runtime: Option<ControllerRuntime<M, R>>,
     ) -> Self {
         Self {
@@ -126,7 +126,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     /// Returns the latest runtime diagnostics without waiting for transport I/O.
     #[must_use]
     pub fn status(&self) -> GamepadStatus {
-        self.status_reader.status::<R>()
+        self.status_reader.status()
     }
 
     /// Returns the latest committed model-valid input without waiting for transport I/O.

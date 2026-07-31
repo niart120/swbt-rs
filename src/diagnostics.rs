@@ -1,10 +1,6 @@
 use crate::model::ControllerKind;
 use crate::reporting::ReportingKind;
 
-#[expect(
-    dead_code,
-    reason = "M8 T02 fixes the event contract before T03 wires runtime emission"
-)]
 pub(crate) mod event;
 
 /// Lifecycle state of a controller runtime.

@@ -16,6 +16,11 @@ impl ConnectionSessionId {
     pub(crate) const fn get(self) -> u64 {
         self.0.get()
     }
+
+    #[must_use]
+    pub(crate) const fn non_zero(self) -> NonZeroU64 {
+        self.0
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

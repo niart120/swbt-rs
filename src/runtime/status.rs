@@ -1,15 +1,25 @@
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::{
+    marker::PhantomData,
+    num::NonZeroU64,
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
+};
 
 use crate::{
-    diagnostics::{GamepadStatus, LifecycleState},
+    diagnostics::{
+        GamepadStatus, LifecycleState,
+        event::{DiagnosticContext, DiagnosticEvent, WorkerFailureCategory},
+    },
     input::InputState,
     model::ControllerModel,
     reporting::ReportingMode,
 };
 
+type DiagnosticEmitter = Arc<dyn Fn(DiagnosticEvent) + Send + Sync>;
+
 struct ProjectionState<M: ControllerModel> {
     lifecycle: LifecycleState,
     connected: bool,
+    session_id: Option<NonZeroU64>,
     report_mode: Option<u8>,
     input_reports_accepted: u64,
     replies_accepted: u64,
@@ -24,6 +34,7 @@ impl<M: ControllerModel> ProjectionState<M> {
         Self {
             lifecycle: LifecycleState::Configured,
             connected: false,
+            session_id: None,
             report_mode: None,
             input_reports_accepted: 0,
             replies_accepted: 0,
@@ -43,45 +54,82 @@ impl<M: ControllerModel> ProjectionState<M> {
 /// response, and join waits.
 pub(crate) struct StatusPublisher<M: ControllerModel> {
     shared: Arc<RwLock<ProjectionState<M>>>,
+    emitter: DiagnosticEmitter,
+    context: fn(NonZeroU64) -> DiagnosticContext,
 }
 
 impl<M: ControllerModel> Clone for StatusPublisher<M> {
     fn clone(&self) -> Self {
         Self {
             shared: Arc::clone(&self.shared),
+            emitter: Arc::clone(&self.emitter),
+            context: self.context,
         }
     }
 }
 
 /// Controller-owned read handle for status and typed input snapshots.
-pub(crate) struct StatusReader<M: ControllerModel> {
+pub(crate) struct StatusReader<M: ControllerModel, R: ReportingMode> {
     shared: Arc<RwLock<ProjectionState<M>>>,
+    types: PhantomData<fn() -> R>,
 }
 
-pub(crate) fn status_projection<M: ControllerModel>() -> (StatusPublisher<M>, StatusReader<M>) {
+pub(crate) fn status_projection<M: ControllerModel, R: ReportingMode>()
+-> (StatusPublisher<M>, StatusReader<M, R>) {
+    status_projection_with_emitter::<M, R>(Arc::new(DiagnosticEvent::emit))
+}
+
+pub(crate) fn status_projection_with_emitter<M: ControllerModel, R: ReportingMode>(
+    emitter: DiagnosticEmitter,
+) -> (StatusPublisher<M>, StatusReader<M, R>) {
     let shared = Arc::new(RwLock::new(ProjectionState::configured()));
     (
         StatusPublisher {
             shared: Arc::clone(&shared),
+            emitter,
+            context: diagnostic_context::<M, R>,
         },
-        StatusReader { shared },
+        StatusReader {
+            shared,
+            types: PhantomData,
+        },
     )
 }
 
 impl<M: ControllerModel> StatusPublisher<M> {
     pub(crate) fn set_lifecycle(&self, lifecycle: LifecycleState) {
-        write(&self.shared).lifecycle = lifecycle;
+        let event = {
+            let mut state = write(&self.shared);
+            if state.lifecycle == lifecycle {
+                return;
+            }
+            state.lifecycle = lifecycle;
+            self.context(&state)
+                .map(|context| DiagnosticEvent::lifecycle_changed(context, lifecycle))
+        };
+        self.emit(event);
     }
 
-    pub(crate) fn begin_session(&self, lifecycle: LifecycleState, snapshot: &InputState<M>) {
-        let mut state = write(&self.shared);
-        state.lifecycle = lifecycle;
-        state.connected = false;
-        state.report_mode = None;
-        state.last_subcommand = None;
-        state.last_disconnect_reason = None;
-        state.worker_failure = None;
-        state.snapshot = snapshot.clone();
+    pub(crate) fn begin_session(
+        &self,
+        session_id: NonZeroU64,
+        lifecycle: LifecycleState,
+        snapshot: &InputState<M>,
+    ) {
+        let context = {
+            let mut state = write(&self.shared);
+            state.lifecycle = lifecycle;
+            state.connected = false;
+            state.session_id = Some(session_id);
+            state.report_mode = None;
+            state.last_subcommand = None;
+            state.last_disconnect_reason = None;
+            state.worker_failure = None;
+            state.snapshot = snapshot.clone();
+            self.context(&state).expect("session ID was just installed")
+        };
+        (self.emitter)(DiagnosticEvent::session_started(context));
+        (self.emitter)(DiagnosticEvent::lifecycle_changed(context, lifecycle));
     }
 
     pub(crate) fn set_connected(&self, connected: bool) {
@@ -98,42 +146,113 @@ impl<M: ControllerModel> StatusPublisher<M> {
         input_reports_accepted: u64,
         replies_accepted: u64,
     ) {
-        let mut state = write(&self.shared);
-        state.report_mode = report_mode;
-        state.input_reports_accepted = input_reports_accepted;
-        state.replies_accepted = replies_accepted;
+        let events = {
+            let mut state = write(&self.shared);
+            let previous_input = state.input_reports_accepted;
+            let previous_replies = state.replies_accepted;
+            state.report_mode = report_mode;
+            state.input_reports_accepted = input_reports_accepted;
+            state.replies_accepted = replies_accepted;
+            let context = self.context(&state);
+            [
+                (input_reports_accepted > previous_input).then(|| {
+                    DiagnosticEvent::report_tx_accepted(
+                        context.expect("active session context"),
+                        report_mode,
+                        input_reports_accepted,
+                    )
+                }),
+                (replies_accepted > previous_replies).then(|| {
+                    DiagnosticEvent::reply_tx_accepted(
+                        context.expect("active session context"),
+                        report_mode,
+                        replies_accepted,
+                    )
+                }),
+            ]
+        };
+        for event in events.into_iter().flatten() {
+            (self.emitter)(event);
+        }
     }
 
     pub(crate) fn record_subcommand(&self, id: u8) {
-        write(&self.shared).last_subcommand = Some(id);
+        let event = {
+            let mut state = write(&self.shared);
+            state.last_subcommand = Some(id);
+            self.context(&state)
+                .map(|context| DiagnosticEvent::subcommand_observed(context, id))
+        };
+        self.emit(event);
     }
 
     pub(crate) fn end_session(&self, lifecycle: LifecycleState, disconnect_reason: Option<u8>) {
-        let mut state = write(&self.shared);
-        state.lifecycle = lifecycle;
-        state.connected = false;
-        state.report_mode = None;
-        state.last_disconnect_reason = disconnect_reason;
+        let event = {
+            let mut state = write(&self.shared);
+            let context = self.context(&state);
+            state.lifecycle = lifecycle;
+            state.connected = false;
+            state.session_id = None;
+            state.report_mode = None;
+            state.last_disconnect_reason = disconnect_reason;
+            context.map(|context| {
+                DiagnosticEvent::session_ended(context, lifecycle, disconnect_reason)
+            })
+        };
+        self.emit(event);
     }
 
     pub(crate) fn close(&self, lifecycle: LifecycleState) {
-        let mut state = write(&self.shared);
-        state.lifecycle = lifecycle;
-        state.connected = false;
-        state.report_mode = None;
+        let event = {
+            let mut state = write(&self.shared);
+            let context = self.context(&state);
+            state.lifecycle = lifecycle;
+            state.connected = false;
+            state.session_id = None;
+            state.report_mode = None;
+            context.map(|context| DiagnosticEvent::session_ended(context, lifecycle, None))
+        };
+        self.emit(event);
     }
 
-    pub(crate) fn fail(&self, message: &'static str) {
-        let mut state = write(&self.shared);
-        state.lifecycle = LifecycleState::Failed;
-        state.connected = false;
-        state.report_mode = None;
-        state.worker_failure = Some(message.to_owned());
+    pub(crate) fn fail(&self, message: &'static str, category: WorkerFailureCategory) {
+        let events = {
+            let mut state = write(&self.shared);
+            if state.worker_failure.is_some() {
+                return;
+            }
+            let context = self.context(&state);
+            state.lifecycle = LifecycleState::Failed;
+            state.connected = false;
+            state.session_id = None;
+            state.report_mode = None;
+            state.worker_failure = Some(message.to_owned());
+            context.map(|context| {
+                [
+                    DiagnosticEvent::worker_failed(context, category),
+                    DiagnosticEvent::lifecycle_changed(context, LifecycleState::Failed),
+                    DiagnosticEvent::session_ended(context, LifecycleState::Failed, None),
+                ]
+            })
+        };
+        for event in events.into_iter().flatten() {
+            (self.emitter)(event);
+        }
+    }
+
+    fn emit(&self, event: Option<DiagnosticEvent>) {
+        if let Some(event) = event {
+            (self.emitter)(event);
+        }
+    }
+
+    fn context(&self, state: &ProjectionState<M>) -> Option<DiagnosticContext> {
+        state.session_id.map(self.context)
     }
 }
 
-impl<M: ControllerModel> StatusReader<M> {
-    pub(crate) fn status<R: ReportingMode>(&self) -> GamepadStatus {
+impl<M: ControllerModel, R: ReportingMode> StatusReader<M, R> {
+    pub(crate) fn status(&self) -> GamepadStatus {
         let state = read(&self.shared);
         GamepadStatus {
             lifecycle: state.lifecycle,
@@ -152,6 +271,12 @@ impl<M: ControllerModel> StatusReader<M> {
     pub(crate) fn snapshot(&self) -> InputState<M> {
         read(&self.shared).snapshot.clone()
     }
+}
+
+fn diagnostic_context<M: ControllerModel, R: ReportingMode>(
+    session_id: NonZeroU64,
+) -> DiagnosticContext {
+    DiagnosticContext::new(M::KIND, R::KIND, session_id)
 }
 
 fn read<M: ControllerModel>(
