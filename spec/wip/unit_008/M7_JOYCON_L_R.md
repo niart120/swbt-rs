@@ -137,7 +137,7 @@ address、link key、USB serial、error source を出力しない。command acce
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | T01 pinned Python profile fixture を Pro/L/R の3 caseにし、typed round-trip と cross-model reject を検査する | new/regression | integration | synthetic key、secret-free failure |
+| refactor-done | T01 pinned Python profile fixture を Pro/L/R の3 caseにし、typed round-trip と cross-model reject を検査する | new/regression | integration | synthetic key、secret-free failure |
 | todo | T02 fake runtime で Joy-Con L/R×Periodic/Direct の左右固有 input、snapshot、neutral close を検査する | new/regression | integration | model/stick sideを混線させない |
 | todo | T03 virtual Classic で L/R の device info、SPI colors、typed input、Periodic/Direct readiness を packet-level 検査する | new/regression | integration | M4の6組 Readyを強化 |
 | todo | T04 L/R 別の同一 profile を Periodic→Direct で再利用し、Direct idle、profile不変、cross-model rejectを検査する | new/regression | integration | Pro-only M6 testを一般化 |
@@ -149,6 +149,10 @@ address、link key、USB serial、error source を出力しない。command acce
 
 各 item の red、green、refactor、targeted gate、commit をここへ追記する。既存実装が最初の test で
 満たした regression item は red を捏造せず、その事実と追加 test の価値を記録する。
+
+| phase | item | evidence |
+|---|---|---|
+| refactor-done | T01 | red: `cargo +1.87.0 test --test profile_compat --locked` は期待する Pro/L/R 3 ID に対して既存 fixture が Pro 1件だけのため、round-trip と cross-model の2 testが失敗。green: synthetic Classic link key を持つ adapter-default Joy-Con L/R caseを固定 fixtureへ追加し、各 `PairingProfile<M>` の未知 field 保持、決定的 JSON、opposite Joy-Con の `ProfileControllerMismatch` を検査して2 passed / 1 manual ignored。固定 repository HEAD `84d2723...` の Python 3.13.5 reader は3 caseを `pro_controller` / `joycon_left` / `joycon_right` として読み、key値は出力していない。profile document 7 test、target clippy `-D warnings`、rustfmt、diff checkが成功。refactor: case ID順序を固定し、3 modelのround-tripをgeneric helperへ集約 |
 
 ## 7. 対象ファイル
 

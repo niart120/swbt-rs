@@ -1,11 +1,47 @@
 use std::{env, fs, path::PathBuf};
 
 use serde_json::{Value, json};
-use swbt::{PairingProfile, model};
+use swbt::{ErrorKind, PairingProfile, model};
+
+const PROFILE_FIXTURE_IDS: [&str; 3] = [
+    "adapter_default_with_classic_link_key",
+    "joycon_l_adapter_default_with_classic_link_key",
+    "joycon_r_adapter_default_with_classic_link_key",
+];
 
 #[test]
 fn typed_profile_preserves_unknown_fields_and_writes_deterministic_python_json() {
-    let mut input = python_profile_fixture();
+    let fixtures = python_profile_fixtures();
+    assert_eq!(fixtures.len(), PROFILE_FIXTURE_IDS.len());
+
+    assert_typed_round_trip::<model::Pro>(&fixtures[0]);
+    assert_typed_round_trip::<model::JoyConL>(&fixtures[1]);
+    assert_typed_round_trip::<model::JoyConR>(&fixtures[2]);
+}
+
+#[test]
+fn typed_profile_rejects_the_opposite_joycon_fixture() {
+    let fixtures = python_profile_fixtures();
+    assert_eq!(fixtures.len(), PROFILE_FIXTURE_IDS.len());
+
+    let left = serde_json::to_vec(&fixtures[1]).expect("serialize left profile");
+    let right = serde_json::to_vec(&fixtures[2]).expect("serialize right profile");
+    assert_eq!(
+        PairingProfile::<model::JoyConR>::from_json(&left)
+            .expect_err("right typed profile must reject left fixture")
+            .kind(),
+        ErrorKind::ProfileControllerMismatch
+    );
+    assert_eq!(
+        PairingProfile::<model::JoyConL>::from_json(&right)
+            .expect_err("left typed profile must reject right fixture")
+            .kind(),
+        ErrorKind::ProfileControllerMismatch
+    );
+}
+
+fn assert_typed_round_trip<M: model::ControllerModel>(input: &Value) {
+    let mut input = input.clone();
     input["future_extension"] = json!({
         "opaque": [3, 1, 2]
     });
@@ -13,7 +49,7 @@ fn typed_profile_preserves_unknown_fields_and_writes_deterministic_python_json()
         "marker": "preserve-me"
     });
 
-    let profile = PairingProfile::<model::Pro>::from_json(
+    let profile = PairingProfile::<M>::from_json(
         &serde_json::to_vec(&input).expect("serialize input profile"),
     )
     .expect("matching Python profile must parse");
@@ -49,7 +85,10 @@ fn write_rust_profile_for_pinned_python_reader() {
         env::var_os("SWBT_PROFILE_COMPAT_OUTPUT")
             .expect("SWBT_PROFILE_COMPAT_OUTPUT must name the output file"),
     );
-    let input = python_profile_fixture();
+    let input = python_profile_fixtures()
+        .into_iter()
+        .next()
+        .expect("fixture must retain the Pro case");
     let profile = PairingProfile::<model::Pro>::from_json(
         &serde_json::to_vec(&input).expect("serialize input profile"),
     )
@@ -64,10 +103,20 @@ fn write_rust_profile_for_pinned_python_reader() {
     .expect("write Rust profile for the Python reader");
 }
 
-fn python_profile_fixture() -> Value {
+fn python_profile_fixtures() -> Vec<Value> {
     let fixture: Value = serde_json::from_slice(include_bytes!(
         "fixtures/python-v0.6.0/profile/pairing-profile-fixtures.json"
     ))
     .expect("Python profile fixture must be valid JSON");
-    fixture["cases"][0]["profile"].clone()
+    let cases = fixture["cases"]
+        .as_array()
+        .expect("Python profile fixture cases must be an array");
+    assert_eq!(
+        cases
+            .iter()
+            .map(|case| case["id"].as_str().expect("fixture ID must be text"))
+            .collect::<Vec<_>>(),
+        PROFILE_FIXTURE_IDS
+    );
+    cases.iter().map(|case| case["profile"].clone()).collect()
 }
