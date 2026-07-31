@@ -13,6 +13,8 @@ use bumble_l2cap::{ClassicChannelSpec, ClassicChannelState};
 use bumble_sdp::{DataElement, SdpPdu};
 use serde_json::json;
 
+use crate::ErrorKind;
+use crate::controller::Controller;
 use crate::diagnostics::LifecycleState;
 use crate::input::{Button, InputState, ProButton};
 use crate::model::{ControllerModel, JoyConL, JoyConR, Pro};
@@ -229,7 +231,7 @@ fn stored_key_active_and_incoming_reconnect_reach_ready_without_fresh_pairing() 
 fn same_pro_profile_reconnects_periodic_then_direct_without_reporting_state_leakage() {
     let directory = VirtualProfileDirectory::new();
     let profile_path = directory.path().join("pro.json");
-    let original_profile = file_backed_profile_bytes();
+    let original_profile = file_backed_profile_bytes::<Pro>();
     fs::write(&profile_path, &original_profile).expect("write virtual Pro profile");
 
     let (periodic_transport, periodic_trace) =
@@ -426,6 +428,180 @@ fn same_pro_profile_reconnects_periodic_then_direct_without_reporting_state_leak
         fs::read(&profile_path).expect("read profile after Direct reconnect"),
         original_profile,
         "reporting mode must not change the shared profile document"
+    );
+}
+
+#[test]
+fn same_joycon_profiles_reconnect_periodic_then_direct_without_model_leakage() {
+    run_joycon_profile_reuse_case::<JoyConL, JoyConR>(
+        "joycon-l.json",
+        JOYCON_L_PACKET_EXPECTATION.buttons,
+    );
+    run_joycon_profile_reuse_case::<JoyConR, JoyConL>(
+        "joycon-r.json",
+        JOYCON_R_PACKET_EXPECTATION.buttons,
+    );
+}
+
+fn run_joycon_profile_reuse_case<M, Opposite>(file_name: &str, expected_buttons: [u8; 3])
+where
+    M: ControllerModel,
+    Opposite: ControllerModel,
+{
+    let directory = VirtualProfileDirectory::new();
+    let profile_path = directory.path().join(file_name);
+    let original_profile = file_backed_profile_bytes::<M>();
+    fs::write(&profile_path, &original_profile).expect("write virtual Joy-Con profile");
+
+    let mismatch = Controller::<Opposite, Periodic>::builder("adapter-must-not-open")
+        .profile_path(profile_path.clone())
+        .build();
+    let mismatch = match mismatch {
+        Ok(_) => panic!("opposite Joy-Con must reject the profile before adapter open"),
+        Err(error) => error,
+    };
+    assert_eq!(mismatch.kind(), ErrorKind::ProfileControllerMismatch);
+
+    let (periodic_transport, periodic_trace) =
+        VirtualClassicTransport::new_reconnect_with_profile::<M>(
+            VirtualReconnectDirection::Active,
+            profile_path.clone(),
+        );
+    let (periodic_status, periodic_reader) = status_projection();
+    let mut periodic_worker = WorkerCore::new_periodic_with_status(
+        SwitchHidProtocol::<M>::new(None, DEVICE_INFO_ADDRESS),
+        Box::new(periodic_transport),
+        REPORT_PERIOD,
+        WorkerBudget::new(2, 4),
+        Box::new(|_| {}),
+        periodic_status,
+    )
+    .expect("valid Joy-Con Periodic worker");
+    let mut periodic_commands = QueuedCommands::from([RuntimeCommand::<M, Periodic>::Reconnect {
+        timeout: CONNECTION_TIMEOUT,
+    }]);
+    let mut periodic_clock = ManualClock::default();
+    let mut periodic_shutdown = ShutdownLatch::default();
+
+    drive_until_ready(
+        &mut periodic_worker,
+        &periodic_reader,
+        &mut periodic_clock,
+        &mut periodic_shutdown,
+        &mut periodic_commands,
+    );
+    let state = all_supported_buttons_state::<M>();
+    periodic_commands.push(RuntimeCommand::Input(PeriodicCommand::Apply(state.clone())));
+    for _ in 0..50 {
+        periodic_clock.advance(REPORT_PERIOD);
+        let WorkerStep::Continue(mut progress) = periodic_worker.step_runtime(
+            &periodic_clock,
+            &mut periodic_shutdown,
+            &mut periodic_commands,
+        ) else {
+            panic!("Joy-Con Periodic input must keep the worker running");
+        };
+        assert_command_successes(&mut progress);
+        if has_input_buttons(&periodic_trace, expected_buttons) {
+            break;
+        }
+    }
+    assert_eq!(periodic_reader.snapshot(), state);
+    assert!(has_input_buttons(&periodic_trace, expected_buttons));
+    close_ready_worker(
+        &mut periodic_worker,
+        &periodic_reader,
+        &periodic_clock,
+        &mut periodic_shutdown,
+        &mut periodic_commands,
+    );
+    assert!(lock(&periodic_trace).stored_key_reconnect_complete);
+    assert_eq!(
+        fs::read(&profile_path).expect("read profile after Joy-Con Periodic reconnect"),
+        original_profile
+    );
+
+    let (direct_transport, direct_trace) = VirtualClassicTransport::new_reconnect_with_profile::<M>(
+        VirtualReconnectDirection::Active,
+        profile_path.clone(),
+    );
+    let (direct_status, direct_reader) = status_projection();
+    let mut direct_worker = WorkerCore::new_direct_with_status(
+        SwitchHidProtocol::<M>::new(None, DEVICE_INFO_ADDRESS),
+        Box::new(direct_transport),
+        WorkerBudget::new(2, 4),
+        Box::new(|_| {}),
+        direct_status,
+    );
+    let mut direct_commands = QueuedCommands::from([RuntimeCommand::<M, Direct>::Reconnect {
+        timeout: CONNECTION_TIMEOUT,
+    }]);
+    let mut direct_clock = ManualClock::default();
+    let mut direct_shutdown = ShutdownLatch::default();
+
+    drive_until_ready(
+        &mut direct_worker,
+        &direct_reader,
+        &mut direct_clock,
+        &mut direct_shutdown,
+        &mut direct_commands,
+    );
+    let ready_report_count = user_input_report_count(&direct_trace);
+    for _ in 0..5 {
+        direct_clock.advance(REPORT_PERIOD);
+        let WorkerStep::Continue(mut progress) =
+            direct_worker.step_runtime(&direct_clock, &mut direct_shutdown, &mut direct_commands)
+        else {
+            panic!("Joy-Con Direct idle must keep the worker running");
+        };
+        assert_command_successes(&mut progress);
+    }
+    assert_eq!(
+        user_input_report_count(&direct_trace),
+        ready_report_count,
+        "Joy-Con Direct idle must not emit periodic 0x30 reports"
+    );
+
+    direct_commands.push(RuntimeCommand::Input(DirectCommand::Send(state.clone())));
+    let WorkerStep::Continue(mut input_progress) =
+        direct_worker.step_runtime(&direct_clock, &mut direct_shutdown, &mut direct_commands)
+    else {
+        panic!("Joy-Con Direct input must keep the worker running");
+    };
+    assert_command_successes(&mut input_progress);
+    assert_eq!(direct_reader.snapshot(), state);
+
+    direct_commands.push(RuntimeCommand::Input(DirectCommand::Common(
+        CommonCommand::Neutral,
+    )));
+    let WorkerStep::Continue(mut neutral_progress) =
+        direct_worker.step_runtime(&direct_clock, &mut direct_shutdown, &mut direct_commands)
+    else {
+        panic!("Joy-Con Direct neutral must keep the worker running");
+    };
+    assert_command_successes(&mut neutral_progress);
+    assert_eq!(direct_reader.snapshot(), InputState::<M>::neutral());
+    close_ready_worker(
+        &mut direct_worker,
+        &direct_reader,
+        &direct_clock,
+        &mut direct_shutdown,
+        &mut direct_commands,
+    );
+
+    let direct_reports = user_input_reports_after(&direct_trace, ready_report_count);
+    assert_eq!(direct_reports.len(), 3);
+    assert!(is_report_with_buttons(&direct_reports[0], expected_buttons));
+    assert!(
+        direct_reports[1..]
+            .iter()
+            .all(|report| is_report_with_buttons(report, [0; 3]))
+    );
+    assert!(lock(&direct_trace).stored_key_reconnect_complete);
+    assert_eq!(
+        fs::read(&profile_path).expect("read profile after Joy-Con Direct reconnect"),
+        original_profile,
+        "reporting mode must not change the shared Joy-Con profile document"
     );
 }
 
@@ -1546,11 +1722,11 @@ fn user_input_reports_after(trace: &Arc<Mutex<VirtualTrace>>, start: usize) -> V
         .collect()
 }
 
-fn file_backed_profile_bytes() -> Vec<u8> {
+fn file_backed_profile_bytes<M: ControllerModel>() -> Vec<u8> {
     let mut bytes = serde_json::to_vec_pretty(&json!({
         "format": "swbt.profile",
         "schema_version": 2,
-        "controller_kind": "pro",
+        "controller_kind": M::PROFILE_NAME,
         "identity": {
             "kind": "adapter-default"
         },
