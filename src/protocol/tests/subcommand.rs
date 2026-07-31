@@ -68,6 +68,35 @@ fn mcu_config_reply_matches_the_python_fixture_and_leaves_one_padding_byte() {
 }
 
 #[test]
+fn nfc_ir_mcu_state_reply_accepts_the_python_supported_modes() {
+    for mode in [0x00, 0x01, 0x02] {
+        let reply = stateless_reply::<JoyConR>(0x22, &[mode], &InputState::neutral(), 0);
+
+        assert_eq!(reply.bytes()[13], 0x80);
+        assert_eq!(reply.bytes()[14], 0x22);
+        assert_eq!(&reply.bytes()[15..], &[0; 35]);
+    }
+}
+
+#[test]
+fn nfc_ir_mcu_state_reply_rejects_missing_and_unknown_modes() {
+    assert_eq!(
+        stateless_result::<JoyConR>(0x22, &[], &InputState::neutral(), 0),
+        Err(ProtocolError::MissingSubcommandArgument {
+            subcommand_id: 0x22,
+        })
+    );
+    assert_eq!(
+        stateless_result::<JoyConR>(0x22, &[0x03], &InputState::neutral(), 0),
+        Err(ProtocolError::InvalidNfcIrMcuState { requested: 0x03 })
+    );
+    assert_eq!(
+        ProtocolError::InvalidNfcIrMcuState { requested: 0x03 }.to_string(),
+        "set NFC/IR MCU state subcommand argument must be 0x00, 0x01, or 0x02"
+    );
+}
+
+#[test]
 fn reply_prefix_uses_the_typed_current_input_and_explicit_timer() {
     let state = InputState::<Pro>::neutral()
         .with_buttons([Button::<Pro>::A])
@@ -226,6 +255,17 @@ fn stateless_reply<M: ControllerModel>(
     state: &InputState<M>,
     timer: u8,
 ) -> PreparedSubcommandReply {
+    stateless_result(subcommand_id, payload, state, timer)
+        .unwrap()
+        .expect("fixture subcommand is stateless")
+}
+
+fn stateless_result<M: ControllerModel>(
+    subcommand_id: u8,
+    payload: &[u8],
+    state: &InputState<M>,
+    timer: u8,
+) -> Result<Option<PreparedSubcommandReply>, ProtocolError> {
     let mut raw = vec![0x01, 0x0A];
     raw.extend_from_slice(&NEUTRAL_RUMBLE);
     raw.push(subcommand_id);
@@ -236,8 +276,6 @@ fn stateless_reply<M: ControllerModel>(
         .expect("0x01 output report has a subcommand");
 
     try_prepare_stateless_reply(request, state, timer, DEVICE_INFO_ADDRESS)
-        .unwrap()
-        .expect("fixture subcommand is stateless")
 }
 
 fn spi_reply<M: ControllerModel>(

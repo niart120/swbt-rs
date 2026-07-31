@@ -1,0 +1,1 @@
+{"connection":"reconnect","event":"diagnostic_summary","input_reports_accepted":1732,"last_subcommand":34,"mode":"periodic","model":"joycon_r","replies_accepted":14,"run_index":7,"schema":"swbt.m7.joycon-diagnostic-summary","schema_version":1,"timeout_ms":30000,"worker_failure_present":false}

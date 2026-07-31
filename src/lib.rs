@@ -33,7 +33,13 @@
 //! in virtual Classic tests. Three active Pro reconnect runs reached Ready and
 //! completed input, neutral close, adapter reopen, and exact profile equality on
 //! the hardware above. One Periodic run followed a user-reported power cycle;
-//! that setup action was not machine-verified. [`PairingProfile`] parses and
+//! that setup action was not machine-verified. On the same hardware, Joy-Con L
+//! reached Ready through fresh Periodic pairing and Direct reconnect. Joy-Con R
+//! reached Ready through fresh Periodic pairing, Periodic reconnect, and Direct
+//! reconnect after adding the Python-compatible NFC/IR MCU state `0x22` reply.
+//! Both models completed side-specific input, neutral close, adapter reopen, and
+//! profile model checks. These runs do not establish long-run reliability.
+//! [`PairingProfile`] parses and
 //! writes complete schema v2 JSON
 //! without discarding unknown extension fields; filesystem update is not part
 //! of that value API. Explicit close waits for cleanup

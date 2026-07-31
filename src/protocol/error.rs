@@ -42,6 +42,9 @@ pub(crate) enum ProtocolError {
     InvalidVibrationValue {
         requested: u8,
     },
+    InvalidNfcIrMcuState {
+        requested: u8,
+    },
     UnsupportedSubcommand {
         subcommand_id: u8,
     },
@@ -104,6 +107,10 @@ impl fmt::Display for ProtocolError {
             Self::MissingSubcommandArgument {
                 subcommand_id: 0x48,
             } => formatter.write_str("enable vibration subcommand must include one argument byte"),
+            Self::MissingSubcommandArgument {
+                subcommand_id: 0x22,
+            } => formatter
+                .write_str("set NFC/IR MCU state subcommand must include one argument byte"),
             Self::MissingSubcommandArgument { subcommand_id } => write!(
                 formatter,
                 "subcommand 0x{subcommand_id:02x} must include one argument byte"
@@ -124,6 +131,8 @@ impl fmt::Display for ProtocolError {
             Self::InvalidVibrationValue { .. } => {
                 formatter.write_str("enable vibration subcommand argument must be 0x00 or 0x01")
             }
+            Self::InvalidNfcIrMcuState { .. } => formatter
+                .write_str("set NFC/IR MCU state subcommand argument must be 0x00, 0x01, or 0x02"),
             Self::UnsupportedSubcommand { subcommand_id } => {
                 write!(formatter, "unsupported subcommand: 0x{subcommand_id:02x}")
             }

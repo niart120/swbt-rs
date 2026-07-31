@@ -457,10 +457,12 @@ cargo test --features adapter-tests --test adapter_open -- --ignored
 
 | ID | OS | dongle | driver | console | firmware | model | reporting | identity | status |
 |---|---|---|---|---|---|---|---|---|---|
-| W11-CSR-S2-P-P | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.1.0 | Pro | Periodic | adapter-default | 要検証 |
-| W11-CSR-S2-P-D | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.1.0 | Pro | Direct | adapter-default | 要検証 |
-| W11-CSR-S2-L-P | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.1.0 | Joy-Con L | Periodic | adapter-default | 要検証 |
-| W11-CSR-S2-R-P | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.1.0 | Joy-Con R | Periodic | adapter-default | 要検証 |
+| W11-CSR-S2-P-P | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.5.0（ユーザ報告） | Pro | Periodic | adapter-default | M5/M6で検証済み |
+| W11-CSR-S2-P-D | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.5.0（ユーザ報告） | Pro | Direct | adapter-default | M6で検証済み |
+| W11-CSR-S2-L-P | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.5.0（ユーザ報告） | Joy-Con L | Periodic | adapter-default | M7で検証済み |
+| W11-CSR-S2-L-D | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.5.0（ユーザ報告） | Joy-Con L | Direct | adapter-default | M7で検証済み |
+| W11-CSR-S2-R-P | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.5.0（ユーザ報告） | Joy-Con R | Periodic | adapter-default | M7で検証済み |
+| W11-CSR-S2-R-D | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.5.0（ユーザ報告） | Joy-Con R | Direct | adapter-default | M7で検証済み |
 
 stages:
 

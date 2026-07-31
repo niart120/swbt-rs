@@ -9,7 +9,7 @@ Bluetooth stack の実装基盤には
 
 ## 現在の状態
 
-このリポジトリは M6 の公開 reconnect API まで実装済みです。Cargo package は
+このリポジトリは M7 の Joy-Con L/R Periodic/Direct まで実装済みです。Cargo package は
 library target `swbt` を提供し、
 model-valid input、crate 内部の Switch HID protocol と runtime、公開 controller builder、
 descriptor-only adapter discovery を実装しています。
@@ -67,6 +67,12 @@ descriptor-only adapter discovery を実装しています。
 - M6 の reconnect 証跡は修正途中の失敗を含む14 run です。最終実装の独立した反復試験では
   ないため、3件の成功を長期信頼性や成功率の根拠にはしません。人手観測を行った3件では
   A、L+R、左右スティックが Switch UI に反映され、neutral 後の入力残りはありませんでした。
+- M7 ではJoy-Con Lをfresh Periodic Pairから同じprofileのDirect reconnectまで確認しました。
+  Joy-Con RはNFC/IR MCU state subcommand `0x22`の互換replyを追加した後、fresh Periodic Pair、
+  Periodic reconnect、Direct reconnectがReady、左右固有入力、neutral close、adapter reopen、
+  profile検査を通過しました。人手観測ではJoy-Con LのD-pad、L+ZL、SL+SR、left stickと、
+  Joy-Con RのABXY、R+ZR、SL+SR、right stickが反映され、neutral後の入力残りはありませんでした。
+  修正・診断途中のrunを含むため、長期信頼性や成功率の根拠にはしません。
 
 ## Pro Periodic 実機 runner
 
@@ -122,6 +128,34 @@ target を作る失敗試験です。正しい profile と同じ path は拒否�
 Ready 後の500 ms idle で user input report が0件であることも検査します。標準出力は schema
 `swbt.m6.pro-profile` version 1 の NDJSON で、path、raw profile、peer address、key material は
 出力しません。`ui_observed` は `null` とし、Switch UI の人手観測は別 record にします。
+
+## Joy-Con L/R実機runner
+
+M7のJoy-Con確認には
+[`examples/joycon_profile_hardware.rs`](examples/joycon_profile_hardware.rs) を使います。fresh Pairは
+Periodicだけを受け付け、Directは同じmodelの既存schema v2 profileからreconnectします。次の例は
+Joy-Con Rのfresh Periodic Pairです。profile pathは実行前に存在していてはいけません。
+
+```powershell
+$runStamp = Get-Date -Format yyyyMMdd-HHmmss
+$profilePath = Join-Path $env:TEMP "swbt-m7-joycon-r-$runStamp.json"
+$evidencePath = Join-Path $env:TEMP "swbt-m7-joycon-r-$runStamp.ndjson"
+cargo run --locked --example joycon_profile_hardware --features bumble -- `
+  --adapter usb:0a12:0001 `
+  --profile $profilePath `
+  --model right `
+  --mode periodic `
+  --connection pair `
+  --timeout-secs 120 `
+  --run 1 | Tee-Object -FilePath $evidencePath
+```
+
+`--model left`はJoy-Con L、`--connection reconnect --mode direct`は既存profileのDirect再接続です。
+runnerはLでD-pad、L+ZL、SL+SR、left stick、RでABXY、R+ZR、SL+SR、right stickを送り、
+neutral、close、adapter reopen、profile model、反対側model拒否を検査します。ABXYは各200 ms、
+同時押しとstickは各500 msです。DirectではReady後のidleにuser input reportが増えないことも
+確認します。標準出力はschema `swbt.m7.joycon-profile` version 1のNDJSONで、path、raw profile、
+peer address、key materialは出力しません。UI結果は別recordにします。
 
 ## 開発
 

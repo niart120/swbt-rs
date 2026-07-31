@@ -1,0 +1,1 @@
+{"connection":"pair","controller_registration_observed":true,"event":"ui_observation","input_residue_observed":false,"mode":"periodic","model":"joycon_r","observation_source":"user","run_index":15,"schema":"swbt.m7.joycon-ui-observation","schema_version":1,"switch_system_version_reported":"22.5.0","unix_time_ms":1785505353113}
