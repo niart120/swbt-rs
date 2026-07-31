@@ -1,6 +1,6 @@
 # M8 IMU、diagnostics、probe
 
-- 状態: **着手中**
+- 状態: **完了**
 - milestone: M8
 - branch: `feat/unit-009-m8-imu-diagnostics-probe`
 - 正本:
@@ -196,7 +196,7 @@ hardware 実行前にユーザへ準備を依頼し、各 UI 観測を受け取�
 | refactor-done | T07 pair/reconnect の3 model dispatch、reporting選択、unsupported button、fallback禁止を検査する | new | CLI/runtime | fake/virtual transport |
 | refactor-done | T08 trace writer が diagnostics target だけを有効な NDJSON へ保存し、秘密値を除外する | new | integration | create-new |
 | refactor-done | T09 Pro実機で IMU/diagnostics/long-run trace と期限付き cleanup を記録する | new | hardware | machine/UI分離 |
-| todo | T10 completion gate、公開文書、criteria note、self-review を確定する | new | docs/package | releaseはしない |
+| refactor-done | T10 completion gate、公開文書、criteria note、self-review を確定する | new | docs/package | releaseはしない |
 
 ### 6.1 TDD cycle evidence
 
@@ -215,6 +215,7 @@ machine evidence を先に確定し、人手 UI 観測を別に追記する。
 | refactor-done | T07 | red: `Controller::button(ButtonKind)`の型付き動的境界を要求するとmethod未定義の`E0599`となり、有効なpair/reconnect CLIは未知commandとして操作失敗の終了1ではなくusageの終了2になった。green: controller名を入口で`Pro`/`JoyConL`/`JoyConR`へ、reconnect reportingを`Periodic`/`Direct`へ分岐し、pair 3経路とreconnect 6経路がそれぞれ`Controller<M, R>`を構築する。fake backend 5 tests、CLI integration 5 tests、button contract 4 testsが成功した。未知controller/reportingとpairへのreporting指定は終了2で、Proへfallbackしない。既存pair targetは`ProfileAlreadyExists`、missing reconnect profileは`ProfileNotFound`となりadapterを開かず、path/traceをerrorへ出さない。任意のdynamic buttonはReady後に`Controller::button`で変換し、非対応なら`UnsupportedInput`を返す。有効sessionのstatus projectionはsession ID付き`unsupported_button` eventを発行し、session前は発行しないことをunit testで確認した。refactor: parse、model dispatch、platform backend、接続後button、primary errorを保つcloseを分離した。trace writerと実pair/reconnectはT08/T09へ先送り。all-feature rustdoc、all-feature clippy `-D warnings`、rustfmt、diff checkが成功 |
 | refactor-done | T08 | red: 既存traceを指定してpair preflightを実行するとtrace errorではなく`ProfileAlreadyExists`となり、trace内容を検査していなかった。green: `--trace`をcreate-newで操作前に開き、process global subscriberでworker threadを含む`swbt::diagnostics` targetだけを収集する。既存traceは1 byteも変更せず`Trace` error、new traceはprofile preflight失敗時にもenvironment 1行を残した。各eventはschema version 1のclosed field集合と照合し、unknown field/debug値を持つrecordは書かずtrace失敗にする。各JSONをメモリ上で完成後に改行付きでwrite/flushし、欠落したoptional report mode/disconnect reasonは`null`へ正規化する。別targetのsecret event除外、unknown diagnostics fieldのfail-closed、独立JSON 2行をbinary unit 2 tests、create-new/redactionをCLI integration 1 testで確認し、probe CLI 6 tests、binary 7 testsが成功した。refactor: writer、typed visitor、schema検査、flush状態をprobe専用`trace` moduleへ分離した。新規dependencyなし。実runtime eventの複数thread記録はT09で確認する。all-feature rustdoc、all-feature clippy `-D warnings`、rustfmt、diff checkが成功 |
 | refactor-done | T09 | red: 旧Pro profileのreconnectは認証時のreason `0x05`で失敗し、fresh Pair後の初回reconnectは60秒でtimeoutした。green: operator setupを更新したrun 04はReady後60秒のnon-neutral IMUを5,343 report受理し、neutral report、neutral close、profile bytes不変、adapter reopenを確認した。trace 5,411行はclosed schemaでparseでき、禁止fieldなし。subscriber観測intervalはp50 8.5495 ms、p95 17.0223 ms、p99 17.4667 ms、最大321.9072 ms、1 core比CPU 1.784%、shutdown 16.4831 msだった。UIではA反映と残留なしを確認したが、IMUは観測可能画面でなかったため未観測とした。refactor: Project_Demiの既存実機手順を参照し、Project_Demi本体や別bondを使わず、加速度`(0,0,1 g)`、Z軸`+1.0 rad/s`の純yaw fixtureをprobeへ追加した。run 05は15秒で1,364 reportを受理し、横移動あり、目視カクつきなし、終了後の移動・入力残りなしを確認した。run 05 intervalはp50 8.5060 ms、p95 16.6487 ms、p99 17.1433 ms、最大18.0418 ms。高いinterval errorはUI成功から消えたと推測せず、M9のS2 release制限として残す。失敗runを含む全試行と測定境界は`evidence/pro-imu-diagnostics-windows-20260801/SUMMARY.md`に記録した |
+| refactor-done | T10 | red: READMEはM7完了・Python fixture 45件のままで、probe command、diagnostics field、M8実機境界がなく、no-default通常依存を`serde_json`だけとする記述も現在の`cargo tree`と不一致だった。green: README、crate rustdoc、hardware matrixへM8の実装、probe feature/command、redaction、transport受理とUIの区別、run 04/05の実測値、S2 timing制限を反映し、READMEのprobe help commandを実行した。refactor: docs reviewでno-defaultの直接依存を`atomic-write-file`、`fs2`、`serde_json`、`tracing`へ修正し、productionではprobeのbinary境界がenvironment recordを発行することに合わせてdead-code理由を具体化した。公開`Controller::button`、`ProfileSummary`/`ProfileIdentityKind`/`inspect_profile`、non-exhaustive `ErrorKind::Trace`をreviewし、型付きmodel境界、値返しgetter、秘密値非保持、分類済みerrorを維持した。all/default/no-defaultのcheck/test/build、all/default clippy `-D warnings`、all-feature rustdoc、rustfmt、diff checkが成功した。Miri、Linux/macOS実機、cross compile、package、publishはM8対象外 |
 
 ## 7. 対象ファイル
 
@@ -257,6 +258,39 @@ probe feature の組合せは binary 有無と通常 library build の双方を�
 version、revision、command を記録する。T09 以外の hardware、network、cross compile、package、publish は
 実行しない。
 
+### 8.1 完了結果
+
+2026-08-01 JSTに次を実行し、すべて成功した。
+
+- `cargo +1.87.0 check --all-targets --all-features --locked`
+- `cargo +1.87.0 test --all-features --locked`
+- `cargo +1.87.0 test --locked`
+- `cargo +1.87.0 test --no-default-features --locked`
+- `cargo clippy --all-targets --all-features --locked -- -D warnings`
+- `cargo clippy --all-targets --locked -- -D warnings`
+- `cargo +1.87.0 build --all-features --locked`
+- `cargo +1.87.0 build --locked`
+- `cargo +1.87.0 build --no-default-features --locked`
+- `cargo +1.87.0 doc --all-features --no-deps --locked`
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo run --locked --features probe --bin swbt-probe -- help`
+- `cargo tree --no-default-features --edges normal --locked`
+
+実機ではWindows/Pro PeriodicのT09だけを実行した。Linux/macOS実機、cross compile、Miri、package、tag、
+GitHub release、crates.io publishはM8の対象外であり未実行とした。Bumble upstream PR / issueは作成して
+いない。public forkへの追加変更とbranch pushも不要だったため実行していない。
+
+### 8.2 self-review
+
+- S0/S1: 秘密値漏えい、profile破損、stale input、close hangを示す結果はなかった
+- S2: subscriber観測の8 ms interval揺れをM9のrelease blocker/制限判断へ残す
+- 公開API: `Controller::button`は`Button<M>`へ変換できないmodelを`UnsupportedInput`で拒否する。
+  profile summaryは検証後の閉じた値と件数だけを返し、raw document、path、address、keyを保持しない
+- docs/rustdoc: transport受理、subscriber観測、Switch UI観測を別の根拠として記述した。READMEの
+  no-default依存記述のずれは完了前に修正した
+- 未実行: Linux/macOS、cross compile、Miri、package/publishは対象外。単発実機runを信頼性へ拡張しない
+
 ## 9. 先送り事項
 
 - Linux/macOS adapter lifecycle と実機: M9
@@ -275,16 +309,16 @@ M9 の完了条件に残す。
 
 ## 11. 完了チェックリスト
 
-- [ ] T01–T10 が個別 commit で完了している
-- [ ] 3 model の standard/quaternion golden が pinned Python fixture と一致する
-- [ ] same-mode reset、ACK ordering、acceptance commit、session reset を検査する
-- [ ] diagnostics schema/version/event/field の契約を test と docs に固定する
-- [ ] status と event が同じ session/counter/lifecycle 状態から投影される
-- [ ] dynamic controller/profile/button 境界で fallback しない
-- [ ] probe の6 command、終了コード、feature 組合せを検査する
-- [ ] trace が有効な NDJSON で、秘密値、path、address、serial、raw packetを含まない
-- [ ] Pro実機 IMU/diagnostics/long-run と UI 観測を別々に記録する
-- [ ] default/no-default/all-feature の build/test/clippy/doc が成功する
-- [ ] README、crate rustdoc、hardware matrix、criteria note が実装と一致する
-- [ ] M9 の portability/release 項目に着手していない
-- [ ] Bumble upstream PR / issue を作成していない
+- [x] T01–T10 が個別 commit で完了している
+- [x] 3 model の standard/quaternion golden が pinned Python fixture と一致する
+- [x] same-mode reset、ACK ordering、acceptance commit、session reset を検査する
+- [x] diagnostics schema/version/event/field の契約を test と docs に固定する
+- [x] status と event が同じ session/counter/lifecycle 状態から投影される
+- [x] dynamic controller/profile/button 境界で fallback しない
+- [x] probe の6 command、終了コード、feature 組合せを検査する
+- [x] trace が有効な NDJSON で、秘密値、path、address、serial、raw packetを含まない
+- [x] Pro実機 IMU/diagnostics/long-run と UI 観測を別々に記録する
+- [x] default/no-default/all-feature の build/test/clippy/doc が成功する
+- [x] README、crate rustdoc、hardware matrix、criteria note が実装と一致する
+- [x] M9 の portability/release 項目に着手していない
+- [x] Bumble upstream PR / issue を作成していない

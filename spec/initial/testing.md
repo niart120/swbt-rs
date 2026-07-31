@@ -457,7 +457,7 @@ cargo test --features adapter-tests --test adapter_open -- --ignored
 
 | ID | OS | dongle | driver | console | firmware | model | reporting | identity | status |
 |---|---|---|---|---|---|---|---|---|---|
-| W11-CSR-S2-P-P | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.5.0（ユーザ報告） | Pro | Periodic | adapter-default | M5/M6で検証済み |
+| W11-CSR-S2-P-P | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.5.0（ユーザ報告） | Pro | Periodic | adapter-default | M5/M6/M8で検証済み |
 | W11-CSR-S2-P-D | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.5.0（ユーザ報告） | Pro | Direct | adapter-default | M6で検証済み |
 | W11-CSR-S2-L-P | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.5.0（ユーザ報告） | Joy-Con L | Periodic | adapter-default | M7で検証済み |
 | W11-CSR-S2-L-D | Windows 11 | CSR8510 A10 | WinUSB | Switch 2 | 22.5.0（ユーザ報告） | Joy-Con L | Direct | adapter-default | M7で検証済み |
@@ -481,6 +481,15 @@ stages:
 13. Direct
 
 「report accepted」と「Switch UI反映」を区別する。
+
+M8のPro Periodicは、stored-key reconnectから60秒のnon-neutral IMU、neutral report、close、profile
+完全一致、adapter reopenまでをmachine traceで確認した。別の15秒pure yaw runでは、ユーザがSwitch画面の
+横移動、目視カクつきなし、終了後の移動・入力残りなしを確認した。machine traceの
+`trace_elapsed_ns`はstatus投影後のsubscriber観測時刻で、無線送信完了や画面反映時刻ではない。両runの
+subscriber観測intervalは8 ms目標に対してp95 errorが1周期を超えたため、UI成功とは別にM9のS2
+release制限として扱う。詳細は
+[`unit_009 evidence`](../complete/unit_009/evidence/pro-imu-diagnostics-windows-20260801/SUMMARY.md)
+を参照する。
 
 ## 13. Profile compatibility tests
 

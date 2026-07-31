@@ -106,7 +106,7 @@ impl DiagnosticEvent {
         not(test),
         expect(
             dead_code,
-            reason = "M8 T08 wires the probe environment event into trace capture"
+            reason = "the probe emits its pre-session environment record at the binary boundary"
         )
     )]
     pub(crate) const fn environment(

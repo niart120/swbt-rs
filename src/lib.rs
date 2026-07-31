@@ -39,6 +39,22 @@
 //! reconnect after adding the Python-compatible NFC/IR MCU state `0x22` reply.
 //! Both models completed side-specific input, neutral close, adapter reopen, and
 //! profile model checks. These runs do not establish long-run reliability.
+//! Runtime state changes also emit schema version 1 `tracing` events on the
+//! `swbt::diagnostics` target. These events expose controller/reporting kinds,
+//! session and lifecycle state, report mode, committed IMU mode, parsed
+//! subcommands, accepted-report counters, classified worker failures, and
+//! disconnect reasons. They do not expose profile paths, Bluetooth addresses,
+//! key material, USB serials, raw packets, or error source chains. Accepted
+//! counters describe transport acceptance, not radio delivery or console UI
+//! effects. The feature-gated `swbt-probe` binary records this event stream as
+//! validated NDJSON and provides adapter, pairing, reconnect, and safe profile
+//! inspection commands.
+//! On the hardware above, one 60-second Pro Periodic IMU run completed neutral
+//! close, exact profile preservation, and adapter reopen. A separate 15-second
+//! constant-yaw run produced horizontal movement without visible stutter or
+//! residual input according to the operator. Subscriber-observed interval
+//! variation remains a release limitation; these runs do not establish a
+//! reliability rate.
 //! [`PairingProfile`] parses and
 //! writes complete schema v2 JSON
 //! without discarding unknown extension fields; filesystem update is not part
