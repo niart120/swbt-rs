@@ -25,7 +25,7 @@ use std::time::Duration;
 use crate::diagnostics::GamepadStatus;
 use crate::error::{Error, ErrorKind};
 use crate::input::{Button, InputState};
-use crate::model::{self, ControllerModel};
+use crate::model::{self, ButtonKind, ControllerModel};
 use crate::profile::{ControllerColors, FileProfileStore};
 use crate::reporting::{self, ReportingMode};
 use crate::runtime::{
@@ -61,7 +61,7 @@ pub struct Controller<M: ControllerModel, R: ReportingMode> {
     _runtime: Option<ControllerRuntime<M, R>>,
     config: ControllerConfig<M, R>,
     status_publisher: StatusPublisher<M>,
-    status_reader: StatusReader<M>,
+    status_reader: StatusReader<M, R>,
     _types: PhantomData<fn() -> (M, R)>,
     _not_sync: PhantomData<Cell<()>>,
 }
@@ -83,7 +83,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     }
 
     fn from_config(config: ControllerConfig<M, R>) -> Self {
-        let (status_publisher, status_reader) = status_projection();
+        let (status_publisher, status_reader) = status_projection::<M, R>();
 
         Self::from_parts(config, status_publisher, status_reader, None)
     }
@@ -91,7 +91,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     fn from_ready_runtime(
         config: ControllerConfig<M, R>,
         status_publisher: StatusPublisher<M>,
-        status_reader: StatusReader<M>,
+        status_reader: StatusReader<M, R>,
         runtime: ControllerRuntime<M, R>,
     ) -> Self {
         Self::from_parts(config, status_publisher, status_reader, Some(runtime))
@@ -100,7 +100,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     fn from_parts(
         config: ControllerConfig<M, R>,
         status_publisher: StatusPublisher<M>,
-        status_reader: StatusReader<M>,
+        status_reader: StatusReader<M, R>,
         runtime: Option<ControllerRuntime<M, R>>,
     ) -> Self {
         Self {
@@ -126,7 +126,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     /// Returns the latest runtime diagnostics without waiting for transport I/O.
     #[must_use]
     pub fn status(&self) -> GamepadStatus {
-        self.status_reader.status::<R>()
+        self.status_reader.status()
     }
 
     /// Returns the latest committed model-valid input without waiting for transport I/O.
@@ -139,6 +139,28 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     #[must_use]
     pub fn snapshot(&self) -> InputState<M> {
         self.status_reader.snapshot()
+    }
+
+    /// Converts a model-independent button identity into a button for this
+    /// controller model.
+    ///
+    /// When an active connection session exists, rejecting an unsupported
+    /// button also emits the stable `unsupported_button` diagnostics event for
+    /// that session. Calling this method does not open a transport or change
+    /// controller input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::UnsupportedInput`] when `kind` is not available on
+    /// model `M`.
+    pub fn button(&self, kind: ButtonKind) -> crate::Result<Button<M>> {
+        match Button::try_from(kind) {
+            Ok(button) => Ok(button),
+            Err(error) => {
+                self.status_publisher.record_unsupported_button(kind);
+                Err(error)
+            }
+        }
     }
 
     /// Opens the configured controller transport.

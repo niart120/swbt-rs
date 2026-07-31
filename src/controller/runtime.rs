@@ -4,6 +4,7 @@ use std::{marker::PhantomData, sync::mpsc::Receiver, time::Duration};
 use std::time::Instant;
 
 use crate::{
+    diagnostics::event::WorkerFailureCategory,
     error::{Error, ErrorKind},
     model::ControllerModel,
     protocol::SwitchHidProtocol,
@@ -391,7 +392,8 @@ where
         let thread =
             spawn_worker_thread(worker, clock, shutdown_receiver, command_receiver, waiter)
                 .map_err(|error| {
-                    self.status.fail("worker spawn failed");
+                    self.status
+                        .fail("worker spawn failed", WorkerFailureCategory::Internal);
                     map_worker_spawn_error(error)
                 })?;
 

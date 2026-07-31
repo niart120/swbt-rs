@@ -9,13 +9,13 @@ Bluetooth stack の実装基盤には
 
 ## 現在の状態
 
-このリポジトリは M7 の Joy-Con L/R Periodic/Direct まで実装済みです。Cargo package は
+このリポジトリは M8 の IMU、安定 diagnostics event、`swbt-probe` まで実装済みです。Cargo package は
 library target `swbt` を提供し、
 model-valid input、crate 内部の Switch HID protocol と runtime、公開 controller builder、
 descriptor-only adapter discovery を実装しています。
 
 - pure protocol は `swbt-python` 0.6.0 の固定 commit
-  `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` から生成した 45 fixture を直接検査します。
+  `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` から生成した 55 fixture を直接検査します。
 - `ControllerBuilder::build()` は adapter や worker を開始せず、profile path 未指定なら
   一時 controller、既存 path なら controller model を検査した Configured controller を返します。
 - `press()`、`release()`、`tap()`、`neutral()`、Periodic `apply()`、Direct `send()` を
@@ -73,6 +73,12 @@ descriptor-only adapter discovery を実装しています。
   profile検査を通過しました。人手観測ではJoy-Con LのD-pad、L+ZL、SL+SR、left stickと、
   Joy-Con RのABXY、R+ZR、SL+SR、right stickが反映され、neutral後の入力残りはありませんでした。
   修正・診断途中のrunを含むため、長期信頼性や成功率の根拠にはしません。
+- M8 では3 modelのstandard/quaternion IMU fixture、version 1の安定diagnostics event、秘密値を
+  出さないprofile検査と`swbt-probe`を追加しました。Pro Periodicの60秒runは5,343件の
+  non-neutral report、neutral close、profile完全一致、adapter reopenを確認しました。別の15秒
+  pure yaw runではSwitch画面の横移動、目視カクつきなし、終了後の移動・入力残りなしを確認しました。
+  subscriber観測intervalのp95はそれぞれ17.0223 msと16.6487 msで、8 ms目標に対する揺れは
+  M9のrelease制限として残しています。単発runを信頼性や成功率の根拠にはしません。
 
 ## Pro Periodic 実機 runner
 
@@ -157,6 +163,33 @@ neutral、close、adapter reopen、profile model、反対側model拒否を検査
 確認します。標準出力はschema `swbt.m7.joycon-profile` version 1のNDJSONで、path、raw profile、
 peer address、key materialは出力しません。UI結果は別recordにします。
 
+## diagnosticsとswbt-probe
+
+runtimeは`swbt::diagnostics` targetへschema `swbt.diagnostics` version 1の`tracing` eventを出します。
+session、lifecycle、report mode、committed IMU mode、subcommand、transport受理数、切断理由、分類済み
+worker failureを記録し、profile path、Bluetooth address、link key、USB serial、raw packet、error source
+chainは安定fieldへ含めません。受理数はtransportがreportを受理した回数であり、無線到達やSwitch画面の
+変化を証明しません。
+
+`probe` featureは`bumble`を含み、`swbt-probe` binaryを有効にします。主な入口は次のとおりです。
+
+```powershell
+cargo run --locked --features probe --bin swbt-probe -- adapters
+cargo run --locked --features probe --bin swbt-probe -- open --adapter usb:0
+cargo run --locked --features probe --bin swbt-probe -- profile inspect .\profile.json
+cargo run --locked --features probe --bin swbt-probe -- profile verify .\profile.json
+cargo run --locked --features probe --bin swbt-probe -- pair --controller pro --profile .\new-profile.json --trace .\pair-trace.ndjson
+cargo run --locked --features probe --bin swbt-probe -- reconnect --controller pro --profile .\profile.json --trace .\reconnect-trace.ndjson
+```
+
+`pair`のprofileと全接続commandのtraceはcreate-newで、既存fileを上書きしません。controllerは
+`pro`、`joycon-l`、`joycon-r`、reconnectのreportingは`periodic`または`direct`です。Pro Periodic
+reconnectだけは`--imu-seconds 1..3600`を受け、固定IMU入力、neutral report、close、profile不変、
+adapter reopenを検査します。traceの`trace_elapsed_ns`はstatus投影後にsubscriberがeventを観測した
+時刻であり、無線送信完了時刻ではありません。実機runと測定境界は
+[`spec/complete/unit_009/evidence/pro-imu-diagnostics-windows-20260801/SUMMARY.md`](spec/complete/unit_009/evidence/pro-imu-diagnostics-windows-20260801/SUMMARY.md)
+に記録しています。
+
 ## 開発
 
 MSRV は Rust 1.87 です。現在のローカル確認は次の command で実行できます。
@@ -173,9 +206,9 @@ cargo build --all-features --locked
 git diff --check
 ```
 
-`cargo tree --no-default-features --edges normal --locked` の通常依存は `serde_json` の
-依存木だけで、Bumble を含みません。selected Miri は nightly の `miri` component を
-導入した環境で次の command を実行します。
+`cargo tree --no-default-features --edges normal --locked` の直接依存は `atomic-write-file`、
+`fs2`、`serde_json`、`tracing` で、Bumble と `rusb` を含みません。selected Miri は nightly の
+`miri` component を導入した環境で次の command を実行します。
 
 ```powershell
 cargo +nightly miri test --lib --no-default-features --locked protocol::

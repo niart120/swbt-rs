@@ -1,0 +1,1 @@
+{"adapter_reopened":true,"controller_kind":"pro","event":"connection_completed","imu_apply_command_latency_ns":15100,"imu_non_neutral_reports_accepted":1364,"imu_run_seconds":15,"neutral_close":true,"neutral_reports_accepted":1,"operation":"reconnect","profile_unchanged":true,"reporting_kind":"periodic","schema":"swbt.probe","schema_version":1,"shutdown_latency_ns":20247100}

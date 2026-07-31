@@ -85,7 +85,7 @@ const JOYCON_R_PACKET_EXPECTATION: ModelPacketExpectation = ModelPacketExpectati
 #[test]
 fn pro_periodic_reaches_ready_and_emits_typed_then_neutral_input() {
     let (transport, trace) = VirtualClassicTransport::new::<Pro>();
-    let (status, reader) = status_projection();
+    let (status, reader) = status_projection::<Pro, Periodic>();
     let protocol = SwitchHidProtocol::<Pro>::new(None, DEVICE_INFO_ADDRESS);
     let mut worker = WorkerCore::new_periodic_with_status(
         protocol,
@@ -118,13 +118,13 @@ fn pro_periodic_reaches_ready_and_emits_typed_then_neutral_input() {
                 }
             }
         }
-        if reader.status::<Periodic>().lifecycle == LifecycleState::Ready {
+        if reader.status().lifecycle == LifecycleState::Ready {
             break;
         }
         clock.advance(STEP);
     }
 
-    let status = reader.status::<Periodic>();
+    let status = reader.status();
     assert_eq!(status.lifecycle, LifecycleState::Ready);
     assert!(status.connected);
     assert_eq!(status.report_mode, Some(0x30));
@@ -189,10 +189,7 @@ fn pro_periodic_reaches_ready_and_emits_typed_then_neutral_input() {
     };
     assert!(completion.performed());
     assert!(interrupted.is_none());
-    assert_eq!(
-        reader.status::<Periodic>().lifecycle,
-        LifecycleState::Closed
-    );
+    assert_eq!(reader.status().lifecycle, LifecycleState::Closed);
 
     let trace = lock(&trace);
     let last_input = trace
@@ -239,7 +236,7 @@ fn same_pro_profile_reconnects_periodic_then_direct_without_reporting_state_leak
             VirtualReconnectDirection::Active,
             profile_path.clone(),
         );
-    let (periodic_status, periodic_reader) = status_projection();
+    let (periodic_status, periodic_reader) = status_projection::<Pro, Periodic>();
     let mut periodic_worker = WorkerCore::new_periodic_with_status(
         SwitchHidProtocol::<Pro>::new(None, DEVICE_INFO_ADDRESS),
         Box::new(periodic_transport),
@@ -296,7 +293,7 @@ fn same_pro_profile_reconnects_periodic_then_direct_without_reporting_state_leak
         VirtualReconnectDirection::Active,
         profile_path.clone(),
     );
-    let (direct_status, direct_reader) = status_projection();
+    let (direct_status, direct_reader) = status_projection::<Pro, Direct>();
     let mut direct_worker = WorkerCore::new_direct_with_status(
         SwitchHidProtocol::<Pro>::new(None, DEVICE_INFO_ADDRESS),
         Box::new(direct_transport),
@@ -467,7 +464,7 @@ where
             VirtualReconnectDirection::Active,
             profile_path.clone(),
         );
-    let (periodic_status, periodic_reader) = status_projection();
+    let (periodic_status, periodic_reader) = status_projection::<M, Periodic>();
     let mut periodic_worker = WorkerCore::new_periodic_with_status(
         SwitchHidProtocol::<M>::new(None, DEVICE_INFO_ADDRESS),
         Box::new(periodic_transport),
@@ -525,7 +522,7 @@ where
         VirtualReconnectDirection::Active,
         profile_path.clone(),
     );
-    let (direct_status, direct_reader) = status_projection();
+    let (direct_status, direct_reader) = status_projection::<M, Direct>();
     let mut direct_worker = WorkerCore::new_direct_with_status(
         SwitchHidProtocol::<M>::new(None, DEVICE_INFO_ADDRESS),
         Box::new(direct_transport),
@@ -607,7 +604,7 @@ where
 
 fn run_reconnect_case(direction: VirtualReconnectDirection, expected_swbt_role: u8) {
     let (transport, trace) = VirtualClassicTransport::new_reconnect::<Pro>(direction);
-    let (status, reader) = status_projection();
+    let (status, reader) = status_projection::<Pro, Direct>();
     let mut worker = WorkerCore::new_direct_with_status(
         SwitchHidProtocol::<Pro>::new(None, DEVICE_INFO_ADDRESS),
         Box::new(transport),
@@ -658,7 +655,7 @@ enum VirtualReconnectDirection {
 
 fn run_periodic_case<M: ControllerModel>(expected: ModelPacketExpectation) {
     let (transport, trace) = VirtualClassicTransport::new::<M>();
-    let (status, reader) = status_projection();
+    let (status, reader) = status_projection::<M, Periodic>();
     let mut worker = WorkerCore::new_periodic_with_status(
         SwitchHidProtocol::<M>::new(None, DEVICE_INFO_ADDRESS),
         Box::new(transport),
@@ -701,7 +698,7 @@ fn run_periodic_case<M: ControllerModel>(expected: ModelPacketExpectation) {
 
 fn run_direct_case<M: ControllerModel>(expected: ModelPacketExpectation) {
     let (transport, trace) = VirtualClassicTransport::new::<M>();
-    let (status, reader) = status_projection();
+    let (status, reader) = status_projection::<M, Direct>();
     let mut worker = WorkerCore::new_direct_with_status(
         SwitchHidProtocol::<M>::new(None, DEVICE_INFO_ADDRESS),
         Box::new(transport),
@@ -736,7 +733,7 @@ fn run_direct_case<M: ControllerModel>(expected: ModelPacketExpectation) {
 
 fn run_resilience_case(scenario: VirtualScenario) {
     let (transport, trace) = VirtualClassicTransport::new_with_scenario::<Pro>(scenario);
-    let (status, reader) = status_projection();
+    let (status, reader) = status_projection::<Pro, Direct>();
     let mut worker = WorkerCore::new_direct_with_status(
         SwitchHidProtocol::<Pro>::new(None, DEVICE_INFO_ADDRESS),
         Box::new(transport),
@@ -774,13 +771,13 @@ fn run_resilience_case(scenario: VirtualScenario) {
             panic!("peer disconnect remains a recoverable worker event");
         };
         assert_command_successes(&mut progress);
-        if reader.status::<Direct>().lifecycle == LifecycleState::Open {
+        if reader.status().lifecycle == LifecycleState::Open {
             break;
         }
         clock.advance(STEP);
     }
-    assert_eq!(reader.status::<Direct>().lifecycle, LifecycleState::Open);
-    assert!(!reader.status::<Direct>().connected);
+    assert_eq!(reader.status().lifecycle, LifecycleState::Open);
+    assert!(!reader.status().connected);
 
     commands.push(RuntimeCommand::Pair {
         timeout: CONNECTION_TIMEOUT,
@@ -812,7 +809,7 @@ fn run_resilience_case(scenario: VirtualScenario) {
 
 fn drive_until_ready<M, R>(
     worker: &mut WorkerCore<M, R>,
-    reader: &StatusReader<M>,
+    reader: &StatusReader<M, R>,
     clock: &mut ManualClock,
     shutdown: &mut ShutdownLatch,
     commands: &mut QueuedCommands<RuntimeCommand<M, R>>,
@@ -835,20 +832,20 @@ fn drive_until_ready<M, R>(
                 }
             }
         }
-        if reader.status::<R>().lifecycle == LifecycleState::Ready {
+        if reader.status().lifecycle == LifecycleState::Ready {
             break;
         }
         clock.advance(STEP);
     }
-    assert_eq!(reader.status::<R>().lifecycle, LifecycleState::Ready);
-    assert!(reader.status::<R>().connected);
-    assert_eq!(reader.status::<R>().report_mode, Some(0x30));
+    assert_eq!(reader.status().lifecycle, LifecycleState::Ready);
+    assert!(reader.status().connected);
+    assert_eq!(reader.status().report_mode, Some(0x30));
     assert!(pair_completed);
 }
 
 fn close_ready_worker<M, R>(
     worker: &mut WorkerCore<M, R>,
-    reader: &StatusReader<M>,
+    reader: &StatusReader<M, R>,
     clock: &ManualClock,
     shutdown: &mut ShutdownLatch,
     commands: &mut QueuedCommands<RuntimeCommand<M, R>>,
@@ -867,7 +864,7 @@ fn close_ready_worker<M, R>(
     };
     assert!(completion.performed());
     assert!(interrupted.is_none());
-    assert_eq!(reader.status::<R>().lifecycle, LifecycleState::Closed);
+    assert_eq!(reader.status().lifecycle, LifecycleState::Closed);
 }
 
 fn assert_common_virtual_trace(trace: &Arc<Mutex<VirtualTrace>>, expected_sessions: usize) {

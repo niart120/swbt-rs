@@ -7,7 +7,7 @@ use crate::{
     model::ControllerModel,
 };
 
-use super::{ControllerKind, LocalAddress};
+use super::{ControllerKind, LocalAddress, ProfileIdentityKind, ProfileSummary};
 
 const PROFILE_FORMAT: &str = "swbt.profile";
 const PROFILE_SCHEMA_VERSION: u64 = 2;
@@ -183,6 +183,33 @@ impl ProfileDocument {
     #[cfg(test)]
     pub(crate) const fn controller_kind(&self) -> ControllerKind {
         self.controller_kind
+    }
+
+    pub(super) fn summary(&self) -> ProfileSummary {
+        let identity_kind = match self.value["identity"]["kind"].as_str() {
+            Some("adapter-default") => ProfileIdentityKind::AdapterDefault,
+            Some("exp-local-address") => ProfileIdentityKind::LocalAddress,
+            _ => unreachable!("validated profile identity kind"),
+        };
+        let namespaces = self
+            .namespaces()
+            .expect("validated profile has key-store namespaces");
+        let bond_count = namespaces
+            .values()
+            .map(|peers| {
+                peers
+                    .as_object()
+                    .expect("validated profile namespace contains peer objects")
+                    .len()
+            })
+            .sum();
+        ProfileSummary::new(
+            PROFILE_SCHEMA_VERSION,
+            self.controller_kind,
+            identity_kind,
+            namespaces.len(),
+            bond_count,
+        )
     }
 
     fn field_count(&self) -> usize {

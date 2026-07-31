@@ -172,6 +172,7 @@ impl<M: ControllerModel> ReportSender<M> {
         if let Some(status) = self.status.as_ref() {
             status.set_sender_state(
                 self.committed.session.report_mode(),
+                self.committed.session.imu_mode() as u8,
                 self.input_reports_accepted,
                 self.replies_accepted,
             );

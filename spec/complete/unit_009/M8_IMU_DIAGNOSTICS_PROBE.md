@@ -1,0 +1,324 @@
+# M8 IMU、diagnostics、probe
+
+- 状態: **完了**
+- milestone: M8
+- branch: `feat/unit-009-m8-imu-diagnostics-probe`
+- 正本:
+  - `spec/initial/roadmap.md` 2、11
+  - `spec/initial/api.md` 6、14、15
+  - `spec/initial/architecture.md` 5、9、13、18、21
+  - `spec/initial/testing.md` 4、5、7、8、10、12、13
+- Python 基準断面:
+  - repository: `niart120/swbt-python`
+  - version: `0.6.0`
+  - revision: `84d2723b127f70fc78e12f4496f5c40af0ccfb0a`
+- Bumble fork:
+  - repository: `https://github.com/niart120/bumble-rs`
+  - branch: `fix/external-host-reader-lifecycle`
+  - revision: `b8c7cd625bc2ac2f58a4beb4ade1264426969819`
+  - public fork と branch push だけを許可範囲とし、upstream PR / issue は作成しない
+
+## 1. 目的
+
+既存の共通 IMU 型と protocol encoder を Pro Controller、Joy-Con L、Joy-Con R の固定 fixture で
+検査し、mode 変更と送信受理の順序を確定する。runtime の内部状態を version 付きの安定した
+diagnostics event へ投影し、接続調査に必要な lifecycle、session、subcommand、受理数、切断理由を、
+秘密情報や機器識別子を含めずに保存できるようにする。
+
+`swbt-probe` は adapter 列挙、open、pair、reconnect、profile inspect/verify を提供する。CLI 境界で
+`ControllerKind` を parse し、Pro/Joy-Con L/Joy-Con R の `run::<M>()` へ明示分岐する。probe の成功は
+transport と runtime の観測結果であり、Switch UI 反映の証拠として扱わない。
+
+## 2. 現状と Intent Delta
+
+M8 着手時点で次は実装・検査済みである。
+
+- 公開 `ImuFrame` / `ImuSamples`、raw/物理量変換、丸めと範囲検査
+- standard mode と quaternion mode `0x02`–`0x05`、same-mode reset、session reset
+- report sender の timer/IMU state acceptance commit と、`0x40` ACK 後の mode 反映
+- Pro の non-neutral IMU Python fixture と IMU unit test
+- nonblocking `GamepadStatus`、lifecycle、report mode、受理数、最終 subcommand、切断理由、
+  sanitized worker failure
+- runtime 内部の単調増加 session ID、session ごとの observed subcommand 集合、stale event 破棄
+- 公開 `AdapterInfo` と `list_adapters()`、typed profile の JSON read/write
+
+この既存 Green を新規実装として数えず、次の差分だけを TDD item にする。
+
+| 境界 | M8 着手時 | M8 完了条件 |
+|---|---|---|
+| IMU fixture | non-neutral は Pro のみ | 3 model の standard/quaternion golden と mode/ACK ordering を固定 fixture で検査 |
+| diagnostics | snapshot と内部 counter はあるが安定 event schema はない | version 付き event 名・field・意味を固定し、runtime session から発行 |
+| redaction | 個別 error/status は sanitized | trace 全体で path、address、key、serial、raw packet、source chain が出ないことを検査 |
+| dynamic boundary | typed controller と typed profile だけ | controller kind、profile metadata、unsupported button を model ごとに安全に判定 |
+| probe | binary target なし | 6 command、終了コード、safe NDJSON、typed dispatch、利用手順を実装 |
+| hardware | M5/M7 の個別 runner 証跡 | probe 経由の IMU/diagnostics trace、期限付き long-run、cleanup を記録 |
+
+### 2.1 release target と milestone 順序
+
+初期 roadmap の主依存列は M7 の後に M8 を置く一方、release target は diagnostics/probe を
+`0.1.0-alpha.2`、Joy-Con を `0.1.0-beta.1` に置いている。実装順は主依存列どおり M7→M8 とし、
+過去の alpha.2 相当機能を後から release したとは扱わない。M8 完了時には機能集合ごとの達成を記録し、
+実際に採用する version と publish 可否は M9 の release gate で決める。
+
+## 3. 対象範囲
+
+- 3 model の standard/quaternion IMU encoder fixture と ordering test
+- version 1 の安定 diagnostics event contract
+- lifecycle、session、report mode、subcommand、counter、disconnect、failure の event 投影
+- controller/reporting/package version/OS/architecture からなる安全な実行環境情報
+- dynamic controller kind と model-specific button の検証
+- 秘密値を返さない profile summary/verify 境界
+- `swbt-probe` の6 command、usage、終了コード、NDJSON trace
+- Pro Controller を使う Windows 実機 IMU/diagnostics/long-run 証跡
+- README、crate rustdoc、probe help、hardware matrix、beta.1 criteria note
+
+## 4. 対象外
+
+- IMU fusion、姿勢推定、補間、calibration 推定、sensor polling API
+- `GamepadStatus` field の追加や既存公開型の破壊的変更
+- raw HID/HCI packet trace と raw profile dump
+- profile の編集、移行、秘密値表示
+- 自動再接続、daemon、対話 UI、複数 controller 同時操作
+- Joy-Con 左右同時接続、`JoyConPair`
+- Linux/macOS 実機、cross compile、package、version 更新、tag、publish: M9
+- Python repository の変更
+- Bumble upstream PR / issue
+
+## 5. 振る舞い仕様
+
+### 5.1 IMU と mode ordering
+
+- `ImuFrame` / `ImuSamples` は model 非依存の公開物理量を維持する
+- encoder は `M::SPEC.protocol` と session の IMU mode から 36-byte block と次状態を計算する
+- Pro/Joy-Con L/Joy-Con R の standard と quaternion mode は pinned Python fixture と一致する
+- 同じ quaternion mode の再指定は encoding state を初期状態へ戻す
+- `0x40` reply は旧 committed mode の input prefix を使い、ACK の transport 受理後だけ新 mode を commit する
+- input report の transport reject では timer と IMU encoding state を進めない
+- new session は IMU mode と encoding state を既定値へ戻す
+
+### 5.2 安定 diagnostics event
+
+安定 event は `tracing` target `swbt::diagnostics` だけに出す。event record は次を契約とする。
+
+- `schema`: `swbt.diagnostics`
+- `schema_version`: `1`
+- `event`: `environment`、`session_started`、`lifecycle_changed`、`subcommand_observed`、
+  `report_tx_accepted`、`reply_tx_accepted`、`session_ended`、`worker_failed`、
+  `unsupported_button` のいずれか
+- 共通 field: `controller_kind`、`reporting_kind`。runtime event は `session_id` も持つ
+- event 固有 field: lifecycle、report mode、committed IMU mode、subcommand ID、累積受理数、
+  disconnect reason、failure category、button kind
+
+`environment` は session 開始前に発行し、package version、target OS、target architecture を持つ。
+event field は machine-readable な固定名と値を使い、人向け error message を契約にしない。`session_id` は
+process 内の単調増加値で、Bluetooth address や profile identity から生成しない。counter event は受理ごとに
+記録できるが、入力内容や raw bytes は記録しない。`GamepadStatus` は既存 field を維持し、安定 event と同じ
+internal status projection から値を得る。
+
+### 5.3 environment と redaction
+
+probe 開始 record に package version、target OS、target architecture、controller kind、reporting kind を含める。
+次は stdout、stderr、trace、error の安定 field に含めない。
+
+- adapter selector、USB bus/address/port、USB serial
+- profile path、profile JSON、peer/local Bluetooth address、link key
+- raw HID/HCI packet、入力した stick/IMU の値
+- Bumble error の source chain と debug 表現
+
+trace writer は `swbt::diagnostics` target だけを収集する。既存 transport debug event を混在させない。
+v1 は raw packet opt-in を実装しない。NDJSON は各行を独立した JSON object とし、中断後も完了行を読める。
+probe の writer は検査済み event に `trace_elapsed_ns` を追加する。この値は trace 開始から subscriber が
+event を観測するまでの単調増加時間であり、無線送信完了時刻や Switch 側の受信時刻ではない。
+
+### 5.4 dynamic controller/profile 境界
+
+CLI の controller 名は `pro`、`joycon-l`、`joycon-r` だけを受け付ける。未知値を Pro へ fallback しない。
+parse 後は入口の `match` で `run::<ProController>()`、`run::<JoyConL>()`、`run::<JoyConR>()` へ分岐し、
+core runtime に untyped controller state を持ち込まない。
+
+動的な `ButtonKind` は対象 model の typed button へ変換できない場合、`UnsupportedInput` と
+`unsupported_button` event を返す。profile inspect/verify は schema と controller kind を検査するが、
+秘密値を保持する document 自体を公開しない。summary が返してよい値は schema version、controller kind、
+identity kind、namespace 数、bond 数に限定する。明示 Bluetooth address は表示しない。
+
+### 5.5 probe command と終了コード
+
+```text
+swbt-probe adapters
+swbt-probe open --adapter usb:0
+swbt-probe pair --controller pro --profile path --trace trace.jsonl
+swbt-probe reconnect --controller pro --profile path --trace trace.jsonl
+swbt-probe profile inspect path
+swbt-probe profile verify path
+```
+
+- 成功は終了コード `0`
+- adapter/controller/profile/runtime/trace の操作失敗は終了コード `1`
+- 未知 command、欠落/重複 option、未知 controller/mode は終了コード `2`
+- stdout は成功時の safe NDJSON、stderr は短い分類済み error とし、path/source chain を出さない
+- `adapters` は claim/open せず候補を列挙し、selector や serial を出力しない
+- `open` は指定 adapter の open/close と resource cleanup を検査する
+- `pair` は Periodic、`reconnect` は `--reporting periodic|direct` を受け、既定は Periodic とする
+- `pair` / `reconnect` は `usb:0` と60秒の接続期限を使う。任意の `--button` は Ready 後に100 msだけ
+  tapし、対象modelで非対応なら `UnsupportedInput` と `unsupported_button` eventを返してからcloseする
+- `pair` は既存 profile を上書きせず、`reconnect` は profile 不一致時に adapter を開かない
+- `--trace` は create-new とし、既存 trace を上書きしない
+- `reconnect --controller pro` の Periodic だけは `--imu-seconds 1..3600` を受ける。指定時は非中立 IMU
+  state を固定時間 commit し、少なくとも1 reportのtransport受理後に中立化して再度1 report以上の受理を
+  確認する。成功 record は実行秒数、apply command latency、各受理数、shutdown latency、profile bytes不変、
+  adapter再openを秘密値なしで返す。pair、Direct、Joy-Conへの指定はusage errorとする
+- `bumble`/probe feature なしの通常 library build と test を維持する
+
+### 5.6 hardware evidence
+
+Windows 11、CSR8510 A10、WinUSB、Switch 2 system version `22.5.0`（ユーザ報告）で Pro Controller の
+stored-key reconnect を行う。runner/probe は timeout と run index を明示し、次を別 record で残す。
+
+- machine: Ready、IMU mode、non-neutral IMU report 受理、session/counter/subcommand/reason、neutral close、
+  adapter reopen、profile bytes 不変、trace parse/redaction
+- timing: 8 ms 周期のsubscriber観測 timestamp、p50/p95/p99/max interval error、overrun、command/reply latency、
+  idle CPU、shutdown latency
+- UI: button/stick/IMU の観測と残留入力なし。machine evidence から推測しない
+
+long-run は明示した固定時間で実行し、その一回を成功率や production reliability の証拠にしない。
+hardware 実行前にユーザへ準備を依頼し、各 UI 観測を受け取るまで `ui_observed` を未確認とする。
+
+## 6. TDD Test List
+
+| status | item | type | layer | notes |
+|---|---|---|---|---|
+| refactor-done | T01 3 model の standard/quaternion IMU golden と mode/ACK ordering を固定 fixture で検査する | new/regression | protocol/integration | 既存 common IMU を再利用 |
+| refactor-done | T02 version 1 diagnostics event の名前、field、値、redaction を検査する | new | unit | raw packetなし |
+| refactor-done | T03 runtime session から lifecycle/subcommand/counter/disconnect/failure event を発行する | new/regression | runtime | statusと同じ投影 |
+| refactor-done | T04 profile JSON を動的に検査し、秘密値を含まない summary を返す | new | public boundary | cross-model情報を保持 |
+| refactor-done | T05 probe の profile inspect/verify、usage、終了コード、safe output を検査する | new | CLI integration | hardwareを開かない |
+| refactor-done | T06 probe の adapters/open と feature-disabled build/error を検査する | new | CLI/package | fake境界を使う |
+| refactor-done | T07 pair/reconnect の3 model dispatch、reporting選択、unsupported button、fallback禁止を検査する | new | CLI/runtime | fake/virtual transport |
+| refactor-done | T08 trace writer が diagnostics target だけを有効な NDJSON へ保存し、秘密値を除外する | new | integration | create-new |
+| refactor-done | T09 Pro実機で IMU/diagnostics/long-run trace と期限付き cleanup を記録する | new | hardware | machine/UI分離 |
+| refactor-done | T10 completion gate、公開文書、criteria note、self-review を確定する | new | docs/package | releaseはしない |
+
+### 6.1 TDD cycle evidence
+
+各 item の red、green、refactor、targeted command、commit をここへ追記する。既存実装が追加 test を
+最初から満たした場合は regression-green と記録し、失敗を捏造しない。hardware item は自動 test と
+machine evidence を先に確定し、人手 UI 観測を別に追記する。
+
+| phase | item | evidence |
+|---|---|---|
+| refactor-done | T01 | red: Rust fixture consumer に Joy-Con L/R の standard と quaternion `0x02`–`0x05` の10 caseを要求すると、固定fixtureがProの5 caseだけだったためcase総数45対55で失敗した。green: cleanなpinned Python 0.6.0 / revision `84d2723...` のgeneratorを3 modelへ一般化し、55 caseを再生成した。Rustは3 model×standard/quaternionをbyte-for-byte検査して6 passed、IMU encoder 8、全model mode/same-mode reset 11、reply reject後のsession未commit/retry 1、fixture provenance 2が成功した。既存testにより`0x40` replyは旧prefixで作られ、transport受理後だけmodeをcommitすることも維持した。refactor: generatorのprofile反復とRust consumerのIMU suffix判定へ重複を集約。production code変更なし |
+| refactor-done | T02 | red: version、target、9 event、field/value、禁止fieldを要求するunit testはevent module/型/定数が未定義のため`E0432`で失敗した。green: `swbt.diagnostics` schema version 1、`swbt::diagnostics` target、`environment`と8 runtime eventをclosed enumで定義した。controller/reporting/lifecycle/button/failureは固定文字列、session/counter/reasonは数値だけを受け、path/address/key/serial/raw packet/error source/messageをpayloadへ渡す入口を持たない。exact record/redaction/failure categoryの3 tests、default all-target clippy `-D warnings`、rustfmt、diff checkが成功。stable eventはdefault runtimeでも発行するため`tracing`を非optionalにした。refactor: 共通runtime contextとfield builderへschema/controller/reporting/sessionの重複を集約。T03 wiring前の未使用lintだけ理由付き`expect`とし、T03で除去する |
+| refactor-done | T03 | red: fake Direct worker の session開始からReady、input、disconnectまでの安定event順とfieldを要求すると、inject可能なevent emitterが未定義のため`E0432`で失敗した。green: status projectionへ非0 session IDを渡し、session start、lifecycle、parse済みsubcommand、transport受理後のinput/reply累積数、disconnect reasonを同じstate更新点から発行した。実workerの10 event順、session/controller/reporting、counter、reasonを1 testで検査し、sourceに`T26_SECRET`を持つterminal transport failureは`transport` category、failed lifecycle/session end、既存sanitized statusだけを返す別testも成功した。callbackはstatus lock解放後に呼ぶ。`GamepadStatus` fieldは変更していない。refactor: module全体の一時dead-code expectationを除去し、status readerの`R` markerとpublisherの単相化context関数によりcontroller/reporting kindを`M`/`R`から導出した。全feature library 299 passed / 2 ignored、default/all-feature clippy `-D warnings`、rustfmt、diff checkが成功 |
+| refactor-done | T04 | red: 外部crate視点で`ProfileSummary`、`ProfileIdentityKind`、`inspect_profile`を要求すると3 public itemが未定義のため`E0432`で失敗した。green: schema v2の完全validation後にschema version、controller kind、address-free identity kind、namespace/bond件数だけをコピーするnon-exhaustive summaryを追加した。raw JSON、unknown field、namespace/peer address、key、pathはsummaryに保持しない。valid local-address profile、malformed file、missing fileを2 integration testsで検査し、ErrorKindは`InvalidProfile`/`ProfileNotFound`、Display/Debugは秘密pathなしとなった。refactor: dynamic inspectionを`profile::summary`へ分離し、秘密を保持する`ProfileDocument`はcrate-privateのままにした。公開fieldなし、getterは値返し、filesystem error sourceは既存chainへ保持する。all-feature test 2、default/no-default check、all-feature clippy `-D warnings`、all-feature rustdoc、rustfmt、diff checkが成功 |
+| refactor-done | T05 | red: `swbt-probe` の profile inspect/verify、usage、終了コード、秘密値非表示を要求するCLI integration testを追加すると、Cargo packageに`probe` featureがなくcommandを実行できなかった。green: `probe` featureでだけ構築するbinaryを追加し、profile inspectはschema version、controller kind、identity kind、namespace/bond件数、verifyはcontroller kindとvalidだけをversion 1 NDJSONへ出力する。malformed/missing profileは分類済みerrorで終了1、欠落・過剰・未知引数はusage errorで終了2、helpは終了0とした。3 integration testsが成功し、profile path、Bluetooth address、link keyはstdout/stderrに出ない。featureなしでは同test targetが0件で成功し、binaryを通常buildへ含めない。refactor: parse、実行、record生成、writerを分離した。gateで検出した既存adapter selectorの不要なclosure参照は別commitで除去し、selector正常/異常2 testsとall-feature clippy `-D warnings`、rustfmt、diff checkが成功した。hardwareは開いていない |
+| refactor-done | T06 | red: `open --adapter` の分類済み失敗と厳密な引数検査を要求すると、command未実装のため終了1ではなくusageの終了2になった。green: `adapters` は1個のversion 1 NDJSONにcandidate件数とVID/PIDだけを出し、selector、serial、bus、portを出さない。`open` はephemeralなDirect Pro controllerを構築し、open後の`close_without_neutral()`成功までを1操作として扱い、selectorを成功/error recordへ出さない。CLI integration 4 testsとbinary fake 3 testsが成功した。fakeは安全なadapter列挙、selector非表示、open→close順とclose失敗の伝播を固定する。実USB descriptor-only列挙はCSR8510 A10を1件返し、出力は件数とVID/PIDだけだった。`cargo check --no-default-features --locked`は成功し、同条件で`--bin swbt-probe`を指定すると`probe` feature必須のCargo errorで停止した。refactor: platform操作を`SystemBackend`、open/close順を`ProbeController`境界へ分離した。実adapterのclaim/openはこのitemでは未実行。all-feature clippy `-D warnings`、rustfmt、diff checkが成功 |
+| refactor-done | T07 | red: `Controller::button(ButtonKind)`の型付き動的境界を要求するとmethod未定義の`E0599`となり、有効なpair/reconnect CLIは未知commandとして操作失敗の終了1ではなくusageの終了2になった。green: controller名を入口で`Pro`/`JoyConL`/`JoyConR`へ、reconnect reportingを`Periodic`/`Direct`へ分岐し、pair 3経路とreconnect 6経路がそれぞれ`Controller<M, R>`を構築する。fake backend 5 tests、CLI integration 5 tests、button contract 4 testsが成功した。未知controller/reportingとpairへのreporting指定は終了2で、Proへfallbackしない。既存pair targetは`ProfileAlreadyExists`、missing reconnect profileは`ProfileNotFound`となりadapterを開かず、path/traceをerrorへ出さない。任意のdynamic buttonはReady後に`Controller::button`で変換し、非対応なら`UnsupportedInput`を返す。有効sessionのstatus projectionはsession ID付き`unsupported_button` eventを発行し、session前は発行しないことをunit testで確認した。refactor: parse、model dispatch、platform backend、接続後button、primary errorを保つcloseを分離した。trace writerと実pair/reconnectはT08/T09へ先送り。all-feature rustdoc、all-feature clippy `-D warnings`、rustfmt、diff checkが成功 |
+| refactor-done | T08 | red: 既存traceを指定してpair preflightを実行するとtrace errorではなく`ProfileAlreadyExists`となり、trace内容を検査していなかった。green: `--trace`をcreate-newで操作前に開き、process global subscriberでworker threadを含む`swbt::diagnostics` targetだけを収集する。既存traceは1 byteも変更せず`Trace` error、new traceはprofile preflight失敗時にもenvironment 1行を残した。各eventはschema version 1のclosed field集合と照合し、unknown field/debug値を持つrecordは書かずtrace失敗にする。各JSONをメモリ上で完成後に改行付きでwrite/flushし、欠落したoptional report mode/disconnect reasonは`null`へ正規化する。別targetのsecret event除外、unknown diagnostics fieldのfail-closed、独立JSON 2行をbinary unit 2 tests、create-new/redactionをCLI integration 1 testで確認し、probe CLI 6 tests、binary 7 testsが成功した。refactor: writer、typed visitor、schema検査、flush状態をprobe専用`trace` moduleへ分離した。新規dependencyなし。実runtime eventの複数thread記録はT09で確認する。all-feature rustdoc、all-feature clippy `-D warnings`、rustfmt、diff checkが成功 |
+| refactor-done | T09 | red: 旧Pro profileのreconnectは認証時のreason `0x05`で失敗し、fresh Pair後の初回reconnectは60秒でtimeoutした。green: operator setupを更新したrun 04はReady後60秒のnon-neutral IMUを5,343 report受理し、neutral report、neutral close、profile bytes不変、adapter reopenを確認した。trace 5,411行はclosed schemaでparseでき、禁止fieldなし。subscriber観測intervalはp50 8.5495 ms、p95 17.0223 ms、p99 17.4667 ms、最大321.9072 ms、1 core比CPU 1.784%、shutdown 16.4831 msだった。UIではA反映と残留なしを確認したが、IMUは観測可能画面でなかったため未観測とした。refactor: Project_Demiの既存実機手順を参照し、Project_Demi本体や別bondを使わず、加速度`(0,0,1 g)`、Z軸`+1.0 rad/s`の純yaw fixtureをprobeへ追加した。run 05は15秒で1,364 reportを受理し、横移動あり、目視カクつきなし、終了後の移動・入力残りなしを確認した。run 05 intervalはp50 8.5060 ms、p95 16.6487 ms、p99 17.1433 ms、最大18.0418 ms。高いinterval errorはUI成功から消えたと推測せず、M9のS2 release制限として残す。失敗runを含む全試行と測定境界は`evidence/pro-imu-diagnostics-windows-20260801/SUMMARY.md`に記録した |
+| refactor-done | T10 | red: READMEはM7完了・Python fixture 45件のままで、probe command、diagnostics field、M8実機境界がなく、no-default通常依存を`serde_json`だけとする記述も現在の`cargo tree`と不一致だった。green: README、crate rustdoc、hardware matrixへM8の実装、probe feature/command、redaction、transport受理とUIの区別、run 04/05の実測値、S2 timing制限を反映し、READMEのprobe help commandを実行した。refactor: docs reviewでno-defaultの直接依存を`atomic-write-file`、`fs2`、`serde_json`、`tracing`へ修正し、productionではprobeのbinary境界がenvironment recordを発行することに合わせてdead-code理由を具体化した。公開`Controller::button`、`ProfileSummary`/`ProfileIdentityKind`/`inspect_profile`、non-exhaustive `ErrorKind::Trace`をreviewし、型付きmodel境界、値返しgetter、秘密値非保持、分類済みerrorを維持した。all/default/no-defaultのcheck/test/build、all/default clippy `-D warnings`、all-feature rustdoc、rustfmt、diff checkが成功した。Miri、Linux/macOS実機、cross compile、package、publishはM8対象外 |
+
+## 7. 対象ファイル
+
+- `src/input/imu.rs`
+- `src/protocol/imu.rs`、`src/protocol/tests/imu.rs`
+- `src/diagnostics.rs` または `src/diagnostics/`
+- `src/runtime/status.rs`、`src/runtime/session.rs`、`src/runtime/connection.rs`
+- `src/profile/`
+- `src/bin/swbt-probe.rs` と probe 専用内部 module
+- `tests/fixtures/python-v0.6.0/`、`tests/imu_contract.rs`
+- probe/diagnostics の unit・integration test
+- `Cargo.toml`、`Cargo.lock`
+- README、crate rustdoc、`spec/initial/testing.md`
+- `evidence/` の secret-free 実機証跡
+- 本作業仕様
+
+公開 API の追加は profile の safe inspection に必要な最小境界だけとする。公開型を追加する場合は
+`rust-api-boundary-review` と `rustdoc-style` で error、所有権、非網羅性、example を検査する。
+
+## 8. 検証
+
+TDD item ごとに同じ targeted command で red/green を確認する。完了 gate:
+
+```powershell
+cargo +1.87.0 check --all-targets --all-features --locked
+cargo +1.87.0 test --all-features --locked
+cargo +1.87.0 test --locked
+cargo +1.87.0 test --no-default-features --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo clippy --all-targets --locked -- -D warnings
+cargo +1.87.0 build --all-features --locked
+cargo +1.87.0 build --locked
+cargo +1.87.0 build --no-default-features --locked
+cargo +1.87.0 doc --all-features --no-deps --locked
+cargo fmt --check
+git diff --check
+```
+
+probe feature の組合せは binary 有無と通常 library build の双方を検査する。Python reader を使う場合は
+version、revision、command を記録する。T09 以外の hardware、network、cross compile、package、publish は
+実行しない。
+
+### 8.1 完了結果
+
+2026-08-01 JSTに次を実行し、すべて成功した。
+
+- `cargo +1.87.0 check --all-targets --all-features --locked`
+- `cargo +1.87.0 test --all-features --locked`
+- `cargo +1.87.0 test --locked`
+- `cargo +1.87.0 test --no-default-features --locked`
+- `cargo clippy --all-targets --all-features --locked -- -D warnings`
+- `cargo clippy --all-targets --locked -- -D warnings`
+- `cargo +1.87.0 build --all-features --locked`
+- `cargo +1.87.0 build --locked`
+- `cargo +1.87.0 build --no-default-features --locked`
+- `cargo +1.87.0 doc --all-features --no-deps --locked`
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo run --locked --features probe --bin swbt-probe -- help`
+- `cargo tree --no-default-features --edges normal --locked`
+
+実機ではWindows/Pro PeriodicのT09だけを実行した。Linux/macOS実機、cross compile、Miri、package、tag、
+GitHub release、crates.io publishはM8の対象外であり未実行とした。Bumble upstream PR / issueは作成して
+いない。public forkへの追加変更とbranch pushも不要だったため実行していない。
+
+### 8.2 self-review
+
+- S0/S1: 秘密値漏えい、profile破損、stale input、close hangを示す結果はなかった
+- S2: subscriber観測の8 ms interval揺れをM9のrelease blocker/制限判断へ残す
+- 公開API: `Controller::button`は`Button<M>`へ変換できないmodelを`UnsupportedInput`で拒否する。
+  profile summaryは検証後の閉じた値と件数だけを返し、raw document、path、address、keyを保持しない
+- docs/rustdoc: transport受理、subscriber観測、Switch UI観測を別の根拠として記述した。READMEの
+  no-default依存記述のずれは完了前に修正した
+- 未実行: Linux/macOS、cross compile、Miri、package/publishは対象外。単発実機runを信頼性へ拡張しない
+
+## 9. 先送り事項
+
+- Linux/macOS adapter lifecycle と実機: M9
+- package、version、tag、GitHub release、crates.io publish: M9
+- raw packet trace: v1 diagnostics の対象外。必要性と明示 opt-in を別 unit で判断
+- IMU fusion/姿勢推定: core protocol の対象外
+- production reliability と反復成功率: 単発 long-run では判定しない
+- Bumble upstream contribution: この作業では実施しない
+
+## 10. criteria note
+
+M8 完了時に、旧 `0.1.0-alpha.2` 対象の diagnostics/probe と、`0.1.0-beta.1` 対象の common IMU、
+Joy-Con を含む model fixture が揃う。ただし過去版を遡って公開せず、M8 単独を release-ready としない。
+limited Linux bring-up、dependency/license inventory、公開 API review、semver freeze 候補、package/publish は
+M9 の完了条件に残す。
+
+## 11. 完了チェックリスト
+
+- [x] T01–T10 が個別 commit で完了している
+- [x] 3 model の standard/quaternion golden が pinned Python fixture と一致する
+- [x] same-mode reset、ACK ordering、acceptance commit、session reset を検査する
+- [x] diagnostics schema/version/event/field の契約を test と docs に固定する
+- [x] status と event が同じ session/counter/lifecycle 状態から投影される
+- [x] dynamic controller/profile/button 境界で fallback しない
+- [x] probe の6 command、終了コード、feature 組合せを検査する
+- [x] trace が有効な NDJSON で、秘密値、path、address、serial、raw packetを含まない
+- [x] Pro実機 IMU/diagnostics/long-run と UI 観測を別々に記録する
+- [x] default/no-default/all-feature の build/test/clippy/doc が成功する
+- [x] README、crate rustdoc、hardware matrix、criteria note が実装と一致する
+- [x] M9 の portability/release 項目に着手していない
+- [x] Bumble upstream PR / issue を作成していない

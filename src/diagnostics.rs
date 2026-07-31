@@ -1,6 +1,8 @@
 use crate::model::ControllerKind;
 use crate::reporting::ReportingKind;
 
+pub(crate) mod event;
+
 /// Lifecycle state of a controller runtime.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

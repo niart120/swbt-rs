@@ -1,0 +1,1 @@
+{"adapter_reopened":null,"controller_kind":"pro","event":"connection_completed","imu_apply_command_latency_ns":null,"imu_non_neutral_reports_accepted":null,"imu_run_seconds":null,"neutral_close":true,"neutral_reports_accepted":null,"operation":"pair","profile_unchanged":null,"reporting_kind":"periodic","schema":"swbt.probe","schema_version":1,"shutdown_latency_ns":null}

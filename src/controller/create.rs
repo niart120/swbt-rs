@@ -260,7 +260,7 @@ where
 {
     let plan = plan.require_supported_backend(|config| backend.ensure_supported(config))?;
     let reopened = plan.persist_and_reopen(store)?;
-    let (status_publisher, status_reader) = status_projection();
+    let (status_publisher, status_reader) = status_projection::<M, R>();
     let mut attempt = backend.begin_attempt(status_publisher.clone());
     if let Err(primary) = attempt.open(&reopened.config) {
         return Err(with_cleanup_error(

@@ -7,6 +7,7 @@ use std::{
 
 use crate::{
     controller::input::{neutral_candidate, press_candidate, release_candidate, tap_plan},
+    diagnostics::event::WorkerFailureCategory,
     error::Error,
     input::{Button, InputState},
     model::ControllerModel,
@@ -623,7 +624,7 @@ impl<M: ControllerModel> WorkerCore<M, Periodic> {
         budget: WorkerBudget,
         observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
     ) -> Result<Self, SchedulerError> {
-        let (status, _reader) = status_projection();
+        let (status, _reader) = status_projection::<M, Periodic>();
         Self::new_periodic_with_status(protocol, transport, period, budget, observe_output, status)
     }
 
@@ -664,7 +665,7 @@ impl<M: ControllerModel> WorkerCore<M, Direct> {
         budget: WorkerBudget,
         observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
     ) -> Self {
-        let (status, _reader) = status_projection();
+        let (status, _reader) = status_projection::<M, Direct>();
         Self::new_direct_with_status(protocol, transport, budget, observe_output, status)
     }
 
@@ -762,7 +763,8 @@ where
         });
         self.connected = false;
         let snapshot = self.input.snapshot();
-        self.status.begin_session(self.lifecycle.state(), &snapshot);
+        self.status
+            .begin_session(session_id.non_zero(), self.lifecycle.state(), &snapshot);
         Ok(session_id)
     }
 
@@ -1328,7 +1330,13 @@ where
         self.complete_connection_failure(failure, &mut progress);
         self.lifecycle.mark_failed();
         self.connected = false;
-        self.status.fail(error.status_message());
+        self.status.fail(
+            error.status_message(),
+            match error {
+                WorkerCoreError::Transport(_) => WorkerFailureCategory::Transport,
+                _ => WorkerFailureCategory::Internal,
+            },
+        );
         WorkerStep::Failed { error, progress }
     }
 
@@ -2715,7 +2723,7 @@ mod tests {
     #[test]
     fn unspawned_worker_cleanup_returns_failure_and_closes_without_neutral() {
         let (transport, control, trace) = tracing_transport();
-        let (status, status_reader) = status_projection();
+        let (status, status_reader) = status_projection::<Pro, Direct>();
         let mut worker = WorkerCore::new_direct_with_status(
             protocol(),
             Box::new(transport),
@@ -2737,7 +2745,7 @@ mod tests {
             TransportErrorKind::SourceTerminated
         );
         assert_eq!(worker.lifecycle_state(), LifecycleState::Closed);
-        let status = status_reader.status::<Direct>();
+        let status = status_reader.status();
         assert_eq!(status.lifecycle, LifecycleState::Closed);
         assert!(!status.connected);
         assert_eq!(status.report_mode, None);

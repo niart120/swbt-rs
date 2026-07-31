@@ -217,59 +217,61 @@ def _generate_cases() -> list[dict[str, object]]:
         IMUFrame.raw(accel=(13, -14, 15), gyro=(-16, 17, -18)),
     )
     distinct_state = InputState.neutral().with_imu(*distinct_frames)
-    report = InputReportBuilder(profiles["pro"]).build_0x30(distinct_state)
-    cases.append(
-        _case(
-            "input.pro.standard_imu",
-            "input_report",
-            "pro",
-            {
-                "imu_mode": 1,
-                "frames": [
-                    [1, -2, 3, -4, 5, -6],
-                    [7, -8, 9, -10, 11, -12],
-                    [13, -14, 15, -16, 17, -18],
-                ],
-            },
-            _expected_bytes(report, imu_hex=report[13:49].hex()),
+    for model, profile in profiles.items():
+        report = InputReportBuilder(profile).build_0x30(distinct_state)
+        cases.append(
+            _case(
+                f"input.{model}.standard_imu",
+                "input_report",
+                model,
+                {
+                    "imu_mode": 1,
+                    "frames": [
+                        [1, -2, 3, -4, 5, -6],
+                        [7, -8, 9, -10, 11, -12],
+                        [13, -14, 15, -16, 17, -18],
+                    ],
+                },
+                _expected_bytes(report, imu_hex=report[13:49].hex()),
+            )
         )
-    )
 
     quaternion_frames = (
         IMUFrame.raw(accel=(1, 2, 3), gyro=(0, 0, 1000)),
         IMUFrame.raw(accel=(4, 5, 6), gyro=(0, 0, 1000)),
         IMUFrame.raw(accel=(7, 8, 9), gyro=(0, 0, 1000)),
     )
-    for mode in range(2, 6):
-        encoded = encode_imu_block(
-            state=ImuEncodingState(previous_report_ns=0),
-            mode=ImuMode(mode),
-            frames=quaternion_frames,
-            gyro_calibration=profiles["pro"].gyro_calibration,
-            now_ns=1_000_000_000,
-        )
-        report = InputReportBuilder(profiles["pro"]).build_0x30(
-            InputState.neutral().with_imu(*quaternion_frames),
-            imu_block=encoded.block,
-        )
-        cases.append(
-            _case(
-                f"input.pro.quaternion_mode_{mode:02x}",
-                "input_report",
-                "pro",
-                {
-                    "imu_mode": mode,
-                    "previous_report_ns": 0,
-                    "now_ns": 1_000_000_000,
-                    "frames": [
-                        [1, 2, 3, 0, 0, 1000],
-                        [4, 5, 6, 0, 0, 1000],
-                        [7, 8, 9, 0, 0, 1000],
-                    ],
-                },
-                _expected_bytes(report, imu_hex=encoded.block.hex()),
+    for model, profile in profiles.items():
+        for mode in range(2, 6):
+            encoded = encode_imu_block(
+                state=ImuEncodingState(previous_report_ns=0),
+                mode=ImuMode(mode),
+                frames=quaternion_frames,
+                gyro_calibration=profile.gyro_calibration,
+                now_ns=1_000_000_000,
             )
-        )
+            report = InputReportBuilder(profile).build_0x30(
+                InputState.neutral().with_imu(*quaternion_frames),
+                imu_block=encoded.block,
+            )
+            cases.append(
+                _case(
+                    f"input.{model}.quaternion_mode_{mode:02x}",
+                    "input_report",
+                    model,
+                    {
+                        "imu_mode": mode,
+                        "previous_report_ns": 0,
+                        "now_ns": 1_000_000_000,
+                        "frames": [
+                            [1, 2, 3, 0, 0, 1000],
+                            [4, 5, 6, 0, 0, 1000],
+                            [7, 8, 9, 0, 0, 1000],
+                        ],
+                    },
+                    _expected_bytes(report, imu_hex=encoded.block.hex()),
+                )
+            )
 
     parser = OutputReportParser()
     parser_inputs = {

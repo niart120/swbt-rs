@@ -13,6 +13,7 @@ use std::{
 
 use crate::{
     Controller, ErrorKind,
+    diagnostics::event::DiagnosticEvent,
     input::{InputState, ProButton},
     model::{ControllerKind, Pro},
     protocol::SwitchHidProtocol,
@@ -25,7 +26,7 @@ use crate::{
             map_worker_failure, unsupported_capability,
         },
         lifecycle::LifecycleCommandError,
-        status::status_projection,
+        status::{status_projection, status_projection_with_emitter},
         transport::{
             ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities, TransportError,
             TransportErrorKind, TransportEvent, TransportPort, TransportResult, activity_channel,
@@ -38,6 +39,8 @@ use crate::{
         worker_thread::{WorkerFailureCause, WorkerJoinError},
     },
 };
+
+use serde_json::Value;
 
 const DEVICE_INFO_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
 const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
@@ -209,6 +212,159 @@ fn projection_tracks_committed_fields_and_acceptance_counters() {
 }
 
 #[test]
+fn runtime_projects_ordered_session_events_from_committed_status_updates() {
+    let events = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let captured = Arc::clone(&events);
+    let emitter = Arc::new(move |event: DiagnosticEvent| {
+        captured
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(event.to_value());
+    });
+    let (publisher, reader) = status_projection_with_emitter::<Pro, Direct>(emitter);
+    let (mut transport, control) = FakeTransport::with_limits(16, 3);
+    let (activity, _wake_receiver) = activity_channel();
+    transport.open(activity).expect("open fake transport");
+    let mut worker = WorkerCore::new_direct_with_status(
+        protocol(),
+        Box::new(transport),
+        WorkerBudget::new(2, 1),
+        Box::new(|_| {}),
+        publisher,
+    );
+    let clock = FakeClock::at(Duration::ZERO);
+
+    prime_ready(&mut worker, &control, &clock);
+    let pressed = InputState::<Pro>::neutral().with_buttons([ProButton::A]);
+    assert_continue(worker.step(
+        &clock,
+        &mut NoShutdown,
+        &mut Commands::one(DirectCommand::Send(pressed)),
+    ));
+    control
+        .inject_disconnected(Some(0x13))
+        .expect("current session disconnect");
+    assert_continue(worker.step(
+        &clock,
+        &mut NoShutdown,
+        &mut Commands::<DirectCommand<Pro>>::none(),
+    ));
+
+    let records = events
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let names = records
+        .iter()
+        .map(|record| record["event"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "session_started",
+            "lifecycle_changed",
+            "report_tx_accepted",
+            "subcommand_observed",
+            "reply_tx_accepted",
+            "subcommand_observed",
+            "reply_tx_accepted",
+            "lifecycle_changed",
+            "report_tx_accepted",
+            "session_ended",
+        ]
+    );
+    assert!(records.iter().all(|record| record["session_id"] == 1));
+    assert!(
+        records
+            .iter()
+            .all(|record| record["controller_kind"] == "pro")
+    );
+    assert!(
+        records
+            .iter()
+            .all(|record| record["reporting_kind"] == "direct")
+    );
+    assert_eq!(records[1]["lifecycle"], "connecting");
+    assert_eq!(records[2]["input_reports_accepted"], 1);
+    assert_eq!(records[3]["subcommand_id"], 0x03);
+    assert_eq!(records[4]["replies_accepted"], 1);
+    assert_eq!(records[5]["subcommand_id"], 0x30);
+    assert_eq!(records[6]["replies_accepted"], 2);
+    assert_eq!(records[7]["lifecycle"], "ready");
+    assert_eq!(records[8]["input_reports_accepted"], 2);
+    assert_eq!(records[9]["lifecycle"], "open");
+    assert_eq!(records[9]["disconnect_reason"], 0x13);
+    assert_eq!(reader.status().last_disconnect_reason, Some(0x13));
+}
+
+#[test]
+fn runtime_failure_emits_a_typed_category_without_its_error_source() {
+    let events = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let captured = Arc::clone(&events);
+    let emitter = Arc::new(move |event: DiagnosticEvent| {
+        captured
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(event.to_value());
+    });
+    let (publisher, reader) = status_projection_with_emitter::<Pro, Direct>(emitter);
+    let (mut transport, control) = FakeTransport::with_limits(16, 3);
+    let (activity, _wake_receiver) = activity_channel();
+    transport.open(activity).expect("open fake transport");
+    let mut worker = WorkerCore::new_direct_with_status(
+        protocol(),
+        Box::new(transport),
+        WorkerBudget::new(2, 1),
+        Box::new(|_| {}),
+        publisher,
+    );
+    let clock = FakeClock::at(Duration::ZERO);
+
+    worker
+        .begin_connection(clock.now(), CONNECTION_TIMEOUT)
+        .expect("begin fake connection");
+    control
+        .terminate_with(SentinelSource)
+        .expect("terminate current session");
+    let failed = worker.step(
+        &clock,
+        &mut NoShutdown,
+        &mut Commands::<DirectCommand<Pro>>::none(),
+    );
+    assert!(matches!(failed, WorkerStep::Failed { .. }));
+
+    let records = events
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let names = records
+        .iter()
+        .map(|record| record["event"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "session_started",
+            "lifecycle_changed",
+            "worker_failed",
+            "lifecycle_changed",
+            "session_ended",
+        ]
+    );
+    assert_eq!(records[2]["failure_category"], "transport");
+    assert_eq!(records[3]["lifecycle"], "failed");
+    assert_eq!(records[4]["lifecycle"], "failed");
+    assert!(
+        !serde_json::to_string(&*records)
+            .unwrap()
+            .contains("T26_SECRET")
+    );
+    assert_eq!(reader.status().lifecycle, crate::LifecycleState::Failed);
+    assert_eq!(
+        reader.status().worker_failure.as_deref(),
+        Some("worker transport failed")
+    );
+}
+
+#[test]
 fn status_and_snapshot_return_while_transport_poll_is_blocked() {
     let (mut inner, control) = FakeTransport::with_limits(16, 3);
     let (activity, _wake_receiver) = activity_channel();
@@ -335,10 +491,11 @@ fn public_error_mapping_preserves_categories_sources_and_redaction() {
 
 #[test]
 fn controller_and_reporting_kinds_are_derived_from_the_requested_types() {
-    let (_publisher, reader) = status_projection::<Pro>();
+    let (_publisher, direct_reader) = status_projection::<Pro, Direct>();
+    let (_publisher, periodic_reader) = status_projection::<Pro, Periodic>();
 
-    let direct = reader.status::<Direct>();
-    let periodic = reader.status::<Periodic>();
+    let direct = direct_reader.status();
+    let periodic = periodic_reader.status();
 
     assert_eq!(direct.controller_kind, ControllerKind::Pro);
     assert_eq!(periodic.controller_kind, ControllerKind::Pro);

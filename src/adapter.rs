@@ -37,28 +37,27 @@ impl AdapterSelector {
         }
 
         if let Some((vendor_id, product)) = spec.split_once(':') {
-            let vendor_id = parse_hex_u16(vendor_id).ok_or_else(&invalid)?;
-            let (product_id, selection) = if let Some((product_id, serial_number)) =
-                product.split_once('/')
-            {
-                if serial_number.is_empty() {
-                    return Err(invalid());
-                }
-                (
-                    parse_hex_u16(product_id).ok_or_else(&invalid)?,
-                    VidPidSelection::Serial(serial_number.into()),
-                )
-            } else if let Some((product_id, occurrence)) = product.split_once('#') {
-                (
-                    parse_hex_u16(product_id).ok_or_else(&invalid)?,
-                    VidPidSelection::Occurrence(parse_decimal(occurrence).ok_or_else(&invalid)?),
-                )
-            } else {
-                (
-                    parse_hex_u16(product).ok_or_else(&invalid)?,
-                    VidPidSelection::First,
-                )
-            };
+            let vendor_id = parse_hex_u16(vendor_id).ok_or_else(invalid)?;
+            let (product_id, selection) =
+                if let Some((product_id, serial_number)) = product.split_once('/') {
+                    if serial_number.is_empty() {
+                        return Err(invalid());
+                    }
+                    (
+                        parse_hex_u16(product_id).ok_or_else(invalid)?,
+                        VidPidSelection::Serial(serial_number.into()),
+                    )
+                } else if let Some((product_id, occurrence)) = product.split_once('#') {
+                    (
+                        parse_hex_u16(product_id).ok_or_else(invalid)?,
+                        VidPidSelection::Occurrence(parse_decimal(occurrence).ok_or_else(invalid)?),
+                    )
+                } else {
+                    (
+                        parse_hex_u16(product).ok_or_else(invalid)?,
+                        VidPidSelection::First,
+                    )
+                };
 
             Ok(UsbSelector::VidPid {
                 vendor_id,
@@ -66,10 +65,10 @@ impl AdapterSelector {
                 selection,
             })
         } else if let Some((bus, ports)) = spec.split_once('-') {
-            let bus = parse_decimal::<u8>(bus).ok_or_else(&invalid)?;
+            let bus = parse_decimal::<u8>(bus).ok_or_else(invalid)?;
             let ports = ports
                 .split('.')
-                .map(|port| parse_decimal::<u8>(port).ok_or_else(&invalid))
+                .map(|port| parse_decimal::<u8>(port).ok_or_else(invalid))
                 .collect::<crate::Result<Vec<_>>>()?;
             if ports.is_empty() {
                 return Err(invalid());
@@ -80,9 +79,7 @@ impl AdapterSelector {
                 ports: ports.into_boxed_slice(),
             })
         } else {
-            Ok(UsbSelector::Index(
-                parse_decimal(spec).ok_or_else(&invalid)?,
-            ))
+            Ok(UsbSelector::Index(parse_decimal(spec).ok_or_else(invalid)?))
         }
     }
 }

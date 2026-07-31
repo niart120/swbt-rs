@@ -11,6 +11,7 @@ use std::{
 };
 
 use crate::{
+    diagnostics::event::WorkerFailureCategory,
     model::ControllerModel,
     runtime::{
         cleanup::{CleanupFailure, CloseCompletion, CloseMode, ExplicitCloseError},
@@ -620,7 +621,7 @@ where
     let (completion, mut panic_payload) = match caught {
         Ok(completion) => (completion, None),
         Err(payload) => {
-            status.fail("worker panicked");
+            status.fail("worker panicked", WorkerFailureCategory::Panicked);
             let cleanup = catch_unwind(AssertUnwindSafe(|| {
                 worker
                     .cleanup_after_failure_without_neutral(clock.now())
@@ -653,9 +654,9 @@ where
         }
     }
     if teardown_panicked {
-        status.fail("worker panicked");
+        status.fail("worker panicked", WorkerFailureCategory::Panicked);
     } else if let WorkerTerminal::Failed { cause, .. } = &completion.terminal {
-        status.fail(worker_failure_status(cause));
+        status.fail(worker_failure_status(cause), worker_failure_category(cause));
     }
 
     publish_completion(&completion_sender, completion);
@@ -673,6 +674,17 @@ fn worker_failure_status(cause: &WorkerFailureCause) -> &'static str {
         WorkerFailureCause::CommandDelivery(_) => "worker command delivery failed",
         WorkerFailureCause::Panicked => "worker panicked",
         WorkerFailureCause::CompletionDisconnected => "worker completion disconnected",
+    }
+}
+
+fn worker_failure_category(cause: &WorkerFailureCause) -> WorkerFailureCategory {
+    match cause {
+        WorkerFailureCause::Core(WorkerCoreError::Transport(_)) => WorkerFailureCategory::Transport,
+        WorkerFailureCause::Core(_) => WorkerFailureCategory::Internal,
+        WorkerFailureCause::Wait(_) => WorkerFailureCategory::Wait,
+        WorkerFailureCause::CommandDelivery(_) => WorkerFailureCategory::CommandDelivery,
+        WorkerFailureCause::Panicked => WorkerFailureCategory::Panicked,
+        WorkerFailureCause::CompletionDisconnected => WorkerFailureCategory::CompletionDisconnected,
     }
 }
 
@@ -752,9 +764,10 @@ where
     M: ControllerModel,
     R: WorkerReporting<M>,
 {
-    worker
-        .status_publisher()
-        .fail(worker_failure_status(&cause));
+    worker.status_publisher().fail(
+        worker_failure_status(&cause),
+        worker_failure_category(&cause),
+    );
     let cleanup_error = worker
         .cleanup_after_failure_without_neutral(clock.now())
         .err();
