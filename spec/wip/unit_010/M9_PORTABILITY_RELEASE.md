@@ -78,14 +78,14 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| red | T01: 0.1.0 package 候補が配布対象だけを含み、registry 用 dependency metadata を持つ | regression | package | baseline: `cargo package --locked --list` は `spec/` と実機 trace を含む。`cargo package --locked` は Bumble 依存の版要件欠落で失敗 |
+| refactor-skipped | T01: 0.1.0 package 候補が配布対象だけを含み、registry 用 dependency metadata を持つ | regression | package | 120 files。開発用 root と実機 trace を除外し、8 Git dependency に `=0.1.0` を追加。manifest 構造の追加 refactor は不要 |
 | todo | T02: 6 alias の model/reporting 対応と公開 API 契約を rustdoc と compile 済み example から確認できる | characterization | public API / docs | alias 自体の rustdoc と model/mapping audit を対象にする |
 | todo | T03: Windows 利用者が driver claim、close、unplug、backend rollback を手順どおり実施できる | new | docs | command、排他条件、失敗時の確認点を含める |
 | todo | T04: Linux 利用者が udev permission と kernel driver ownership を区別でき、支援水準を誤認しない | new | docs / source audit | fixed Bumble revision の `set_auto_detach_kernel_driver(true)` と Drop 境界を根拠にする |
 | todo | T05: Windows と Linux の CI が all-feature compile/test を実行し、hardware 未検証を置き換えない | regression | CI | Windows job を追加し、Ubuntu job の意味を docs と整合させる |
 | todo | T06: resolved dependency graph の license と SBOM inventory が生成され、未知 license と禁止 source を検出できる | new | package / release | tool 未導入時に検査を省略せず、導入方法か代替の再現 command を定義する |
 | todo | T07: changelog、security policy、hardware matrix、known limitations、source baseline、release/rollback checklist を一続きに辿れる | new | docs / release | M8 timing variation と crates.io dependency blocker を含める |
-| todo | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | unpublished Bumble registry crates がある間は blocked とし、`--no-verify` を成功根拠にしない |
+| deferred | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | `bumble-controller@0.1.0` を含む必要 crate が registry にない。`--no-verify` を成功根拠にしない |
 | todo | T09: local gate と public docs review が変更範囲に対して成功し、未実行 hardware/publish を明記する | regression | quality gate | all/default/no-default、MSRV、doc、package、diff を記録する |
 
 ## 7. 設計メモ
@@ -140,8 +140,8 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 
 | command | result | notes |
 |---|---|---|
-| `cargo package --locked --list` | success (baseline) | 配布対象外の `.agents/`、`spec/`、実機 trace を含むため T01 red |
-| `cargo package --locked` | failed (baseline) | `bumble` に version requirement がなく、packaging 前 manifest 検査で停止 |
+| `cargo package --locked --list` | success | 120 files。`.agents/`、`.codex/`、`.github/`、`spec/`、`tools/`、実機 trace を含まない |
+| `cargo package --locked` | failed (tracked blocker) | manifest 検査と packaging 開始後、crates.io に `bumble-controller@0.1.0` がなく停止 |
 | `cargo fmt --all --check` | not run | 実装後に実行 |
 | `cargo check --all-targets --all-features --locked` | not run | 実装後に current Rust と MSRV 1.87 で実行 |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | not run | 実装後に実行 |
