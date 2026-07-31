@@ -10,6 +10,11 @@ use swbt::{
     reporting::{self, ReportingMode},
 };
 
+#[path = "swbt-probe/trace.rs"]
+mod trace;
+
+use trace::TraceSession;
+
 const PROBE_SCHEMA: &str = "swbt.probe";
 const PROBE_SCHEMA_VERSION: u64 = 1;
 const EXIT_OPERATION_ERROR: u8 = 1;
@@ -312,32 +317,47 @@ impl ProbeBackend for SystemBackend {
     }
 
     fn pair<M: ControllerModel>(&mut self, request: &ConnectionRequest) -> Result<(), ErrorKind> {
-        let _trace = &request.trace;
-        let mut controller = Controller::<M, reporting::Periodic>::builder(DEFAULT_ADAPTER)
-            .profile_path(&request.profile)
-            .create_profile(CreateProfileOptions {
-                identity: ProfileIdentity::AdapterDefault,
-                pair_timeout: CONNECTION_TIMEOUT,
-            })
-            .map_err(|error| error.kind())?;
-        apply_button_and_close(&mut controller, request.button)
+        let trace = TraceSession::install(&request.trace)?;
+        trace::emit_environment::<M, reporting::Periodic>();
+        let operation = (|| {
+            let mut controller = Controller::<M, reporting::Periodic>::builder(DEFAULT_ADAPTER)
+                .profile_path(&request.profile)
+                .create_profile(CreateProfileOptions {
+                    identity: ProfileIdentity::AdapterDefault,
+                    pair_timeout: CONNECTION_TIMEOUT,
+                })
+                .map_err(|error| error.kind())?;
+            apply_button_and_close(&mut controller, request.button)
+        })();
+        finish_trace(trace, operation)
     }
 
     fn reconnect<M: ControllerModel, R: ReportingMode>(
         &mut self,
         request: &ConnectionRequest,
     ) -> Result<(), ErrorKind> {
-        let _trace = &request.trace;
-        let mut controller = Controller::<M, R>::builder(DEFAULT_ADAPTER)
-            .profile_path(&request.profile)
-            .build()
-            .map_err(|error| error.kind())?;
-        controller.open().map_err(|error| error.kind())?;
-        let operation = controller
-            .reconnect(CONNECTION_TIMEOUT)
-            .map_err(|error| error.kind())
-            .and_then(|()| apply_button(&mut controller, request.button));
-        finish_connection(&mut controller, operation)
+        let trace = TraceSession::install(&request.trace)?;
+        trace::emit_environment::<M, R>();
+        let operation = (|| {
+            let mut controller = Controller::<M, R>::builder(DEFAULT_ADAPTER)
+                .profile_path(&request.profile)
+                .build()
+                .map_err(|error| error.kind())?;
+            controller.open().map_err(|error| error.kind())?;
+            let connection = controller
+                .reconnect(CONNECTION_TIMEOUT)
+                .map_err(|error| error.kind())
+                .and_then(|()| apply_button(&mut controller, request.button));
+            finish_connection(&mut controller, connection)
+        })();
+        finish_trace(trace, operation)
+    }
+}
+
+fn finish_trace(trace: TraceSession, operation: Result<(), ErrorKind>) -> Result<(), ErrorKind> {
+    match trace.finish() {
+        Ok(()) => operation,
+        Err(error) => Err(error),
     }
 }
 
@@ -489,6 +509,7 @@ const fn error_kind_name(kind: ErrorKind) -> &'static str {
     match kind {
         ErrorKind::AdapterDiscovery => "adapter_discovery",
         ErrorKind::TransportOpen => "transport_open",
+        ErrorKind::Trace => "trace",
         ErrorKind::ProfilePathRequired => "profile_path_required",
         ErrorKind::ProfileNotFound => "profile_not_found",
         ErrorKind::ProfileAlreadyExists => "profile_already_exists",

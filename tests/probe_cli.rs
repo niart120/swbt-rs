@@ -124,8 +124,7 @@ fn adapter_commands_use_strict_usage_and_redact_operation_errors() {
 #[test]
 fn connection_commands_dispatch_known_models_without_fallback() {
     let fixture = ProbeFixture::new();
-    let trace = fixture.directory.join("T07_SECRET_TRACE.jsonl");
-    let trace_text = trace.to_str().expect("test path must be UTF-8");
+    let trace_text = fixture.trace_text();
     fs::write(&fixture.profile, profile_json()).expect("write existing profile");
 
     let pair = run([
@@ -145,6 +144,7 @@ fn connection_commands_dispatch_known_models_without_fallback() {
     assert_safe_output(&pair, &fixture);
     assert!(!String::from_utf8_lossy(&pair.stderr).contains(trace_text));
 
+    fs::remove_file(&fixture.trace).expect("remove pair preflight trace");
     fs::remove_file(&fixture.profile).expect("remove profile before reconnect preflight");
     let reconnect = run([
         "reconnect",
@@ -204,6 +204,65 @@ fn connection_commands_dispatch_known_models_without_fallback() {
     }
 }
 
+#[test]
+fn trace_is_create_new_valid_ndjson_and_redacted_on_operation_failure() {
+    let fixture = ProbeFixture::new();
+    fs::write(&fixture.profile, profile_json()).expect("write existing profile");
+    fs::write(&fixture.trace, b"T08_EXISTING_TRACE\n").expect("write existing trace");
+
+    let occupied = run([
+        "pair",
+        "--controller",
+        "pro",
+        "--profile",
+        fixture.profile_text(),
+        "--trace",
+        fixture.trace_text(),
+    ]);
+    assert_eq!(occupied.status.code(), Some(1));
+    assert_eq!(one_json_line(&occupied.stderr)["error_kind"], "trace");
+    assert_eq!(
+        fs::read(&fixture.trace).expect("read occupied trace"),
+        b"T08_EXISTING_TRACE\n"
+    );
+    assert_safe_output(&occupied, &fixture);
+
+    fs::remove_file(&fixture.trace).expect("remove occupied trace");
+    let preflight_failure = run([
+        "pair",
+        "--controller",
+        "pro",
+        "--profile",
+        fixture.profile_text(),
+        "--trace",
+        fixture.trace_text(),
+    ]);
+    assert_eq!(preflight_failure.status.code(), Some(1));
+    assert_eq!(
+        one_json_line(&preflight_failure.stderr)["error_kind"],
+        "profile_already_exists"
+    );
+    let trace = fs::read_to_string(&fixture.trace).expect("read new trace");
+    let lines = trace.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1, "trace: {trace:?}");
+    let environment: Value = serde_json::from_str(lines[0]).expect("valid NDJSON line");
+    assert_eq!(environment["schema"], "swbt.diagnostics");
+    assert_eq!(environment["schema_version"], 1);
+    assert_eq!(environment["event"], "environment");
+    assert_eq!(environment["controller_kind"], "pro");
+    assert_eq!(environment["reporting_kind"], "periodic");
+    for forbidden in [
+        "T05_SECRET_PATH",
+        fixture.profile_text(),
+        fixture.trace_text(),
+        "02:12:34:56:78:9A",
+        "AA:BB:CC:DD:EE:FF",
+        "7055EC0E7A7055EC",
+    ] {
+        assert!(!trace.contains(forbidden), "trace disclosed {forbidden}");
+    }
+}
+
 fn run<I, S>(arguments: I) -> Output
 where
     I: IntoIterator<Item = S>,
@@ -237,6 +296,7 @@ fn assert_safe_output(output: &Output, fixture: &ProbeFixture) {
 struct ProbeFixture {
     directory: PathBuf,
     profile: PathBuf,
+    trace: PathBuf,
 }
 
 impl ProbeFixture {
@@ -248,17 +308,27 @@ impl ProbeFixture {
         ));
         fs::create_dir_all(&directory).expect("create probe test directory");
         let profile = directory.join("profile.json");
-        Self { directory, profile }
+        let trace = directory.join("trace.jsonl");
+        Self {
+            directory,
+            profile,
+            trace,
+        }
     }
 
     fn profile_text(&self) -> &str {
         self.profile.to_str().expect("test path must be UTF-8")
+    }
+
+    fn trace_text(&self) -> &str {
+        self.trace.to_str().expect("test path must be UTF-8")
     }
 }
 
 impl Drop for ProbeFixture {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.profile);
+        let _ = fs::remove_file(&self.trace);
         let _ = fs::remove_dir(&self.directory);
     }
 }
