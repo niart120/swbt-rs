@@ -96,6 +96,31 @@ fn profile_usage_rejects_missing_extra_and_unknown_arguments_with_exit_two() {
     }
 }
 
+#[test]
+fn adapter_commands_use_strict_usage_and_redact_operation_errors() {
+    let secret_selector = "usb:T06_SECRET_SELECTOR";
+    let invalid = run(["open", "--adapter", secret_selector]);
+    assert_eq!(invalid.status.code(), Some(1));
+    assert!(invalid.stdout.is_empty());
+    let error = one_json_line(&invalid.stderr);
+    assert_eq!(error["event"], "error");
+    assert_eq!(error["error_kind"], "transport_open");
+    assert!(!String::from_utf8_lossy(&invalid.stderr).contains(secret_selector));
+
+    for arguments in [
+        vec!["adapters", "extra"],
+        vec!["open"],
+        vec!["open", "--adapter"],
+        vec!["open", "--wrong", "usb:0"],
+        vec!["open", "--adapter", "usb:0", "--adapter", "usb:1"],
+    ] {
+        let output = run(&arguments);
+        assert_eq!(output.status.code(), Some(2), "arguments: {arguments:?}");
+        assert!(output.stdout.is_empty());
+        assert_eq!(one_json_line(&output.stderr)["error_kind"], "usage");
+    }
+}
+
 fn run<I, S>(arguments: I) -> Output
 where
     I: IntoIterator<Item = S>,
