@@ -29,10 +29,20 @@ const EXPECTED_CASE_IDS: &[&str] = &[
     "input.joycon_r.all_buttons",
     "input.pro.custom_sticks",
     "input.pro.standard_imu",
+    "input.joycon_l.standard_imu",
+    "input.joycon_r.standard_imu",
     "input.pro.quaternion_mode_02",
     "input.pro.quaternion_mode_03",
     "input.pro.quaternion_mode_04",
     "input.pro.quaternion_mode_05",
+    "input.joycon_l.quaternion_mode_02",
+    "input.joycon_l.quaternion_mode_03",
+    "input.joycon_l.quaternion_mode_04",
+    "input.joycon_l.quaternion_mode_05",
+    "input.joycon_r.quaternion_mode_02",
+    "input.joycon_r.quaternion_mode_03",
+    "input.joycon_r.quaternion_mode_04",
+    "input.joycon_r.quaternion_mode_05",
     "output.valid_01",
     "output.valid_10",
     "output.error.empty",
@@ -101,7 +111,7 @@ fn conversion_cases_project_the_python_expected_values() {
 fn input_report_cases_project_the_python_expected_bytes() {
     let document = fixture_document();
     let cases = cases_of_kind(&document, "input_report").collect::<Vec<_>>();
-    assert_eq!(cases.len(), 12);
+    assert_eq!(cases.len(), 22);
 
     for case in cases {
         assert_case_keys(case);
@@ -251,13 +261,10 @@ fn project_input_report<M: ControllerModel>(case: &Value) -> Value {
         "input.pro.all_buttons" | "input.joycon_l.all_buttons" | "input.joycon_r.all_buttons" => {
             assert_exact_keys(input, &["buttons", "timer"], id);
         }
-        "input.pro.standard_imu" => {
+        id if id.ends_with(".standard_imu") => {
             assert_exact_keys(input, &["frames", "imu_mode"], id);
         }
-        "input.pro.quaternion_mode_02"
-        | "input.pro.quaternion_mode_03"
-        | "input.pro.quaternion_mode_04"
-        | "input.pro.quaternion_mode_05" => {
+        id if id.contains(".quaternion_mode_") => {
             assert_exact_keys(
                 input,
                 &["frames", "imu_mode", "now_ns", "previous_report_ns"],
@@ -316,11 +323,7 @@ fn project_input_report<M: ControllerModel>(case: &Value) -> Value {
         "input.pro.all_buttons" | "input.joycon_l.all_buttons" | "input.joycon_r.all_buttons" => {
             json!({"button_hex": encode_hex(&bytes[3..6])})
         }
-        "input.pro.standard_imu"
-        | "input.pro.quaternion_mode_02"
-        | "input.pro.quaternion_mode_03"
-        | "input.pro.quaternion_mode_04"
-        | "input.pro.quaternion_mode_05" => {
+        id if id.ends_with(".standard_imu") || id.contains(".quaternion_mode_") => {
             json!({"imu_hex": encode_hex(&bytes[13..49])})
         }
         _ => unreachable!("input fixture ID was checked above"),

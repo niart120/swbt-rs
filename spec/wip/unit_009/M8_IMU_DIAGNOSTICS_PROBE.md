@@ -178,7 +178,7 @@ hardware 実行前にユーザへ準備を依頼し、各 UI 観測を受け取�
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | T01 3 model の standard/quaternion IMU golden と mode/ACK ordering を固定 fixture で検査する | new/regression | protocol/integration | 既存 common IMU を再利用 |
+| refactor-done | T01 3 model の standard/quaternion IMU golden と mode/ACK ordering を固定 fixture で検査する | new/regression | protocol/integration | 既存 common IMU を再利用 |
 | todo | T02 version 1 diagnostics event の名前、field、値、redaction を検査する | new | unit | raw packetなし |
 | todo | T03 runtime session から lifecycle/subcommand/counter/disconnect/failure event を発行する | new/regression | runtime | statusと同じ投影 |
 | todo | T04 profile JSON を動的に検査し、秘密値を含まない summary を返す | new | public boundary | cross-model情報を保持 |
@@ -197,6 +197,7 @@ machine evidence を先に確定し、人手 UI 観測を別に追記する。
 
 | phase | item | evidence |
 |---|---|---|
+| refactor-done | T01 | red: Rust fixture consumer に Joy-Con L/R の standard と quaternion `0x02`–`0x05` の10 caseを要求すると、固定fixtureがProの5 caseだけだったためcase総数45対55で失敗した。green: cleanなpinned Python 0.6.0 / revision `84d2723...` のgeneratorを3 modelへ一般化し、55 caseを再生成した。Rustは3 model×standard/quaternionをbyte-for-byte検査して6 passed、IMU encoder 8、全model mode/same-mode reset 11、reply reject後のsession未commit/retry 1、fixture provenance 2が成功した。既存testにより`0x40` replyは旧prefixで作られ、transport受理後だけmodeをcommitすることも維持した。refactor: generatorのprofile反復とRust consumerのIMU suffix判定へ重複を集約。production code変更なし |
 
 ## 7. 対象ファイル
 
