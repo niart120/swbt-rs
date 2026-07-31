@@ -82,7 +82,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | refactor-done | T02: 6 alias の model/reporting 対応と公開 API 契約を rustdoc と compile 済み example から確認できる | characterization | public API / docs | 既存型契約と全 button wire mapping は green。alias rustdoc に reporting と side-specific input を追記 |
 | refactor-done | T03: Windows 利用者が driver claim、close、unplug、backend rollback を手順どおり実施できる | new | docs | WinUSB 専用 adapter、排他 claim、明示 close、reopen、Python rollback を公開 docs に分離 |
 | refactor-done | T04: Linux 利用者が udev permission と kernel driver ownership を区別でき、支援水準を誤認しない | new | docs / source audit | `TAG+="uaccess"` と fixed Bumble/libusb の自動 detach/release を記録。hardware は未検証と明記 |
-| todo | T05: Windows と Linux の CI が all-feature compile/test を実行し、hardware 未検証を置き換えない | regression | CI | Windows job を追加し、Ubuntu job の意味を docs と整合させる |
+| green | T05: Windows と Linux の CI が all-feature compile/test を実行し、hardware 未検証を置き換えない | regression | CI | `windows-latest` に all-targets/all-features check/test を追加。remote run と refactor 判定は PR 後 |
 | todo | T06: resolved dependency graph の license と SBOM inventory が生成され、未知 license と禁止 source を検出できる | new | package / release | tool 未導入時に検査を省略せず、導入方法か代替の再現 command を定義する |
 | todo | T07: changelog、security policy、hardware matrix、known limitations、source baseline、release/rollback checklist を一続きに辿れる | new | docs / release | M8 timing variation と crates.io dependency blocker を含める |
 | deferred | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | `bumble-controller@0.1.0` を含む必要 crate が registry にない。`--no-verify` を成功根拠にしない |
@@ -163,6 +163,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | `cargo test --lib protocol:: --no-default-features --locked` | not run | Bumble-free 境界を検査 |
 | `cargo build --all-features --locked` | not run | 実装後に実行 |
 | `cargo build --no-default-features --locked` | not run | 実装後に実行 |
+| GitHub Actions `windows` | not run | workflow 追加済み。PR head の remote run で確定する |
 | `cargo test --test controller_type_contract --locked` | success | 2 passed。6 alias と builder の2型軸を検査 |
 | `cargo test --lib model::tests --no-default-features --locked` | success | 3 passed。model metadata と全 button wire mapping を検査 |
 | `cargo check --examples --all-features --locked` | success | public/hardware examples を compile |

@@ -37,6 +37,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --all-targets --all-features --locked
 
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --all-targets --all-features --locked
+      - run: cargo test --all-targets --all-features --locked
+
   clippy:
     runs-on: ubuntu-latest
     steps:
