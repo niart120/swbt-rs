@@ -1,0 +1,1 @@
+{"schema":"swbt.m8.probe-cpu","schema_version":1,"measurement_boundary":"process_total_processor_time_from_ready_observation_to_exit","ready_observed":false,"process_cpu_time_ns":0,"process_cpu_window_ns":1695300,"process_cpu_percent_of_one_core":0.0,"exit_code":1}

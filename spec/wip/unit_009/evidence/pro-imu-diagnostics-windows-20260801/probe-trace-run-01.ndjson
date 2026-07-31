@@ -1,0 +1,4 @@
+{"controller_kind":"pro","event":"environment","package_version":"0.1.0","reporting_kind":"periodic","schema":"swbt.diagnostics","schema_version":1,"target_arch":"x86_64","target_os":"windows","trace_elapsed_ns":49100}
+{"controller_kind":"pro","event":"session_started","reporting_kind":"periodic","schema":"swbt.diagnostics","schema_version":1,"session_id":1,"trace_elapsed_ns":347950000}
+{"controller_kind":"pro","event":"lifecycle_changed","lifecycle":"connecting","reporting_kind":"periodic","schema":"swbt.diagnostics","schema_version":1,"session_id":1,"trace_elapsed_ns":347997500}
+{"controller_kind":"pro","disconnect_reason":5,"event":"session_ended","lifecycle":"open","reporting_kind":"periodic","schema":"swbt.diagnostics","schema_version":1,"session_id":1,"trace_elapsed_ns":1422013000}
