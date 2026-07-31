@@ -478,9 +478,7 @@ fn run_periodic_imu<M: ControllerModel>(
     controller: &mut Controller<M, reporting::Periodic>,
     duration: Duration,
 ) -> Result<ImuRunEvidence, ErrorKind> {
-    let frame = ImuFrame::accel_g(0.25, -0.25, 1.25)
-        .and_then(|frame| frame.with_gyro_rate(0.5, -0.25, 0.125))
-        .map_err(|error| error.kind())?;
+    let frame = horizontal_yaw_frame().map_err(|error| error.kind())?;
     let started = Instant::now();
     let apply_started = Instant::now();
     controller
@@ -507,6 +505,10 @@ fn run_periodic_imu<M: ControllerModel>(
         non_neutral_reports_accepted,
         neutral_reports_accepted,
     })
+}
+
+fn horizontal_yaw_frame() -> swbt::Result<ImuFrame> {
+    ImuFrame::accel_g(0.0, 0.0, 1.0).and_then(|frame| frame.with_gyro_rate(0.0, 0.0, 1.0))
 }
 
 fn wait_for_periodic_report<M: ControllerModel>(

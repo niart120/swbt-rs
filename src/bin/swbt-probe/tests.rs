@@ -1,9 +1,10 @@
 use super::{
     ButtonKind, Command, ConnectionOperation, ConnectionRequest, ControllerKind, ControllerModel,
     ControllerSelection, ErrorKind, ImuRunEvidence, ProbeBackend, ProbeController, ReportingMode,
-    ReportingSelection, SafeAdapter, connection_completed_record, execute, open_and_close,
+    ReportingSelection, SafeAdapter, connection_completed_record, execute, horizontal_yaw_frame,
+    open_and_close,
 };
-use swbt::{Button, ReportingKind};
+use swbt::{Button, ImuFrame, ReportingKind};
 
 #[test]
 fn fake_adapter_listing_emits_only_safe_descriptor_fields() {
@@ -198,6 +199,16 @@ fn imu_connection_completion_reports_only_safe_machine_evidence() {
     let text = record.to_string();
     assert!(!text.contains("T07_SECRET_PROFILE"));
     assert!(!text.contains("T07_SECRET_TRACE"));
+}
+
+#[test]
+fn hardware_imu_run_uses_project_demi_horizontal_yaw_pattern() {
+    let frame = horizontal_yaw_frame().expect("horizontal yaw fixture");
+
+    assert_eq!(frame.to_accel_g(), [0.0, 0.0, 1.0]);
+    let [x, y, z] = frame.to_gyro_rate();
+    assert_eq!([x, y], [0.0, 0.0]);
+    assert!((z - 1.0).abs() <= ImuFrame::GYRO_DPS_PER_RAW.to_radians() / 2.0);
 }
 
 fn connection_request(
