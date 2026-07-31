@@ -102,13 +102,14 @@ M8 着手時点で次は実装・検査済みである。
 
 - `schema`: `swbt.diagnostics`
 - `schema_version`: `1`
-- `event`: `session_started`、`lifecycle_changed`、`subcommand_observed`、
+- `event`: `environment`、`session_started`、`lifecycle_changed`、`subcommand_observed`、
   `report_tx_accepted`、`reply_tx_accepted`、`session_ended`、`worker_failed`、
   `unsupported_button` のいずれか
-- 共通 field: `controller_kind`、`reporting_kind`、`session_id`
+- 共通 field: `controller_kind`、`reporting_kind`。runtime event は `session_id` も持つ
 - event 固有 field: lifecycle、report mode、subcommand ID、累積受理数、disconnect reason、
   failure category、button kind
 
+`environment` は session 開始前に発行し、package version、target OS、target architecture を持つ。
 event field は machine-readable な固定名と値を使い、人向け error message を契約にしない。`session_id` は
 process 内の単調増加値で、Bluetooth address や profile identity から生成しない。counter event は受理ごとに
 記録できるが、入力内容や raw bytes は記録しない。`GamepadStatus` は既存 field を維持し、安定 event と同じ
@@ -179,7 +180,7 @@ hardware 実行前にユーザへ準備を依頼し、各 UI 観測を受け取�
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-done | T01 3 model の standard/quaternion IMU golden と mode/ACK ordering を固定 fixture で検査する | new/regression | protocol/integration | 既存 common IMU を再利用 |
-| todo | T02 version 1 diagnostics event の名前、field、値、redaction を検査する | new | unit | raw packetなし |
+| refactor-done | T02 version 1 diagnostics event の名前、field、値、redaction を検査する | new | unit | raw packetなし |
 | todo | T03 runtime session から lifecycle/subcommand/counter/disconnect/failure event を発行する | new/regression | runtime | statusと同じ投影 |
 | todo | T04 profile JSON を動的に検査し、秘密値を含まない summary を返す | new | public boundary | cross-model情報を保持 |
 | todo | T05 probe の profile inspect/verify、usage、終了コード、safe output を検査する | new | CLI integration | hardwareを開かない |
@@ -198,6 +199,7 @@ machine evidence を先に確定し、人手 UI 観測を別に追記する。
 | phase | item | evidence |
 |---|---|---|
 | refactor-done | T01 | red: Rust fixture consumer に Joy-Con L/R の standard と quaternion `0x02`–`0x05` の10 caseを要求すると、固定fixtureがProの5 caseだけだったためcase総数45対55で失敗した。green: cleanなpinned Python 0.6.0 / revision `84d2723...` のgeneratorを3 modelへ一般化し、55 caseを再生成した。Rustは3 model×standard/quaternionをbyte-for-byte検査して6 passed、IMU encoder 8、全model mode/same-mode reset 11、reply reject後のsession未commit/retry 1、fixture provenance 2が成功した。既存testにより`0x40` replyは旧prefixで作られ、transport受理後だけmodeをcommitすることも維持した。refactor: generatorのprofile反復とRust consumerのIMU suffix判定へ重複を集約。production code変更なし |
+| refactor-done | T02 | red: version、target、9 event、field/value、禁止fieldを要求するunit testはevent module/型/定数が未定義のため`E0432`で失敗した。green: `swbt.diagnostics` schema version 1、`swbt::diagnostics` target、`environment`と8 runtime eventをclosed enumで定義した。controller/reporting/lifecycle/button/failureは固定文字列、session/counter/reasonは数値だけを受け、path/address/key/serial/raw packet/error source/messageをpayloadへ渡す入口を持たない。exact record/redaction/failure categoryの3 tests、default all-target clippy `-D warnings`、rustfmt、diff checkが成功。stable eventはdefault runtimeでも発行するため`tracing`を非optionalにした。refactor: 共通runtime contextとfield builderへschema/controller/reporting/sessionの重複を集約。T03 wiring前の未使用lintだけ理由付き`expect`とし、T03で除去する |
 
 ## 7. 対象ファイル
 
