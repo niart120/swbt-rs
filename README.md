@@ -80,6 +80,17 @@ descriptor-only adapter discovery を実装しています。
   subscriber観測intervalのp95はそれぞれ17.0223 msと16.6487 msで、8 ms目標に対する揺れは
   M9のrelease制限として残しています。単発runを信頼性や成功率の根拠にはしません。
 
+## 対応環境と USB 準備
+
+実機確認済みの構成は Windows 11、CSR8510 A10 (`0A12:0001`)、WinUSB、Switch 2
+system version 22.5.0（ユーザ報告）です。Linux は CI の build/test までで、USB adapter を使った
+pair/reconnect は未検証です。macOS は初期対象外です。
+
+driver と udev の準備、claim/release の所有権、既知の制限は
+[対応環境と USB adapter](docs/platform-support.md) にまとめています。adapter が見つからない、
+permission/claim に失敗する、実行中に unplug した、Python backend へ戻す場合は
+[トラブルシューティング](docs/troubleshooting.md) を参照してください。
+
 ## Pro Periodic 実機 runner
 
 M5 の実機確認には
@@ -187,7 +198,7 @@ cargo run --locked --features probe --bin swbt-probe -- reconnect --controller p
 reconnectだけは`--imu-seconds 1..3600`を受け、固定IMU入力、neutral report、close、profile不変、
 adapter reopenを検査します。traceの`trace_elapsed_ns`はstatus投影後にsubscriberがeventを観測した
 時刻であり、無線送信完了時刻ではありません。実機runと測定境界は
-[`spec/complete/unit_009/evidence/pro-imu-diagnostics-windows-20260801/SUMMARY.md`](spec/complete/unit_009/evidence/pro-imu-diagnostics-windows-20260801/SUMMARY.md)
+[M8 実機証跡](https://github.com/niart120/swbt-rs/blob/main/spec/complete/unit_009/evidence/pro-imu-diagnostics-windows-20260801/SUMMARY.md)
 に記録しています。
 
 ## 開発
@@ -213,9 +224,6 @@ git diff --check
 ```powershell
 cargo +nightly miri test --lib --no-default-features --locked protocol::
 ```
-
-作業境界とリポジトリ固有の手順は [AGENTS.md](AGENTS.md) と
-[SKILLS.md](SKILLS.md) にあります。
 
 現在利用できる model-valid input 型は
 [examples/type_model.rs](examples/type_model.rs) で確認できます。

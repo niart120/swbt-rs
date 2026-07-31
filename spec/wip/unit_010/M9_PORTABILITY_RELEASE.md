@@ -65,7 +65,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 
 | 振る舞い | 入力・状態 | 期待結果 | 備考 |
 |---|---|---|---|
-| package file selection | clean 0.1.0 candidate | library source、examples、tests/fixtures、README、LICENSE、CHANGELOG、SECURITY のみを package 候補に含む | `spec/`、`.agents/`、`.codex/`、`.github/`、`tools/`、実機 trace は除外 |
+| package file selection | clean 0.1.0 candidate | library source、public docs、examples、tests/fixtures、README、LICENSE、CHANGELOG、SECURITY のみを package 候補に含む | `spec/`、`.agents/`、`.codex/`、`.github/`、`tools/`、実機 trace は除外 |
 | registry dependency validation | fixed Git Bumble dependencies | dependency に exact `0.1.0` 版要件を持たせる。registry に同版がない限り `cargo package` と publish を成功扱いにしない | Git source は package 時に registry source へ正規化される |
 | Windows lifecycle guidance | WinUSB/libusbK 対応 driver と専用 adapter | open 中の排他所有、明示 close、unplug、元 backend へ戻す順序を実行可能な command とともに示す | OS 全体の Bluetooth adapter を対象にしない |
 | Linux ownership guidance | kernel driver が HCI interface を所有 | fixed Bumble revision が `set_auto_detach_kernel_driver(true)` 後に claim し、handle Drop で release/reattach する境界を示す | udev permission は別に必要 |
@@ -80,8 +80,8 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 |---|---|---|---|---|
 | refactor-skipped | T01: 0.1.0 package 候補が配布対象だけを含み、registry 用 dependency metadata を持つ | regression | package | 120 files。開発用 root と実機 trace を除外し、8 Git dependency に `=0.1.0` を追加。manifest 構造の追加 refactor は不要 |
 | refactor-done | T02: 6 alias の model/reporting 対応と公開 API 契約を rustdoc と compile 済み example から確認できる | characterization | public API / docs | 既存型契約と全 button wire mapping は green。alias rustdoc に reporting と side-specific input を追記 |
-| todo | T03: Windows 利用者が driver claim、close、unplug、backend rollback を手順どおり実施できる | new | docs | command、排他条件、失敗時の確認点を含める |
-| todo | T04: Linux 利用者が udev permission と kernel driver ownership を区別でき、支援水準を誤認しない | new | docs / source audit | fixed Bumble revision の `set_auto_detach_kernel_driver(true)` と Drop 境界を根拠にする |
+| refactor-done | T03: Windows 利用者が driver claim、close、unplug、backend rollback を手順どおり実施できる | new | docs | WinUSB 専用 adapter、排他 claim、明示 close、reopen、Python rollback を公開 docs に分離 |
+| refactor-done | T04: Linux 利用者が udev permission と kernel driver ownership を区別でき、支援水準を誤認しない | new | docs / source audit | `TAG+="uaccess"` と fixed Bumble/libusb の自動 detach/release を記録。hardware は未検証と明記 |
 | todo | T05: Windows と Linux の CI が all-feature compile/test を実行し、hardware 未検証を置き換えない | regression | CI | Windows job を追加し、Ubuntu job の意味を docs と整合させる |
 | todo | T06: resolved dependency graph の license と SBOM inventory が生成され、未知 license と禁止 source を検出できる | new | package / release | tool 未導入時に検査を省略せず、導入方法か代替の再現 command を定義する |
 | todo | T07: changelog、security policy、hardware matrix、known limitations、source baseline、release/rollback checklist を一続きに辿れる | new | docs / release | M8 timing variation と crates.io dependency blocker を含める |
@@ -168,6 +168,9 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | `cargo check --examples --all-features --locked` | success | public/hardware examples を compile |
 | `cargo test --doc --all-features --locked` | success | 1 passed |
 | `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked` | success | warning なし |
+| `Get-Command Get-PnpDevice` | success | Windows driver 確認 command の入口を確認 |
+| fixed Bumble `bumble-transport/src/usb.rs` source audit | success | auto detach、configuration、claim、alternate setting、handle ownership を確認 |
+| Linux adapter hardware test | not run | 専用 Linux host/adapter がなく、CI と source audit で代替しない |
 | `cargo deny check` | not run | tool availability と policy 作成後に実行 |
 | `git diff --check` | not run | 各 cycle と全体 gate で実行 |
 
