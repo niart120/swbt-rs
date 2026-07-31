@@ -23,6 +23,7 @@ const TRIGGER_ELAPSED_SUBCOMMAND: u8 = 0x04;
 const SIMPLE_ACK_SUBCOMMAND: u8 = 0x08;
 const SPI_READ_SUBCOMMAND: u8 = 0x10;
 const MCU_CONFIG_SUBCOMMAND: u8 = 0x21;
+const NFC_IR_MCU_STATE_SUBCOMMAND: u8 = 0x22;
 const PLAYER_LIGHTS_SUBCOMMAND: u8 = 0x30;
 const IMU_MODE_SUBCOMMAND: u8 = 0x40;
 const VIBRATION_SUBCOMMAND: u8 = 0x48;
@@ -124,6 +125,17 @@ pub(crate) fn try_prepare_stateless_reply<M: ControllerModel>(
         SIMPLE_ACK_SUBCOMMAND => prepare_0x21(request.id(), SIMPLE_ACK, &[], state, timer)?,
         MCU_CONFIG_SUBCOMMAND => {
             prepare_0x21(request.id(), MCU_CONFIG_ACK, &MCU_CONFIG_DATA, state, timer)?
+        }
+        NFC_IR_MCU_STATE_SUBCOMMAND => {
+            let requested = request.payload().first().copied().ok_or(
+                ProtocolError::MissingSubcommandArgument {
+                    subcommand_id: NFC_IR_MCU_STATE_SUBCOMMAND,
+                },
+            )?;
+            if !matches!(requested, 0x00..=0x02) {
+                return Err(ProtocolError::InvalidNfcIrMcuState { requested });
+            }
+            prepare_0x21(request.id(), SIMPLE_ACK, &[], state, timer)?
         }
         _ => return Ok(None),
     };

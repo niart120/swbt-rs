@@ -142,7 +142,7 @@ address、link key、USB serial、error source を出力しない。command acce
 | refactor-done | T03 virtual Classic で L/R の device info、SPI colors、typed input、Periodic/Direct readiness を packet-level 検査する | new/regression | integration | M4の6組 Readyを強化 |
 | refactor-done | T04 L/R 別の同一 profile を Periodic→Direct で再利用し、Direct idle、profile不変、cross-model rejectを検査する | new/regression | integration | Pro-only M6 testを一般化 |
 | refactor-done | T05 hardware runner で Joy-Con L の Periodic pairing、Direct reconnect、入力、close を記録する | new | hardware | machine/UIを別 recordにする |
-| todo | T06 hardware runner で Joy-Con R の Periodic pairing、Direct reconnect、入力、close を記録する | new | hardware | Lと別 profile/evidence |
+| refactor-done | T06 hardware runner で Joy-Con R の Periodic pairing、Direct reconnect、入力、close を記録する | new | hardware | Lと別 profile/evidence |
 | todo | T07 completion gate、public docs、beta.1 criteria note、self-review を確定する | new | docs/package | 未検証事項を明記 |
 
 ### 6.1 TDD cycle evidence
@@ -157,12 +157,14 @@ address、link key、USB serial、error source を出力しない。command acce
 | refactor-done | T03 | red: 6組の virtual packet test に device-info `0x02` と SPI colors `0x10` reply を要求すると、既存 virtual peer が readiness 用の report mode と player lights しか送らないため最初の `0x02` 不在で失敗。green: peer request 列を identity、colors、report mode、player lights の順に拡張し、固定 Python fixture 由来の Pro/L/R device-info 12 bytes、colors 12 bytes、全対応button 3 bytesを各 Periodic/Direct session の実パケットで検査して成功。report mode `0x30` と非0 player lights 後の Ready、typed snapshot、neutral closeを維持した。virtual transport 5 test、all-feature clippy `-D warnings`、rustfmt、diff checkが成功。refactor: model別期待値を1構造体にまとめ、全対応button stateとsubcommand reply検索をgeneric helperへ集約 |
 | refactor-done | T04 | regression-green: 初回の `cargo +1.87.0 test same_joycon_profiles_reconnect_periodic_then_direct_without_model_leakage --all-features --locked` から成功し、既存の model-generic profile key-store/runtime に製品コード不足はなかった。Joy-Con L/R を別 schema v2 fileで検査し、反対側 model の public builder が `ProfileControllerMismatch` を adapter open 前に返すこと、Periodic stored-key reconnect と全対応button、同じfileのDirect reconnect、5 idle stepで追加 `0x30` なし、Direct input、明示neutral、final neutral、各run前後の完全bytes一致を確認。virtual transport 6 test、all-feature clippy `-D warnings`、rustfmt、diff checkが成功。refactor: file-backed profile fixtureをmodel generic化し、L/R共通のreuse helperへ集約 |
 | refactor-done | T05 | red: `cargo test --all-features --example joycon_profile_hardware --locked` は runner target がなく失敗。green: model、reporting、pair/reconnect、timeout、run indexを明示し、adapter selector、profile path、raw profile、key materialを出力しない NDJSON runnerを追加した。Joy-Con L run 1はfresh Periodic Pairが5.808秒でReadyとなり、D-pad 4方向、L+ZL、SL+SR、left stick 4方向、中立close、adapter reopen、新規profileのmodel検査を完了した。run 2は同じprofileのDirect reconnectが3.336秒でReadyとなり、Ready後idleのuser input 0件、各操作のpress/release 2件、明示neutral、close、adapter reopen、profile完全一致を確認した。ユーザは両runで全入力のUI反映と残留入力なしを報告した。runner unit 3 test、rustfmt、secret-free evidence検査が成功。refactor: L/RとPeriodic/Directのdispatch、machine/UI record、profile pre/postflight、操作ごとの受理数と接続維持検査を共通化 |
+| refactor-done | T06 | red: Joy-Con R fresh Pairのrun 3/6は120秒でtimeoutしたがschema v2 bondは保存され、run 7のPeriodic reconnectは通常入力を1,732件受理しながら30秒でReadyにならなかった。statusはreply 14件、最後のsubcommand `0x22`、worker failureなしを示した。pinned Python `0.6.0` / commit `84d2723...` の実装と過去のJoy-Con R実機記録を照合し、RustだけがNFC/IR MCU state `0x22`を未対応と特定した。`nfc_ir_mcu_state_reply_accepts_the_python_supported_modes` は最初、stateless replyが`None`のため失敗した。green: mode `0x00`–`0x02`をACK `0x80`、追加dataなしで受け、payload欠落と未知modeをtyped `ProtocolError`にした。targeted subcommand 14 test、facade routing、all-feature lib clippy `-D warnings`が成功した。修正後run 13は既存bondのPeriodic reconnectが2.303秒でReadyとなり、3秒idleと全入力の間も接続を維持し、中立close、adapter reopen、profile完全一致を完了した。run 14は同じprofileのDirect reconnectが2.027秒でReady、2回の500 ms idleでuser input 0件、各操作2 report、全入力のUI反映、残留入力なしを確認した。Switch登録解除後のrun 15はfresh Periodic Pairが10.588秒でReadyとなり、全入力、中立close、adapter reopen、新規profileと反対側model拒否を完了し、ユーザはJoy-Con R登録と残留入力なしを確認した。500 msのX押下でremote reason `0x13`の切断を再現し、200 msではrun 13–15が成功したためface buttonだけ200 msへ短縮したが、Switch UIの長押し終了条件だったかは未検証。refactor: stateless replyのerror検査helper、接続喪失/入力未受理の即時failure、Periodicのpress/releaseとDirectのtapをrunner内で分離 |
 
 ## 7. 対象ファイル
 
 - `tests/fixtures/python-v0.6.0/profile/`
 - `tests/profile_compat.rs`
 - `src/controller/runtime_tests.rs`
+- `src/protocol/`
 - `src/runtime/transport/virtual_tests.rs`
 - `examples/`
 - `README.md`、crate rustdoc

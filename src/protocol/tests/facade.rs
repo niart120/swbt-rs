@@ -197,6 +197,7 @@ fn every_supported_subcommand_routes_to_the_expected_action_kind() {
         (0x08, &[]),
         (0x10, &[0x12, 0x60, 0x00, 0x00, 0x01]),
         (0x21, &[0x01]),
+        (0x22, &[0x01]),
     ];
     let session_cases: &[(u8, &[u8])] = &[
         (0x03, &[0x30]),

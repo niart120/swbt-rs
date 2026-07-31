@@ -1,0 +1,1 @@
+{"connected_after_pre_input_idle":true,"connection":"reconnect","event":"diagnostic_summary","input_reports_accepted_during_pre_input_idle":194,"last_disconnect_reason":19,"mode":"periodic","model":"joycon_r","pre_input_idle_ms":3000,"run_index":12,"schema":"swbt.m7.joycon-diagnostic-summary","schema_version":1,"x_hold_ms":500,"x_input_reports_accepted_delta":29}
