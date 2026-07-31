@@ -15,6 +15,7 @@ path = "src/lib.rs"
 [features]
 default = []
 adapter-tests = ["bumble"]
+probe = ["bumble"]
 bumble = [
     "dep:bumble",
     "dep:bumble-controller",
@@ -41,3 +42,8 @@ fs2 = "0.4.3"
 rusb = { version = "0.9.4", features = ["vendored"], optional = true }
 serde_json = "1"
 tracing = "0.1"
+
+[[bin]]
+name = "swbt-probe"
+path = "src/bin/swbt-probe.rs"
+required-features = ["probe"]
