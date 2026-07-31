@@ -87,6 +87,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | refactor-done | T07: changelog、security policy、hardware matrix、known limitations、source baseline、release/rollback checklist を一続きに辿れる | new | docs / release | 未公開 candidate と明記し、M8 timing variation、registry 名衝突、private vulnerability reporting 未設定を停止条件にした |
 | deferred | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | crates.io の `bumble@0.1.0` は別実装で、他の必要 crate は未公開。配布境界の再設計が必要。`--no-verify` を成功根拠にしない |
 | refactor-skipped | T09: local gate と public docs review が変更範囲に対して成功し、未実行 hardware/publish を明記する | regression | quality gate | all/default/no-default、MSRV、doc、dependency policy、diff は green。archive、remote CI、hardware/publish は未実行理由を記録。検査後の構造変更は不要 |
+| refactor-done | T10: Bumble session 統合 test が reader thread の packet 分割順序に依存せず公開 transport event を検査する | regression | test harness / CI | PR #11 run `30649447099` で `CommandStatus` 後に空で返る red を記録。残り期限内の再 poll に変更し、対象100回と全 library testが green |
 
 ## 7. 設計メモ
 
@@ -183,6 +184,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | release docs placeholder scan | success | `[TODO]`、`TBD`、`xxx` の残存なし |
 | release docs relative-link audit | success | README、CHANGELOG、SECURITY、platform/troubleshooting、publishing の local link 解決を確認 |
 | `cargo tree --no-default-features --edges normal --locked` | success | Bumble/rusb を含まず、直接依存は atomic-write-file、fs2、serde_json、tracing |
+| Bumble session targeted test | success | 修正後1回と同じ compiled binary の100回反復が成功。全 library 300 passed / 2 ignored、Clippy success |
 | `git diff --check` | success | whitespace error なし |
 
 ## 10. 先送り事項

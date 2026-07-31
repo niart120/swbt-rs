@@ -43,6 +43,38 @@ fmt、MSRV、stable check、clippy、test、protocol-pure、doc も同じ head S
 
 この記録を追加した final head に対する check は merge 前に再実行し、PR 上で確認する。
 
+### CI scheduling regression
+
+証跡だけを追加した head `8e68135f4c6b3974a2d855f19f39e891dadedf53` の run `30649447099` では、
+Linux `test` job の `bumble_session_drives_pairing_connection_drain_and_disconnect` が1回失敗した。
+299 tests は成功し、失敗 assertion は実値 `[]`、期待値 `[Connected]` だった。同じ head の Windows
+all-feature test と、直前 head の Linux test は成功した。
+
+原因は、test が reader thread へ `CommandStatus` と `ConnectionComplete` を連続投入し、1回の
+`poll()` で両方が処理されると仮定していたこと。内部 HCI activity だけを処理した `poll()` は公開
+transport event を持たず空で返せるため、reader scheduling によって assertion が先行した。
+
+製品の `poll()` 契約は変更せず、test helper が1秒の同じ期限内で空の結果を再 poll し、最初の公開
+event を返すようにした。接続と HID interrupt channel configuration の2 assertion に適用した。
+
+修正後の検証:
+
+- 対象 test 1回: pass
+- 同じ compiled test binary の対象 test 100回: 100 passed
+- `cargo test --lib --all-features --locked`: 300 passed / 2 ignored
+- `cargo clippy --all-targets --all-features --locked -- -D warnings`: pass
+- `cargo fmt --all --check`、`git diff --check`: pass
+
+### Test Desiderata Review
+
+| test | value | trade-off | decision |
+|---|---|---|---|
+| Bumble session connection/HID integration | production session と非同期 reader の境界を検査 | real thread と最大1秒の deadline を使う | 外部 I/O は使わず、内部 packet 数ではなく公開 event を期限内に待つ |
+| targeted 100-run repeat | scheduler 競合の回帰を短時間で検出 | Windows の scheduling だけを観測 | remote Linux gate と組み合わせ、単独で cross-platform 証明としない |
+
+失敗時は assertion context と「公開 event 前に timeout」を表示する。sleep、network、USB、実機には
+依存しない。
+
 ## 未成功 / 未実行
 
 - `cargo package --locked`: `bumble-controller@0.1.0` が crates.io にないため停止。
