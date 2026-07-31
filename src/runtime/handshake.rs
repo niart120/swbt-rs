@@ -75,6 +75,7 @@ impl StdError for HandshakeError {
 
 pub(crate) struct Handshake {
     session_id: ConnectionSessionId,
+    completion_condition: HandshakeCompletionCondition,
     link_observed: bool,
     control_observed: bool,
     interrupt_observed: bool,
@@ -83,10 +84,37 @@ pub(crate) struct Handshake {
     bootstrap_stopped: bool,
 }
 
+#[derive(Clone, Copy)]
+enum HandshakeCompletionCondition {
+    FirstSubcommand,
+    ProtocolReady,
+}
+
+impl HandshakeCompletionCondition {
+    fn is_satisfied(self, observed: &ObservedSubcommands, protocol_ready: bool) -> bool {
+        match self {
+            Self::FirstSubcommand => !observed.is_empty(),
+            Self::ProtocolReady => protocol_ready,
+        }
+    }
+}
+
 impl Handshake {
     pub(crate) const fn new(session_id: ConnectionSessionId) -> Self {
+        Self::with_completion_condition(session_id, HandshakeCompletionCondition::FirstSubcommand)
+    }
+
+    pub(crate) const fn until_protocol_ready(session_id: ConnectionSessionId) -> Self {
+        Self::with_completion_condition(session_id, HandshakeCompletionCondition::ProtocolReady)
+    }
+
+    const fn with_completion_condition(
+        session_id: ConnectionSessionId,
+        completion_condition: HandshakeCompletionCondition,
+    ) -> Self {
         Self {
             session_id,
+            completion_condition,
             link_observed: false,
             control_observed: false,
             interrupt_observed: false,
@@ -160,7 +188,11 @@ impl Handshake {
         if !self.topology_ready() {
             return Ok(HandshakeProgress::WaitingForTopology);
         }
-        if self.bootstrap_accepted && !observed.is_empty() {
+        if self.bootstrap_accepted
+            && self
+                .completion_condition
+                .is_satisfied(observed, sender.session().protocol_ready())
+        {
             self.stop_bootstrap();
             return Ok(HandshakeProgress::SubcommandObserved);
         }
@@ -171,7 +203,12 @@ impl Handshake {
                 let scheduler = ReportScheduler::start(now, BOOTSTRAP_RETRY)?;
                 self.retry = Some(scheduler);
                 let result = send_bootstrap(now_ns, protocol, sender, transport);
-                Ok(self.record_bootstrap_attempt(observed, result, 0))
+                Ok(self.record_bootstrap_attempt(
+                    observed,
+                    sender.session().protocol_ready(),
+                    result,
+                    0,
+                ))
             }
             Some(scheduler) => {
                 let deadline = scheduler.next_deadline();
@@ -185,7 +222,12 @@ impl Handshake {
                     });
                 };
                 let result = send_bootstrap(now_ns, protocol, sender, transport);
-                Ok(self.record_bootstrap_attempt(observed, result, skipped))
+                Ok(self.record_bootstrap_attempt(
+                    observed,
+                    sender.session().protocol_ready(),
+                    result,
+                    skipped,
+                ))
             }
         }
     }
@@ -193,12 +235,16 @@ impl Handshake {
     fn record_bootstrap_attempt(
         &mut self,
         observed: &ObservedSubcommands,
+        protocol_ready: bool,
         result: TransportResult<SendAcceptance>,
         skipped: u64,
     ) -> HandshakeProgress {
         if result.is_ok() {
             self.bootstrap_accepted = true;
-            if !observed.is_empty() {
+            if self
+                .completion_condition
+                .is_satisfied(observed, protocol_ready)
+            {
                 self.stop_bootstrap();
             }
         }

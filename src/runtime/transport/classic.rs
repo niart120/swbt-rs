@@ -46,6 +46,7 @@ struct PairingWindow {
 struct ReconnectWindow {
     peer_address: Address,
     connection_request_accepted: bool,
+    initiate: bool,
 }
 
 struct ConnectionSession {
@@ -65,6 +66,7 @@ struct SdpChannel {
 #[derive(Clone, Copy)]
 struct Channel {
     cid: u16,
+    opened: bool,
 }
 
 impl ClassicDeviceSession {
@@ -173,6 +175,7 @@ impl ClassicDeviceSession {
         self.reconnect = Some(ReconnectWindow {
             peer_address: peer_address.clone(),
             connection_request_accepted: false,
+            initiate,
         });
         if initiate {
             device.connect_classic(link, peer_address);
@@ -201,7 +204,7 @@ impl ClassicDeviceSession {
         let events = device.take_device_events();
         self.process_device_events(device, link, events)?;
         if self.current.is_some() {
-            self.accept_channels(device);
+            self.accept_channels(device, link)?;
             self.process_sdp(device, link)?;
             self.process_hid(device, link)?;
         }
@@ -282,7 +285,7 @@ impl ClassicDeviceSession {
                 .sdp_channels
                 .keys()
                 .copied()
-                .map(|cid| Channel { cid }),
+                .map(|cid| Channel { cid, opened: true }),
         );
         for channel in channels {
             let is_open = device
@@ -388,18 +391,39 @@ impl ClassicDeviceSession {
                             && current.peer_address == connection.peer_address
                     });
                     if self.current.is_none() {
+                        let connection_handle = connection.connection_handle;
+                        let encryption_enabled = connection.encryption_enabled;
                         device
                             .set_discoverable(link, false)
                             .map_err(map_pairing_source)?;
                         device.set_connectable(link, false);
                         self.current = Some(ConnectionSession {
-                            handle: connection.connection_handle,
+                            handle: connection_handle,
                             peer_address: connection.peer_address,
                             sdp_channels: BTreeMap::new(),
                             control: None,
                             interrupt: None,
                             hidp: HidpBridge::new(0, 0),
                         });
+                        let active_reconnect = self
+                            .reconnect
+                            .as_ref()
+                            .is_some_and(|reconnect| reconnect.initiate);
+                        if active_reconnect {
+                            if encryption_enabled != 0 {
+                                self.start_active_reconnect_control(
+                                    device,
+                                    link,
+                                    connection_handle,
+                                )?;
+                            } else if !device
+                                .authenticate_classic_on_handle(link, connection_handle)
+                            {
+                                return Err(TransportError::new(
+                                    TransportErrorKind::SourceTerminated,
+                                ));
+                            }
+                        }
                         self.enqueue(TransportEvent::Connected);
                     } else if is_current {
                         continue;
@@ -421,6 +445,34 @@ impl ClassicDeviceSession {
                 }
                 DeviceEvent::ClassicPairing(event) => {
                     self.process_pairing_event(device, link, event)?;
+                }
+                DeviceEvent::EncryptionChange {
+                    status,
+                    connection_handle,
+                    encryption_enabled,
+                    ..
+                } if self
+                    .current
+                    .as_ref()
+                    .is_some_and(|current| current.handle == connection_handle) =>
+                {
+                    if status == 0 && encryption_enabled != 0 {
+                        self.start_active_reconnect_control(device, link, connection_handle)?;
+                    } else if self
+                        .reconnect
+                        .as_ref()
+                        .is_some_and(|reconnect| reconnect.initiate)
+                    {
+                        self.fail_pairing(
+                            device,
+                            link,
+                            if status == 0 {
+                                AUTHENTICATION_FAILURE
+                            } else {
+                                status
+                            },
+                        )?;
+                    }
                 }
                 _ => {}
             }
@@ -451,6 +503,22 @@ impl ClassicDeviceSession {
                     .is_some_and(|current| current.handle == connection_handle) =>
             {
                 self.fail_pairing(device, link, status)?;
+            }
+            ClassicPairingEvent::AuthenticationComplete {
+                status: 0,
+                connection_handle,
+            } if self
+                .reconnect
+                .as_ref()
+                .is_some_and(|reconnect| reconnect.initiate)
+                && self
+                    .current
+                    .as_ref()
+                    .is_some_and(|current| current.handle == connection_handle) =>
+            {
+                if !device.set_classic_encryption_on_handle(link, connection_handle, true) {
+                    return Err(TransportError::new(TransportErrorKind::SourceTerminated));
+                }
             }
             ClassicPairingEvent::PinCodeRequest { peer_address } => {
                 link.handle_command(
@@ -562,9 +630,13 @@ impl ClassicDeviceSession {
         Ok(())
     }
 
-    fn accept_channels(&mut self, device: &mut Device) {
+    fn accept_channels(
+        &mut self,
+        device: &mut Device,
+        link: &mut (dyn HostTransport + 'static),
+    ) -> TransportResult<()> {
         let Some(handle) = self.current.as_ref().map(|current| current.handle) else {
-            return;
+            return Ok(());
         };
         for cid in device.take_accepted_classic_channels(handle) {
             let Some(channel) = device.classic_channel(handle, cid) else {
@@ -587,15 +659,17 @@ impl ClassicDeviceSession {
                                 pending: VecDeque::new(),
                             });
                     }
-                    HID_CONTROL_PSM if current.control.is_none() => {
-                        current.control = Some(Channel { cid });
+                    HID_CONTROL_PSM if current.control.is_none_or(|channel| !channel.opened) => {
+                        current.control = Some(Channel { cid, opened: true });
                         current
                             .hidp
                             .set_peer_mtu(HidChannel::Control, usize::from(peer_mtu));
                         opened = Some(HidChannel::Control);
                     }
-                    HID_INTERRUPT_PSM if current.interrupt.is_none() => {
-                        current.interrupt = Some(Channel { cid });
+                    HID_INTERRUPT_PSM
+                        if current.interrupt.is_none_or(|channel| !channel.opened) =>
+                    {
+                        current.interrupt = Some(Channel { cid, opened: true });
                         current
                             .hidp
                             .set_peer_mtu(HidChannel::Interrupt, usize::from(peer_mtu));
@@ -608,6 +682,112 @@ impl ClassicDeviceSession {
                 self.enqueue(TransportEvent::HidChannelOpened { channel });
             }
         }
+        self.advance_active_reconnect_channels(device, link)
+    }
+
+    fn advance_active_reconnect_channels(
+        &mut self,
+        device: &mut Device,
+        link: &mut (dyn HostTransport + 'static),
+    ) -> TransportResult<()> {
+        if !self
+            .reconnect
+            .as_ref()
+            .is_some_and(|reconnect| reconnect.initiate)
+        {
+            return Ok(());
+        }
+        let Some(handle) = self.current.as_ref().map(|current| current.handle) else {
+            return Ok(());
+        };
+
+        for (kind, expected_psm) in [
+            (HidChannel::Control, HID_CONTROL_PSM),
+            (HidChannel::Interrupt, HID_INTERRUPT_PSM),
+        ] {
+            let pending = self.current.as_ref().and_then(|current| match kind {
+                HidChannel::Control => current.control,
+                HidChannel::Interrupt => current.interrupt,
+            });
+            let Some(channel) = pending.filter(|channel| !channel.opened) else {
+                continue;
+            };
+            let Some(peer_mtu) = device
+                .classic_channel(handle, channel.cid)
+                .filter(|candidate| {
+                    candidate.state == ClassicChannelState::Open && candidate.psm == expected_psm
+                })
+                .map(|candidate| candidate.peer_mtu)
+            else {
+                continue;
+            };
+            if let Some(current) = self.current.as_mut() {
+                match kind {
+                    HidChannel::Control => {
+                        current.control = Some(Channel {
+                            cid: channel.cid,
+                            opened: true,
+                        })
+                    }
+                    HidChannel::Interrupt => {
+                        current.interrupt = Some(Channel {
+                            cid: channel.cid,
+                            opened: true,
+                        })
+                    }
+                }
+                current.hidp.set_peer_mtu(kind, usize::from(peer_mtu));
+            }
+            self.enqueue(TransportEvent::HidChannelOpened { channel: kind });
+        }
+
+        let start_interrupt = self.current.as_ref().is_some_and(|current| {
+            current.control.is_some_and(|channel| channel.opened) && current.interrupt.is_none()
+        });
+        if start_interrupt {
+            let cid = device
+                .connect_classic_channel(
+                    link,
+                    handle,
+                    HID_INTERRUPT_PSM,
+                    ClassicChannelSpec { mtu: SERVER_MTU },
+                )
+                .map_err(map_source_terminated)?;
+            if let Some(current) = self.current.as_mut() {
+                current.interrupt = Some(Channel { cid, opened: false });
+            }
+        }
+        Ok(())
+    }
+
+    fn start_active_reconnect_control(
+        &mut self,
+        device: &mut Device,
+        link: &mut (dyn HostTransport + 'static),
+        connection_handle: u16,
+    ) -> TransportResult<()> {
+        let start_control = self
+            .reconnect
+            .as_ref()
+            .is_some_and(|reconnect| reconnect.initiate)
+            && self.current.as_ref().is_some_and(|current| {
+                current.handle == connection_handle && current.control.is_none()
+            });
+        if !start_control {
+            return Ok(());
+        }
+        let cid = device
+            .connect_classic_channel(
+                link,
+                connection_handle,
+                HID_CONTROL_PSM,
+                ClassicChannelSpec { mtu: SERVER_MTU },
+            )
+            .map_err(map_source_terminated)?;
+        if let Some(current) = self.current.as_mut() {
+            current.control = Some(Channel { cid, opened: false });
+        }
+        Ok(())
     }
 
     fn process_sdp(
@@ -681,7 +861,8 @@ impl ClassicDeviceSession {
         ];
         for (channel_kind, channel) in channels {
             let Some(channel) = channel else { continue };
-            for sdu in device.take_classic_channel_sdus(handle, channel.cid) {
+            let sdus = device.take_classic_channel_sdus(handle, channel.cid);
+            for sdu in sdus {
                 let Some(current) = self.current.as_mut() else {
                     return Ok(());
                 };
@@ -771,11 +952,11 @@ fn map_pairing_source(error: impl std::error::Error + Send + Sync + 'static) -> 
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc::TryRecvError;
+    use std::{collections::VecDeque, sync::mpsc::TryRecvError};
 
     use bumble::{Address, AddressType};
     use bumble_controller::{Controller, LocalLink};
-    use bumble_hci::{AclDataPacket, Command, HciPacket, IsoDataPacket};
+    use bumble_hci::{AclDataPacket, Command, Event, HciPacket, IsoDataPacket};
     use bumble_host::{
         ClassicPairingEvent, Device, DeviceConfiguration, DeviceEvent, HostTransport, pump,
     };
@@ -975,6 +1156,134 @@ mod tests {
             [TransportEvent::Disconnected {
                 reason: Some(AUTHENTICATION_FAILURE),
             }]
+        );
+    }
+
+    #[test]
+    fn stored_key_reconnect_authenticates_then_enables_encryption() {
+        let mut link = RecordingLink::default();
+        let mut device = configured_device(7);
+        let (activity, _wakes) = activity_channel();
+        let mut session = ClassicDeviceSession::new(&TransportConfig::for_model::<Pro>(), activity);
+        let peer = address(INITIATOR_ADDRESS);
+        let connection_handle = 0x0040;
+
+        session
+            .start_reconnect(&mut device, &mut link, peer.clone(), true)
+            .expect("start active stored-key reconnect");
+        link.commands.clear();
+        link.events
+            .push_back(HciPacket::Event(Event::ConnectionComplete {
+                status: 0,
+                connection_handle,
+                bd_addr: peer,
+                link_type: 0x01,
+                encryption_enabled: 0,
+            }));
+        device.poll(&mut link);
+        let events = device.take_device_events();
+        session
+            .process_device_events(&mut device, &mut link, events)
+            .expect("accept the stored peer ACL");
+
+        assert!(link.commands.iter().any(|command| matches!(
+            command,
+            Command::AuthenticationRequested {
+                connection_handle: authenticated_handle
+            } if *authenticated_handle == connection_handle
+        )));
+
+        link.commands.clear();
+        session
+            .process_device_events(
+                &mut device,
+                &mut link,
+                [pairing_event(ClassicPairingEvent::AuthenticationComplete {
+                    status: 0,
+                    connection_handle,
+                })],
+            )
+            .expect("complete stored-key authentication");
+        assert!(link.commands.iter().any(|command| matches!(
+            command,
+            Command::SetConnectionEncryption {
+                connection_handle: encrypted_handle,
+                encryption_enable: 1,
+            } if *encrypted_handle == connection_handle
+        )));
+
+        session
+            .process_device_events(
+                &mut device,
+                &mut link,
+                [DeviceEvent::EncryptionChange {
+                    status: 0,
+                    connection_handle,
+                    encryption_enabled: 1,
+                    encryption_key_size: 16,
+                }],
+            )
+            .expect("start active HID control channel after encryption");
+        let control = session
+            .current
+            .as_ref()
+            .and_then(|current| current.control)
+            .expect("active reconnect retains the outgoing control channel");
+        assert!(!control.opened);
+        assert_eq!(
+            device
+                .classic_channel(connection_handle, control.cid)
+                .expect("outgoing control channel exists")
+                .psm,
+            HID_CONTROL_PSM
+        );
+    }
+
+    #[test]
+    fn stored_key_reconnect_with_encrypted_acl_starts_control_without_authentication() {
+        let mut link = RecordingLink::default();
+        let mut device = configured_device(7);
+        let (activity, _wakes) = activity_channel();
+        let mut session = ClassicDeviceSession::new(&TransportConfig::for_model::<Pro>(), activity);
+        let peer = address(INITIATOR_ADDRESS);
+        let connection_handle = 0x0040;
+
+        session
+            .start_reconnect(&mut device, &mut link, peer.clone(), true)
+            .expect("start active stored-key reconnect");
+        link.commands.clear();
+        link.events
+            .push_back(HciPacket::Event(Event::ConnectionComplete {
+                status: 0,
+                connection_handle,
+                bd_addr: peer,
+                link_type: 0x01,
+                encryption_enabled: 1,
+            }));
+        device.poll(&mut link);
+        let events = device.take_device_events();
+        session
+            .process_device_events(&mut device, &mut link, events)
+            .expect("accept the already-encrypted stored peer ACL");
+
+        assert!(
+            !link
+                .commands
+                .iter()
+                .any(|command| matches!(command, Command::AuthenticationRequested { .. }))
+        );
+        let control = session
+            .current
+            .as_ref()
+            .and_then(|current| current.control)
+            .expect("encrypted reconnect starts the outgoing control channel");
+        assert!(!control.opened);
+        assert_eq!(
+            device
+                .classic_channel(connection_handle, control.cid)
+                .expect("outgoing control channel exists")
+                .psm,
+            HID_CONTROL_PSM
         );
     }
 
@@ -1255,6 +1564,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingLink {
         commands: Vec<Command>,
+        events: VecDeque<HciPacket>,
     }
 
     impl HostTransport for RecordingLink {
@@ -1263,7 +1573,7 @@ mod tests {
         }
 
         fn send_acl_packet(&mut self, _controller_id: usize, _packet: AclDataPacket) -> bool {
-            false
+            true
         }
 
         fn send_synchronous_data(
@@ -1281,7 +1591,7 @@ mod tests {
         }
 
         fn drain_host_events(&mut self, _controller_id: usize) -> Vec<HciPacket> {
-            Vec::new()
+            self.events.drain(..).collect()
         }
     }
 

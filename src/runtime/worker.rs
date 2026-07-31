@@ -480,6 +480,8 @@ pub(crate) trait WorkerReporting<M: ControllerModel>: ReportingMode {
         input: &mut InputStateStore<M>,
     ) -> Result<ConnectionSessionId, SessionError>;
 
+    fn begin_handshake(session_id: ConnectionSessionId) -> Handshake;
+
     fn handle_command(
         runtime: &mut Self::RuntimeState,
         command: <Self as reporting::sealed::Sealed>::Command<M>,
@@ -755,7 +757,7 @@ where
         };
         self.connection = Some(ConnectionWork {
             session_id,
-            handshake: Some(Handshake::new(session_id)),
+            handshake: Some(R::begin_handshake(session_id)),
             readiness: ReadinessGate::new(session_id, operation_deadline),
         });
         self.connected = false;
@@ -1448,6 +1450,10 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
         sessions.begin_periodic(sender, &mut runtime.policy, observed, input)
     }
 
+    fn begin_handshake(session_id: ConnectionSessionId) -> Handshake {
+        Handshake::new(session_id)
+    }
+
     fn handle_command(
         runtime: &mut Self::RuntimeState,
         command: <Self as reporting::sealed::Sealed>::Command<M>,
@@ -1685,6 +1691,10 @@ impl<M: ControllerModel> WorkerReporting<M> for Direct {
         input: &mut InputStateStore<M>,
     ) -> Result<ConnectionSessionId, SessionError> {
         sessions.begin_direct(sender, observed, input)
+    }
+
+    fn begin_handshake(session_id: ConnectionSessionId) -> Handshake {
+        Handshake::until_protocol_ready(session_id)
     }
 
     fn handle_command(
@@ -3056,6 +3066,94 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             [(0x30, 0, None), (0x21, 1, Some(0x03)), (0x30, 2, None),]
+        );
+    }
+
+    #[test]
+    fn direct_worker_retries_bootstrap_until_protocol_ready_then_stays_idle() {
+        let (mut transport, control) = FakeTransport::with_limits(8, 8);
+        let (notifier, _receiver) = activity_channel();
+        transport.open(notifier).expect("open fake transport");
+        let clock = FakeClock::at(Duration::ZERO);
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let mut worker = WorkerCore::new_direct(
+            protocol(),
+            Box::new(transport),
+            WorkerBudget::new(1, 1),
+            Box::new(|_| {}),
+        );
+        worker
+            .begin_connection(clock.now(), CONNECTION_TIMEOUT)
+            .expect("begin fake connection");
+        control.script_sends([
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Accepted,
+            ScriptedSendOutcome::Accepted,
+        ]);
+        control.inject_connected().expect("link event");
+        control
+            .inject_hid_channel_opened(HidChannel::Control)
+            .expect("control channel");
+        control
+            .inject_hid_channel_opened(HidChannel::Interrupt)
+            .expect("interrupt channel");
+        let mut commands = TracedCommands::new([], trace);
+        let mut no_shutdown = ShutdownLatch::default();
+
+        assert!(matches!(
+            worker.step(&clock, &mut no_shutdown, &mut commands),
+            WorkerStep::Continue(_)
+        ));
+        clock.set(Duration::from_millis(10));
+        control
+            .inject_hid_output(HidChannel::Interrupt, &subcommand_report(0x03, &[0x30]))
+            .expect("report mode");
+        assert!(matches!(
+            worker.step(&clock, &mut no_shutdown, &mut commands),
+            WorkerStep::Continue(_)
+        ));
+        assert_eq!(worker.lifecycle_state(), LifecycleState::Connecting);
+
+        clock.set(Duration::from_secs(1));
+        assert!(matches!(
+            worker.step(&clock, &mut no_shutdown, &mut commands),
+            WorkerStep::Continue(_)
+        ));
+        assert_eq!(
+            control
+                .accepted_interrupts()
+                .iter()
+                .map(|report| (
+                    report[0],
+                    report[1],
+                    (report[0] == 0x21).then_some(report[14]),
+                ))
+                .collect::<Vec<_>>(),
+            [(0x30, 0, None), (0x21, 1, Some(0x03)), (0x30, 2, None)],
+            "Direct must send a readiness-only bootstrap after report mode"
+        );
+
+        clock.set(Duration::from_millis(1_010));
+        control
+            .inject_hid_output(HidChannel::Interrupt, &subcommand_report(0x30, &[0x01]))
+            .expect("player lights");
+        assert!(matches!(
+            worker.step(&clock, &mut no_shutdown, &mut commands),
+            WorkerStep::Continue(_)
+        ));
+        assert_eq!(worker.lifecycle_state(), LifecycleState::Ready);
+
+        let ready_report_count = control.accepted_interrupts().len();
+        clock.set(Duration::from_secs(2));
+        assert!(matches!(
+            worker.step(&clock, &mut no_shutdown, &mut commands),
+            WorkerStep::Continue(_)
+        ));
+        assert_eq!(
+            control.accepted_interrupts().len(),
+            ready_report_count,
+            "Direct must stop automatic reports after readiness"
         );
     }
 
