@@ -86,7 +86,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | refactor-done | T06: resolved dependency graph の license と SBOM inventory が生成され、未知 license と禁止 source を検出できる | new | package / release | cargo-deny policy と Windows/Linux CycloneDX 1.5 SBOM を追加。CI job でも検査 |
 | refactor-done | T07: changelog、security policy、hardware matrix、known limitations、source baseline、release/rollback checklist を一続きに辿れる | new | docs / release | 未公開 candidate と明記し、M8 timing variation、registry 名衝突、private vulnerability reporting 未設定を停止条件にした |
 | deferred | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | crates.io の `bumble@0.1.0` は別実装で、他の必要 crate は未公開。配布境界の再設計が必要。`--no-verify` を成功根拠にしない |
-| todo | T09: local gate と public docs review が変更範囲に対して成功し、未実行 hardware/publish を明記する | regression | quality gate | all/default/no-default、MSRV、doc、package、diff を記録する |
+| refactor-skipped | T09: local gate と public docs review が変更範囲に対して成功し、未実行 hardware/publish を明記する | regression | quality gate | all/default/no-default、MSRV、doc、dependency policy、diff は green。archive、remote CI、hardware/publish は未実行理由を記録。検査後の構造変更は不要 |
 
 ## 7. 設計メモ
 
@@ -159,14 +159,15 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 |---|---|---|
 | `cargo package --locked --list` | success | 最終 candidate 124 files。`.agents/`、`.codex/`、`.github/`、`spec/`、`tools/`、実機 trace を含まない |
 | `cargo package --locked` | failed (tracked blocker) | manifest 検査と packaging 開始後、crates.io に `bumble-controller@0.1.0` がなく停止 |
-| `cargo fmt --all --check` | not run | 実装後に実行 |
-| `cargo check --all-targets --all-features --locked` | not run | 実装後に current Rust と MSRV 1.87 で実行 |
-| `cargo clippy --all-targets --all-features --locked -- -D warnings` | not run | 実装後に実行 |
-| `cargo test --all-targets --all-features --locked` | not run | 実装後に実行 |
-| `cargo test --all-targets --locked` | not run | default feature 利用を検査 |
-| `cargo test --lib protocol:: --no-default-features --locked` | not run | Bumble-free 境界を検査 |
-| `cargo build --all-features --locked` | not run | 実装後に実行 |
-| `cargo build --no-default-features --locked` | not run | 実装後に実行 |
+| `cargo fmt --all --check` | success | Rust source の整形 |
+| `cargo +1.87.0 check --all-targets --all-features --locked` | success | MSRV で全 target/feature compile |
+| `cargo check --all-targets --all-features --locked` | success | current toolchain で全 target/feature compile |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | success | warning なし |
+| `cargo test --all-targets --all-features --locked` | success | library 300 passed / 2 ignored、probe 9 passed、統合/example test success、hardware 5 ignored |
+| `cargo test --all-targets --locked` | success | default feature library 256 passed / 1 ignored、統合/example test success |
+| `cargo test --lib protocol:: --no-default-features --locked` | success | 65 passed |
+| `cargo build --all-features --locked` | success | all-feature build |
+| `cargo build --no-default-features --locked` | success | Bumble-free build |
 | GitHub Actions `windows` | not run | workflow 追加済み。PR head の remote run で確定する |
 | `cargo test --test controller_type_contract --locked` | success | 2 passed。6 alias と builder の2型軸を検査 |
 | `cargo test --lib model::tests --no-default-features --locked` | success | 3 passed。model metadata と全 button wire mapping を検査 |
@@ -181,7 +182,8 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | fixture/package secret audit | success | JSON fixture 4件の provenance と合成 key 3件を確認。代表 credential pattern 0件、実機 profile/trace の収録なし |
 | release docs placeholder scan | success | `[TODO]`、`TBD`、`xxx` の残存なし |
 | release docs relative-link audit | success | README、CHANGELOG、SECURITY、platform/troubleshooting、publishing の local link 解決を確認 |
-| `git diff --check` | not run | 各 cycle と全体 gate で実行 |
+| `cargo tree --no-default-features --edges normal --locked` | success | Bumble/rusb を含まず、直接依存は atomic-write-file、fs2、serde_json、tracing |
+| `git diff --check` | success | whitespace error なし |
 
 ## 10. 先送り事項
 
@@ -197,10 +199,10 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test List を作成した
-- [ ] TDD Test List の各 item を更新した
+- [x] TDD Test List の各 item を更新した
 - [x] Windows/Linux/macOS の支援水準を公開文書へ反映した
 - [x] public API、alias、model/mapping、examples を監査した
 - [x] package file list、license/SBOM、security、changelog を検査した
 - [x] release/rollback runbook と blocker を検査した
-- [ ] 検証結果または未実行理由を記録した
+- [x] 検証結果または未実行理由を記録した
 - [x] package / release / public API に触れる gate を記録した
