@@ -14,7 +14,7 @@ use bumble_sdp::{DataElement, SdpPdu};
 use serde_json::json;
 
 use crate::diagnostics::LifecycleState;
-use crate::input::{InputState, ProButton};
+use crate::input::{Button, InputState, ProButton};
 use crate::model::{ControllerModel, JoyConL, JoyConR, Pro};
 use crate::protocol::SwitchHidProtocol;
 use crate::reporting::{Direct, Periodic, ReportingMode};
@@ -42,6 +42,43 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_secs(2);
 const STEP: Duration = Duration::from_millis(10);
 const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
 static NEXT_PROFILE_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy)]
+struct ModelPacketExpectation {
+    device_info: [u8; 12],
+    colors: [u8; 12],
+    buttons: [u8; 3],
+}
+
+const PRO_PACKET_EXPECTATION: ModelPacketExpectation = ModelPacketExpectation {
+    device_info: [
+        0x04, 0x00, 0x03, 0x02, 0x00, 0x1B, 0xDC, 0xF9, 0x9F, 0x7D, 0x03, 0x02,
+    ],
+    colors: [
+        0x32, 0x32, 0x32, 0xFF, 0xFF, 0xFF, 0x00, 0xB2, 0xFF, 0xFF, 0x3B, 0x30,
+    ],
+    buttons: [0xCF, 0x3F, 0xCF],
+};
+
+const JOYCON_L_PACKET_EXPECTATION: ModelPacketExpectation = ModelPacketExpectation {
+    device_info: [
+        0x04, 0x00, 0x01, 0x02, 0x00, 0x1B, 0xDC, 0xF9, 0x9F, 0x7D, 0x01, 0x01,
+    ],
+    colors: [
+        0x00, 0xB2, 0xFF, 0x32, 0x32, 0x32, 0x00, 0xB2, 0xFF, 0x00, 0xB2, 0xFF,
+    ],
+    buttons: [0x00, 0x29, 0xFF],
+};
+
+const JOYCON_R_PACKET_EXPECTATION: ModelPacketExpectation = ModelPacketExpectation {
+    device_info: [
+        0x04, 0x00, 0x02, 0x02, 0x00, 0x1B, 0xDC, 0xF9, 0x9F, 0x7D, 0x01, 0x01,
+    ],
+    colors: [
+        0xFF, 0x3B, 0x30, 0x32, 0x32, 0x32, 0xFF, 0x3B, 0x30, 0xFF, 0x3B, 0x30,
+    ],
+    buttons: [0xFF, 0x16, 0x00],
+};
 
 #[test]
 fn pro_periodic_reaches_ready_and_emits_typed_then_neutral_input() {
@@ -108,8 +145,8 @@ fn pro_periodic_reaches_ready_and_emits_typed_then_neutral_input() {
                 .iter()
                 .filter(|report| report.first() == Some(&0x21))
                 .count()
-                >= 2,
-            "peer receives report-mode and player-light replies"
+                >= 4,
+            "peer receives identity, color, report-mode, and player-light replies"
         );
     }
 
@@ -168,13 +205,13 @@ fn pro_periodic_reaches_ready_and_emits_typed_then_neutral_input() {
 }
 
 #[test]
-fn all_model_reporting_combinations_reach_ready_over_the_virtual_packet_path() {
-    run_periodic_case::<Pro>();
-    run_direct_case::<Pro>();
-    run_periodic_case::<JoyConL>();
-    run_direct_case::<JoyConL>();
-    run_periodic_case::<JoyConR>();
-    run_direct_case::<JoyConR>();
+fn all_model_reporting_combinations_preserve_identity_and_input_over_the_virtual_packet_path() {
+    run_periodic_case::<Pro>(PRO_PACKET_EXPECTATION);
+    run_direct_case::<Pro>(PRO_PACKET_EXPECTATION);
+    run_periodic_case::<JoyConL>(JOYCON_L_PACKET_EXPECTATION);
+    run_direct_case::<JoyConL>(JOYCON_L_PACKET_EXPECTATION);
+    run_periodic_case::<JoyConR>(JOYCON_R_PACKET_EXPECTATION);
+    run_direct_case::<JoyConR>(JOYCON_R_PACKET_EXPECTATION);
 }
 
 #[test]
@@ -430,8 +467,8 @@ fn run_reconnect_case(direction: VirtualReconnectDirection, expected_swbt_role: 
                 .iter()
                 .filter(|report| report.first() == Some(&0x21))
                 .count(),
-            2,
-            "report-mode and player-light replies belong to the reconnect session"
+            4,
+            "identity, color, report-mode, and player-light replies belong to the reconnect session"
         );
     }
     close_ready_worker(&mut worker, &reader, &clock, &mut shutdown, &mut commands);
@@ -443,7 +480,7 @@ enum VirtualReconnectDirection {
     Incoming,
 }
 
-fn run_periodic_case<M: ControllerModel>() {
+fn run_periodic_case<M: ControllerModel>(expected: ModelPacketExpectation) {
     let (transport, trace) = VirtualClassicTransport::new::<M>();
     let (status, reader) = status_projection();
     let mut worker = WorkerCore::new_periodic_with_status(
@@ -467,11 +504,26 @@ fn run_periodic_case<M: ControllerModel>() {
         &mut shutdown,
         &mut commands,
     );
-    assert_common_virtual_trace(&trace, 1);
+    let state = all_supported_buttons_state::<M>();
+    commands.push(RuntimeCommand::Input(PeriodicCommand::Apply(state.clone())));
+    for _ in 0..50 {
+        clock.advance(REPORT_PERIOD);
+        let WorkerStep::Continue(mut progress) =
+            worker.step_runtime(&clock, &mut shutdown, &mut commands)
+        else {
+            panic!("Periodic input must keep the virtual worker running");
+        };
+        assert_command_successes(&mut progress);
+        if has_input_buttons(&trace, expected.buttons) {
+            break;
+        }
+    }
+    assert_eq!(reader.snapshot(), state);
+    assert_model_virtual_trace(&trace, expected);
     close_ready_worker(&mut worker, &reader, &clock, &mut shutdown, &mut commands);
 }
 
-fn run_direct_case<M: ControllerModel>() {
+fn run_direct_case<M: ControllerModel>(expected: ModelPacketExpectation) {
     let (transport, trace) = VirtualClassicTransport::new::<M>();
     let (status, reader) = status_projection();
     let mut worker = WorkerCore::new_direct_with_status(
@@ -493,7 +545,16 @@ fn run_direct_case<M: ControllerModel>() {
         &mut shutdown,
         &mut commands,
     );
-    assert_common_virtual_trace(&trace, 1);
+    let state = all_supported_buttons_state::<M>();
+    commands.push(RuntimeCommand::Input(DirectCommand::Send(state.clone())));
+    let WorkerStep::Continue(mut progress) =
+        worker.step_runtime(&clock, &mut shutdown, &mut commands)
+    else {
+        panic!("Direct input must keep the virtual worker running");
+    };
+    assert_command_successes(&mut progress);
+    assert_eq!(reader.snapshot(), state);
+    assert_model_virtual_trace(&trace, expected);
     close_ready_worker(&mut worker, &reader, &clock, &mut shutdown, &mut commands);
 }
 
@@ -653,8 +714,50 @@ fn assert_common_virtual_trace(trace: &Arc<Mutex<VirtualTrace>>, expected_sessio
             .iter()
             .filter(|report| report.first() == Some(&0x21))
             .count()
-            >= expected_sessions * 2
+            >= expected_sessions * 4
     );
+}
+
+fn assert_model_virtual_trace(trace: &Arc<Mutex<VirtualTrace>>, expected: ModelPacketExpectation) {
+    assert_common_virtual_trace(trace, 1);
+    let trace = lock(trace);
+    let device_info = subcommand_reply(&trace, 0x02);
+    assert_eq!(device_info[13], 0x82);
+    assert_eq!(&device_info[15..27], expected.device_info);
+
+    let colors = subcommand_reply(&trace, 0x10);
+    assert_eq!(colors[13], 0x90);
+    assert_eq!(&colors[15..20], &[0x50, 0x60, 0x00, 0x00, 0x0C]);
+    assert_eq!(&colors[20..32], expected.colors);
+
+    assert!(
+        trace
+            .input_reports
+            .iter()
+            .any(|report| is_report_with_buttons(report, expected.buttons)),
+        "peer receives the model-specific all-buttons input report"
+    );
+}
+
+fn subcommand_reply(trace: &VirtualTrace, subcommand_id: u8) -> &[u8] {
+    trace
+        .input_reports
+        .iter()
+        .find(|report| report.first() == Some(&0x21) && report.get(14) == Some(&subcommand_id))
+        .unwrap_or_else(|| panic!("peer receives the 0x{subcommand_id:02X} reply"))
+}
+
+fn all_supported_buttons_state<M: ControllerModel>() -> InputState<M> {
+    InputState::neutral().with_buttons(M::SPEC.supported_buttons().iter().copied().map(|kind| {
+        Button::<M>::try_from(kind).expect("model declaration contains only supported buttons")
+    }))
+}
+
+fn has_input_buttons(trace: &Arc<Mutex<VirtualTrace>>, buttons: [u8; 3]) -> bool {
+    lock(trace)
+        .input_reports
+        .iter()
+        .any(|report| is_report_with_buttons(report, buttons))
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1151,6 +1254,14 @@ impl VirtualClassicTransport {
                 .send_classic_channel_sdu(&mut self.link, peer_handle, control_cid, &[0x41])
                 .expect("send malformed virtual HIDP control message");
         }
+        let device_info = hid_output(subcommand_report(0x02, &[]));
+        self.devices[0]
+            .send_classic_channel_sdu(&mut self.link, peer_handle, control_cid, &device_info)
+            .expect("send device-info output");
+        let colors = hid_output(subcommand_report(0x10, &[0x50, 0x60, 0x00, 0x00, 0x0C]));
+        self.devices[0]
+            .send_classic_channel_sdu(&mut self.link, peer_handle, control_cid, &colors)
+            .expect("send SPI colors output");
         let report_mode = hid_output(subcommand_report(0x03, &[0x30]));
         self.devices[0]
             .send_classic_channel_sdu(&mut self.link, peer_handle, control_cid, &report_mode)
