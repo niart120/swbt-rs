@@ -93,6 +93,7 @@ fn profile_usage_rejects_missing_extra_and_unknown_arguments_with_exit_two() {
         let help = String::from_utf8(output.stdout).unwrap();
         assert!(help.contains("swbt-probe profile inspect <path>"));
         assert!(help.contains("swbt-probe profile verify <path>"));
+        assert!(help.contains("[--local-address <XX:XX:XX:XX:XX:XX>]"));
     }
 }
 
@@ -201,6 +202,79 @@ fn connection_commands_dispatch_known_models_without_fallback() {
         let output = run(&arguments);
         assert_eq!(output.status.code(), Some(2), "arguments: {arguments:?}");
         assert_eq!(one_json_line(&output.stderr)["error_kind"], "usage");
+    }
+}
+
+#[test]
+fn pair_accepts_one_redacted_local_address_and_reconnect_rejects_the_option() {
+    let fixture = ProbeFixture::new();
+    let local_address = "02:12:34:56:78:9A";
+    fs::write(&fixture.profile, profile_json()).expect("write existing profile");
+
+    let pair = run([
+        "pair",
+        "--controller",
+        "pro",
+        "--profile",
+        fixture.profile_text(),
+        "--trace",
+        fixture.trace_text(),
+        "--local-address",
+        local_address,
+    ]);
+    assert_eq!(pair.status.code(), Some(1));
+    assert_eq!(
+        one_json_line(&pair.stderr)["error_kind"],
+        "profile_already_exists"
+    );
+    assert!(!String::from_utf8_lossy(&pair.stderr).contains(local_address));
+    assert!(
+        !fs::read_to_string(&fixture.trace)
+            .expect("read pair trace")
+            .contains(local_address)
+    );
+
+    for arguments in [
+        vec![
+            "pair",
+            "--controller",
+            "pro",
+            "--profile",
+            fixture.profile_text(),
+            "--trace",
+            fixture.trace_text(),
+            "--local-address",
+            "02:12:34:56:78:ZZ",
+        ],
+        vec![
+            "pair",
+            "--controller",
+            "pro",
+            "--profile",
+            fixture.profile_text(),
+            "--trace",
+            fixture.trace_text(),
+            "--local-address",
+            local_address,
+            "--local-address",
+            local_address,
+        ],
+        vec![
+            "reconnect",
+            "--controller",
+            "pro",
+            "--profile",
+            fixture.profile_text(),
+            "--trace",
+            fixture.trace_text(),
+            "--local-address",
+            local_address,
+        ],
+    ] {
+        let output = run(&arguments);
+        assert_eq!(output.status.code(), Some(2), "arguments: {arguments:?}");
+        assert_eq!(one_json_line(&output.stderr)["error_kind"], "usage");
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(local_address));
     }
 }
 

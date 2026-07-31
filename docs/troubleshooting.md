@@ -68,6 +68,18 @@ cargo run --locked --features probe --bin swbt-probe -- profile verify .\profile
 - malformed profile / key store: raw key をログへ出さず、元 profile の copy を保全してから原因を
   調査する。
 
+## explicit local address を使った後に接続できない
+
+- `transport_open`: 書換え前または通常初期化時の失敗です。profileと専用dongleの組合せを確認し、別の
+  identity用profileへ切り替えません。
+- `adapter_identity_recovery_required`: volatile write開始後に結果を確定できなかった状態です。同じcommandを
+  再試行せず、dongleを物理的に抜き差しします。再列挙後、元のadapter addressへ戻ったことをread-onlyで
+  確認するまで次のwriteを行いません。
+
+profile削除やprocess終了は、dongleの揮発identityを復元しません。1個のdongle・1個のlocal address・1個の
+profileを一組として管理してください。調査時は`identity_kind`とerror categoryだけを記録し、address値、
+profile本文、link keyをissue、ログ、チャットへ載せません。
+
 ## 正常終了
 
 入力を残さない通常終了は `close()` を使います。

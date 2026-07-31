@@ -1,10 +1,10 @@
 use super::{
     ButtonKind, Command, ConnectionOperation, ConnectionRequest, ControllerKind, ControllerModel,
     ControllerSelection, ErrorKind, ImuRunEvidence, ProbeBackend, ProbeController, ReportingMode,
-    ReportingSelection, SafeAdapter, connection_completed_record, execute, horizontal_yaw_frame,
-    open_and_close,
+    ReportingSelection, SafeAdapter, connection_completed_record, error_kind_name, execute,
+    horizontal_yaw_frame, open_and_close,
 };
-use swbt::{Button, ImuFrame, ReportingKind};
+use swbt::{Button, ImuFrame, LocalAddress, ProfileIdentity, ReportingKind};
 
 #[test]
 fn fake_adapter_listing_emits_only_safe_descriptor_fields() {
@@ -145,6 +145,37 @@ fn typed_connection_dispatch_covers_all_models_and_reconnect_reporting_modes() {
 }
 
 #[test]
+fn explicit_local_identity_reaches_pair_backend_and_emits_only_its_kind() {
+    let mut backend = FakeBackend::default();
+    let address = LocalAddress::parse("02:12:34:56:78:9A").expect("valid local address fixture");
+    let mut request = connection_request(
+        ConnectionOperation::Pair,
+        ControllerSelection::Pro,
+        ReportingSelection::Periodic,
+        None,
+    );
+    request.identity = ProfileIdentity::LocalAddress(address);
+
+    let record = execute(Command::Connection(request), &mut backend).expect("dispatch typed pair");
+
+    assert_eq!(
+        backend.pair_identities,
+        [ProfileIdentity::LocalAddress(address)]
+    );
+    assert_eq!(record["identity_kind"], "local_address");
+    assert!(!record.to_string().contains("02:12:34:56:78:9A"));
+}
+
+#[test]
+fn identity_failures_keep_specific_secret_free_probe_categories() {
+    assert_eq!(error_kind_name(ErrorKind::TransportOpen), "transport_open");
+    assert_eq!(
+        error_kind_name(ErrorKind::AdapterIdentityRecoveryRequired),
+        "adapter_identity_recovery_required"
+    );
+}
+
+#[test]
 fn fake_dynamic_button_rejects_model_mismatch_without_typed_fallback() {
     let mut backend = FakeBackend::default();
     let result = execute(
@@ -175,6 +206,7 @@ fn imu_connection_completion_reports_only_safe_machine_evidence() {
     let record = connection_completed_record(
         &request,
         super::ConnectionEvidence {
+            identity_kind: swbt::ProfileIdentityKind::AdapterDefault,
             imu: Some(ImuRunEvidence {
                 duration_seconds: 60,
                 apply_command_latency_ns: 12_345,
@@ -196,6 +228,7 @@ fn imu_connection_completion_reports_only_safe_machine_evidence() {
     assert_eq!(record["neutral_close"], true);
     assert_eq!(record["profile_unchanged"], true);
     assert_eq!(record["adapter_reopened"], true);
+    assert_eq!(record["identity_kind"], "adapter_default");
     let text = record.to_string();
     assert!(!text.contains("T07_SECRET_PROFILE"));
     assert!(!text.contains("T07_SECRET_TRACE"));
@@ -221,6 +254,7 @@ fn connection_request(
         operation,
         controller,
         reporting,
+        identity: ProfileIdentity::AdapterDefault,
         profile: "T07_SECRET_PROFILE".into(),
         trace: "T07_SECRET_TRACE".into(),
         button,
@@ -246,6 +280,7 @@ struct FakeBackend {
     opened_selectors: Vec<String>,
     connections: Vec<ConnectionCall>,
     unsupported_buttons: Vec<(ControllerKind, ButtonKind)>,
+    pair_identities: Vec<ProfileIdentity>,
 }
 
 impl ProbeBackend for FakeBackend {
@@ -262,11 +297,15 @@ impl ProbeBackend for FakeBackend {
         &mut self,
         request: &ConnectionRequest,
     ) -> Result<super::ConnectionEvidence, ErrorKind> {
+        self.pair_identities.push(request.identity);
         self.record_connection::<M, swbt::reporting::Periodic>(
             ConnectionOperation::Pair,
             request.button,
         )?;
-        Ok(super::ConnectionEvidence::default())
+        Ok(super::ConnectionEvidence {
+            identity_kind: super::profile_identity_kind(request.identity),
+            ..super::ConnectionEvidence::default()
+        })
     }
 
     fn reconnect<M: ControllerModel, R: super::ProbeReporting<M>>(
