@@ -22,7 +22,7 @@ use crate::{
     JoyConRButton, ProButton, ProController, ProfileIdentity,
     controller::Controller,
     diagnostics::LifecycleState,
-    input::{Button, InputState},
+    input::{InputState, Stick},
     model::ControllerModel,
     profile::{
         ControllerKind, ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState,
@@ -539,7 +539,7 @@ fn pro_periodic_build_ready_input_and_close_smoke() {
         ProController::builder("fake-adapter")
             .build()
             .expect("build configured Pro controller"),
-        ProButton::A,
+        InputState::neutral().with_buttons([ProButton::A]),
     );
 }
 
@@ -549,7 +549,7 @@ fn pro_direct_build_ready_input_and_close_smoke() {
         DirectProController::builder("fake-adapter")
             .build()
             .expect("build configured direct Pro controller"),
-        ProButton::A,
+        InputState::neutral().with_buttons([ProButton::A]),
     );
 }
 
@@ -559,7 +559,15 @@ fn joycon_l_periodic_build_ready_input_and_close_smoke() {
         JoyConL::builder("fake-adapter")
             .build()
             .expect("build configured left Joy-Con"),
-        JoyConLButton::L,
+        InputState::neutral()
+            .with_buttons([
+                JoyConLButton::L,
+                JoyConLButton::ZL,
+                JoyConLButton::SL,
+                JoyConLButton::SR,
+                JoyConLButton::DPAD_UP,
+            ])
+            .with_left_stick(Stick::up(0.75).expect("valid left-stick input")),
     );
 }
 
@@ -569,7 +577,15 @@ fn joycon_l_direct_build_ready_input_and_close_smoke() {
         DirectJoyConL::builder("fake-adapter")
             .build()
             .expect("build configured direct left Joy-Con"),
-        JoyConLButton::L,
+        InputState::neutral()
+            .with_buttons([
+                JoyConLButton::L,
+                JoyConLButton::ZL,
+                JoyConLButton::SL,
+                JoyConLButton::SR,
+                JoyConLButton::DPAD_UP,
+            ])
+            .with_left_stick(Stick::up(0.75).expect("valid left-stick input")),
     );
 }
 
@@ -579,7 +595,15 @@ fn joycon_r_periodic_build_ready_input_and_close_smoke() {
         JoyConR::builder("fake-adapter")
             .build()
             .expect("build configured right Joy-Con"),
-        JoyConRButton::R,
+        InputState::neutral()
+            .with_buttons([
+                JoyConRButton::A,
+                JoyConRButton::R,
+                JoyConRButton::ZR,
+                JoyConRButton::SL,
+                JoyConRButton::SR,
+            ])
+            .with_right_stick(Stick::right(0.75).expect("valid right-stick input")),
     );
 }
 
@@ -589,7 +613,15 @@ fn joycon_r_direct_build_ready_input_and_close_smoke() {
         DirectJoyConR::builder("fake-adapter")
             .build()
             .expect("build configured direct right Joy-Con"),
-        JoyConRButton::R,
+        InputState::neutral()
+            .with_buttons([
+                JoyConRButton::A,
+                JoyConRButton::R,
+                JoyConRButton::ZR,
+                JoyConRButton::SL,
+                JoyConRButton::SR,
+            ])
+            .with_right_stick(Stick::right(0.75).expect("valid right-stick input")),
     );
 }
 
@@ -1255,14 +1287,12 @@ fn configured_input_is_transport_closed_and_close_is_idempotent() {
     assert_eq!(direct.status().lifecycle, LifecycleState::Closed);
 }
 
-fn periodic_smoke<M>(controller: Controller<M, Periodic>, button: Button<M>)
+fn periodic_smoke<M>(controller: Controller<M, Periodic>, state: InputState<M>)
 where
     M: ControllerModel,
     Periodic: WorkerReporting<M>,
 {
     let (mut controller, control) = install_fake_runtime(controller, true);
-    let state = InputState::neutral().with_buttons([button]);
-
     controller
         .apply(state.clone())
         .expect("Periodic worker accepts a model-valid state");
@@ -1270,17 +1300,16 @@ where
     assert_eq!(controller.snapshot(), state);
     assert_eq!(controller.status().lifecycle, LifecycleState::Ready);
     controller.close().expect("explicit close joins worker");
+    assert_eq!(controller.snapshot(), state);
     assert_closed(&controller, &control);
 }
 
-fn direct_smoke<M>(controller: Controller<M, Direct>, button: Button<M>)
+fn direct_smoke<M>(controller: Controller<M, Direct>, state: InputState<M>)
 where
     M: ControllerModel,
     Direct: WorkerReporting<M>,
 {
     let (mut controller, control) = install_fake_runtime(controller, false);
-    let state = InputState::neutral().with_buttons([button]);
-
     controller
         .send(state.clone())
         .expect("Direct worker accepts a model-valid state");
@@ -1288,6 +1317,7 @@ where
     assert_eq!(controller.snapshot(), state);
     assert_eq!(controller.status().lifecycle, LifecycleState::Ready);
     controller.close().expect("explicit close joins worker");
+    assert_eq!(controller.snapshot(), state);
     assert_closed(&controller, &control);
 }
 
@@ -1438,6 +1468,16 @@ where
     let status = controller.status();
     assert_eq!(status.lifecycle, LifecycleState::Closed);
     assert!(!status.connected);
+    let accepted = control.accepted_interrupts();
+    let final_neutral = accepted
+        .iter()
+        .rev()
+        .find(|report| report.first() == Some(&0x30))
+        .expect("explicit close must send a final neutral input report");
+    assert_eq!(
+        &final_neutral[3..12],
+        &[0x00, 0x00, 0x00, 0x00, 0x08, 0x80, 0x00, 0x08, 0x80]
+    );
     assert_eq!(control.counters(), (1, 1, 1));
 }
 
