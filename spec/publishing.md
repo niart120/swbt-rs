@@ -20,6 +20,9 @@ GitHub Release、`cargo publish`、publish workflow の実行には、その tur
 - `cargo package --locked --allow-dirty` は120 files / 1.4 MiB（圧縮258.0 KiB）のarchiveを生成した。
   展開archiveからの `cargo +1.87.0 test --all-targets --all-features --locked --offline --quiet` は
   library 271 passed / 1 ignored、hardware 5 ignored、他target successだった。
+- [registry backend dependency / package audit](wip/unit_010/evidence/dependency-package-audit-20260802.md)で
+  Git source 0、cargo-denyのadvisory/license/source policy、Windows 33 / Linux 34 componentの
+  CycloneDX 1.5 SBOM、license欠落0、local pathと秘密情報の不在を確認した。
 
 ## 現在の停止条件
 
@@ -28,8 +31,7 @@ GitHub Release、`cargo publish`、publish workflow の実行には、その tur
 1. `Cargo.toml` の `publish = false` を維持している。
 2. unit_012 T08 の実機回帰は完了したが、公開対象となる `swbt-rs` 0.1.0 の exact head、merge SHA、
    remote checkをまだ固定していない。
-3. backend切り替え後のlicense判定とWindows/Linux SBOMをrelease candidateで再生成していない。
-4. 2026-08-01 の GitHub API で `niart120/swbt-rs` の Private Vulnerability Reporting は
+3. 2026-08-02 の GitHub API で `niart120/swbt-rs` の Private Vulnerability Reporting は
    `enabled:false` であり、
    `SECURITY.md` に恒久的な非公開報告先を記載できていない。
 
@@ -49,7 +51,7 @@ release candidate では次を同じ記録へ残す。
 - 実機確認した OS、adapter、driver、console version と未検証条件
 
 現在の `Cargo.lock` SHA-256 は
-`861E05B96E9A3E4725A482221B95FB36D288F20515A02F1589BF118C61EB9D2C`。release commit は merge 前に
+`40109791FB91C479AF355F4B1A07F59A3E7F3680F35C8E5CF0E311A3D021629F`。release commit は merge 前に
 確定できないため、実際の release 承認後に main の対象 SHA とともに記録する。
 
 ## local gate
@@ -91,7 +93,8 @@ release candidate PR で Linux、Windows、MSRV、dependency-policy の全 job �
 `deny.toml` は advisory、license、source の正本である。未知 license、許可していない Git source、
 advisory ignore を残した状態で公開しない。Windows/Linux の all-feature graph から CycloneDX 1.5 JSON
 を再生成し、component 数、license 欠落数、SHA-256 を記録する。SBOM に local path、token、profile、
-key material がないことを検査する。
+key material がないことを検査する。`cargo-cyclonedx`のroot local pathは
+`tools/normalize-cyclonedx.ps1`でpackage URLへ正規化し、dependency referenceを再検査する。
 
 ## hardware と既知の制限
 

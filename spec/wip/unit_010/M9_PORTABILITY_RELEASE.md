@@ -88,7 +88,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | refactor-skipped | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | unit_012で公開済み`swbt-bumble-backend@0.1.1`へ更新し、registryだけを使うarchive verification buildと展開archiveのoffline/all-feature testが成功。検査後の構造変更は不要 |
 | refactor-skipped | T09: local gate と public docs review が変更範囲に対して成功し、未実行 hardware/publish を明記する | regression | quality gate | all/default/no-default、MSRV、doc、dependency policy、diff、archive gateがgreen。unit_012のWindows実機回帰は完了し、remote CIはmerge gate、`swbt-rs` publishは別承認事項として残した。検査後の構造変更は不要 |
 | refactor-done | T10: Bumble session 統合 test が reader thread の packet 分割順序に依存せず公開 transport event を検査する | regression | test harness / CI | PR #11 run `30649447099` で `CommandStatus` 後に空で返る red を記録。残り期限内の再 poll に変更し、対象100回と全 library testが green |
-| pending | T11: registry backend 0.1.1 の現行 dependency graph、license、Windows/Linux SBOM、package archive を再生成できる | regression | package / release | 2026-08-01 evidence は旧 Git dependency graph の履歴として保持し、registry sourceだけの現行結果を別 evidenceへ記録する |
+| refactor-done | T11: registry backend 0.1.1 の現行 dependency graph、license、Windows/Linux SBOM、package archive を再生成できる | regression | package / release | red: 旧evidenceはGit Bumble 22 componentsとWindows 220 / Linux 222 dependenciesを記録し、現行graphと不一致。green: registry sourceだけでcargo-deny、120-file archive、MSRV offline test、33 / 34 component SBOM、license欠落0が成功。refactor: 旧Git allowlistと未使用license例外を削除し、SBOM local path正規化とreference検査をtool化 |
 | pending | T12: 非公開脆弱性報告先が実際に有効で、`SECURITY.md` からその入口へ到達できる | new | repository security / docs | GitHub API の有効値と実在URLを確認し、public issueへ秘密情報を出さない契約を維持する |
 | pending | T13: workload soak と Python backend への切戻し訓練が、adapter排他・profile非破壊・neutral終了を満たす | acceptance | operational cutover / hardware | unit_012 の連続60秒runをsoakとして評価し、Rust終了後のadapter再利用、Python再接続、入力、neutral closeを新しい非秘密 evidenceへ記録する |
 
@@ -122,6 +122,8 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
   interface lifecycle を所有するため、公開 docs と source revision 監査で境界を固定する。
 - crates.io用の恒久境界はunit_012で単一`swbt-bumble-backend`とし、source/API inventory、実装、
   単体archive、初回公開、registry archiveだけを使うswbt-rs smokeまで完了した。
+- T11で現行registry graphのWindows/Linux SBOMを再生成し、旧Git graphのevidenceを履歴として分離した。
+  `deny.toml`はGit sourceをすべて拒否し、backend 0.1.1のregistry checksumをSBOMでも固定する。
 - GitHub Private Vulnerability Reporting が無効の間は、恒久的な非公開報告先がない。0.1.0 の公開前に
   有効化し、`SECURITY.md` を実際の報告先へ更新する。
 
@@ -154,6 +156,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | `deny.toml` | new | license/advisory/source policy |
 | `spec/initial/source-baseline.md` | modify | 0.1.0 candidate の fork revision と差分 |
 | `spec/publishing.md` | new | 0.1.0 release runbook と停止条件 |
+| `tools/normalize-cyclonedx.ps1` | new | 生成SBOMのroot local path正規化とreference検査 |
 | `spec/wip/unit_010/evidence/` | new | package list、license/SBOM、source audit、gate の非秘密 evidence |
 | `spec/wip/unit_010/M9_PORTABILITY_RELEASE.md` | new | 本作業仕様 |
 
@@ -187,6 +190,10 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | Linux adapter hardware test | not run | 専用 Linux host/adapter がなく、CI と source audit で代替しない |
 | `cargo-deny 0.20.2 --locked check` | success | advisories、bans、licenses、sources pass。複数版は warning |
 | `cargo-cyclonedx 0.5.9` Windows/Linux all-features | success | CycloneDX 1.5、220/222 dependency components、license 欠落0 |
+| T11 `cargo-deny 0.20.2 --locked check` | success | registry-only graphでadvisories、bans、licenses、sources pass。警告なし |
+| T11 `cargo package --locked --allow-dirty` | success | 120 files / 1.4 MiB（圧縮258.0 KiB）、verification build成功 |
+| T11 展開archive MSRV offline test | success | library 271 passed / 1 ignored、hardware 5 ignored、他target success |
+| T11 `cargo-cyclonedx 0.5.9` Windows/Linux all-features | success | CycloneDX 1.5、33/34 dependency components、license欠落0、local pathなし、dependency ref整合 |
 | fixture/package secret audit | success | JSON fixture 4件の provenance と合成 key 3件を確認。代表 credential pattern 0件、実機 profile/trace の収録なし |
 | release docs placeholder scan | success | `[TODO]`、`TBD`、`xxx` の残存なし |
 | release docs relative-link audit | success | README、CHANGELOG、SECURITY、platform/troubleshooting、publishing の local link 解決を確認 |
@@ -214,6 +221,6 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 - [x] release/rollback runbook と blocker を検査した
 - [x] 検証結果または未実行理由を記録した
 - [x] package / release / public API に触れる gate を記録した
-- [ ] registry backend 0.1.1 の dependency/license/SBOM/package evidence を再生成した
+- [x] registry backend 0.1.1 の dependency/license/SBOM/package evidence を再生成した
 - [ ] GitHub の非公開脆弱性報告先を有効化し、`SECURITY.md` を更新した
 - [ ] workload soak と backend rollback rehearsal の結果を記録した
