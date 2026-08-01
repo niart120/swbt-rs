@@ -7,7 +7,7 @@ description = "Rust port of swbt-python for an NX-compatible virtual Bluetooth H
 repository = "https://github.com/niart120/swbt-rs"
 license = "MIT"
 readme = "README.md"
-publish = false
+publish = true
 include = [
     "/src/**",
     "/docs/**",

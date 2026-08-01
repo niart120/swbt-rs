@@ -1,11 +1,12 @@
 # 0.1.0 公開手順
 
-- 状態: **公開停止中**
+- 状態: **公開承認済み・実行待ち**
 - candidate: `0.1.0`
 - 最終監査日: 2026-08-02 (JST)
 
-この文書は release candidate の再現、停止条件、検査、rollback を一か所にまとめる。production tag、
-GitHub Release、`cargo publish`、publish workflow の実行には、その turn でのユーザの明示承認が必要。
+この文書は release candidate の再現、停止条件、検査、rollback を一か所にまとめる。2026-08-02の
+公開turnで、`swbt-rs` 0.1.0の`cargo publish`、同一commitのproduction tag `v0.1.0`、GitHub Release
+作成についてユーザの明示承認を得た。
 
 ## 解消済みの依存条件
 
@@ -30,13 +31,12 @@ GitHub Release、`cargo publish`、publish workflow の実行には、その tur
   では、連続2回の60秒IMU run、RustからPython 0.6.0への同一profile copyによる切戻し、A入力、
   neutral終了、両backend終了後のadapter再利用、profileのバイト不変を確認した。
 
-## 現在の停止条件
+## 公開前条件と固定点
 
-0.1.0 は次の全条件を解消するまで公開しない。
-
-1. `Cargo.toml` の `publish = false` を維持している。
-2. 公開承認 turn で、対象となる `swbt-rs` 0.1.0 の exact main SHA と、そのSHAに対するremote checkを
-   固定する必要がある。このwork unitのmerge承認はcrates.io公開、tag、GitHub Releaseを含まない。
+公開承認前の停止条件だった`publish = false`は専用release changeで解除する。監査基準にしたmainは
+`a8378f9657b986f74a8f2f50c86c36eb2eacf885`で、同じSHAの
+[CI run 30712408463](https://github.com/niart120/swbt-rs/actions/runs/30712408463)は全job成功である。
+公開元となるrelease changeのmerge後main SHAとremote checkを固定してから`cargo publish`を実行する。
 
 fork 元 `chaitanyarahalkar/bumble-rs` への issue/PR はこの手順に含めない。自己所有 fork の
 [Issue #1](https://github.com/niart120/bumble-rs/issues/1) だけでbackend切り出しを追跡する。
@@ -55,7 +55,7 @@ release candidate では次を同じ記録へ残す。
 
 現在の `Cargo.lock` SHA-256 は
 `40109791FB91C479AF355F4B1A07F59A3E7F3680F35C8E5CF0E311A3D021629F`。release commit は merge 前に
-確定できないため、実際の release 承認後に main の対象 SHA とともに記録する。
+確定できないため、release changeのmerge後にmainの対象SHAとともに固定する。
 
 T13後のclean archive SHA-256は
 `57C6496601BFD721C71B7771BD8B2847AE1E584DA6FC172939F9103CFB5383A2`。Windows/Linux SBOM SHA-256は
@@ -111,16 +111,16 @@ key material がないことを検査する。`cargo-cyclonedx`のroot local pat
 unsupported、明示 local address の実機確認が CSR8510 A10 に限られること、`Drop` の best-effort
 cleanup を release note に残す。
 
-## swbt-rs 公開承認後
+## swbt-rs 公開実行
 
-停止条件をすべて解消し、当該 turn で公開操作の明示承認を得た場合だけ、次へ進む。
+停止条件をすべて解消し、当該turnで得た公開操作の明示承認の範囲で次へ進む。
 
 1. `publish = false` の解除と配布 dependency を専用 release change として review する。
 2. GitHub Private Vulnerability Reporting が有効で、`SECURITY.md` の非公開報告 URL が現在の
    repositoryを指すことを再確認する。
 3. main の candidate SHA、Cargo.lock hash、backend version、SBOM hash、全 check を記録する。
-4. crates.io Trusted Publishing または同等の短命 credential を設定した専用 workflow を review する。
-   現在は publish workflow を置いていない。
+4. crates.io credentialの設定を秘密値を表示せず確認する。現在はpublish workflowを置かず、承認済みの
+   この公開操作に限ってローカルのCargo credentialを使用する。
 5. 承認済み candidate だけを一度公開し、`cargo info swbt-rs@0.1.0` と新規 project から取得・build する。
 6. 公開した同じ commit に production tag と GitHub Release を対応付ける。
 
