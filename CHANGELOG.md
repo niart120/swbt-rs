@@ -1,11 +1,8 @@
 # 変更履歴
 
-この文書は利用者に見える変更と互換性上の制限を記録する。日付と版は実際に公開した時点で
-確定する。
+この文書は利用者に見える変更と互換性上の制限を記録する。
 
-## 未公開
-
-### 0.1.0 候補
+## 0.1.0 - 2026-08-02
 
 - Pro Controller、Joy-Con L、Joy-Con R を Periodic/Direct の型付き API から操作できる。
 - Switch HID protocol、profile schema v2、pairing、保存鍵からの reconnect、model-valid input、
@@ -22,10 +19,9 @@
 
 ### 公開状態
 
-0.1.0 は crates.io へ公開していない。Bumble 配布境界は registry の
+0.1.0 は crates.io の初回公開版である。Bumble 配布境界は registry の
 `swbt-bumble-backend = "=0.1.1"` へ切り替え、clean package、展開 archive の offline test、
-license/SBOM 監査まで成功した。`publish = false` の解除、production tag、GitHub Release、
-`cargo publish` は別の公開承認を得るまで実行しない。
+license/SBOM 監査まで成功した。
 
 ## 版の方針
 
