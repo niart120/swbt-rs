@@ -76,7 +76,11 @@ pub(crate) struct StatusReader<M: ControllerModel, R: ReportingMode> {
 
 pub(crate) fn status_projection<M: ControllerModel, R: ReportingMode>()
 -> (StatusPublisher<M>, StatusReader<M, R>) {
-    status_projection_with_emitter::<M, R>(Arc::new(DiagnosticEvent::emit))
+    #[cfg(feature = "diagnostics-schema")]
+    let emitter = Arc::new(DiagnosticEvent::emit) as DiagnosticEmitter;
+    #[cfg(not(feature = "diagnostics-schema"))]
+    let emitter = Arc::new(|_| {}) as DiagnosticEmitter;
+    status_projection_with_emitter::<M, R>(emitter)
 }
 
 pub(crate) fn status_projection_with_emitter<M: ControllerModel, R: ReportingMode>(

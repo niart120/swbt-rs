@@ -27,10 +27,12 @@
 //! cleanup or join failures. It does not wait for completion credit for every
 //! in-flight packet. Dropping a controller is bounded best-effort shutdown: it
 //! omits neutral reporting and draining and cannot report failures. Runtime
-//! changes emit secret-free schema-v1 `tracing` events on the
-//! `swbt::diagnostics` target; accepted-report counters indicate transport
-//! acceptance, not radio delivery or console behavior. Platform support and
-//! hardware verification limits are documented in `docs/platform-support.md`.
+//! With the `diagnostics-schema` feature, runtime changes emit secret-free
+//! schema-v1 `tracing` events on the `swbt::diagnostics` target. Featureless
+//! builds do not compile that stable event emitter. Accepted-report counters
+//! indicate transport acceptance, not radio delivery or console behavior.
+//! Platform support and hardware verification limits are documented in
+//! `docs/platform-support.md`.
 //!
 //! # Model-valid input
 //!

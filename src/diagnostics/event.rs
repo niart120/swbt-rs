@@ -1,6 +1,6 @@
 use std::num::NonZeroU64;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "diagnostics-schema"))]
 use serde_json::{Map, Value, json};
 
 use crate::{
@@ -9,8 +9,11 @@ use crate::{
     reporting::ReportingKind,
 };
 
+#[cfg(any(test, feature = "diagnostics-schema"))]
 pub(crate) const DIAGNOSTICS_TARGET: &str = "swbt::diagnostics";
+#[cfg(any(test, feature = "diagnostics-schema"))]
 pub(crate) const DIAGNOSTICS_SCHEMA: &str = "swbt.diagnostics";
+#[cfg(any(test, feature = "diagnostics-schema"))]
 pub(crate) const DIAGNOSTICS_SCHEMA_VERSION: u64 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +48,7 @@ pub(crate) enum WorkerFailureCategory {
 }
 
 impl WorkerFailureCategory {
+    #[cfg(any(test, feature = "diagnostics-schema"))]
     const fn name(self) -> &'static str {
         match self {
             Self::Transport => "transport",
@@ -176,127 +180,18 @@ impl DiagnosticEvent {
         }
     }
 
+    #[cfg(feature = "diagnostics-schema")]
     pub(crate) fn emit(self) {
-        match self {
-            Self::SessionStarted { context } => tracing::event!(
-                target: DIAGNOSTICS_TARGET,
-                tracing::Level::INFO,
-                schema = DIAGNOSTICS_SCHEMA,
-                schema_version = DIAGNOSTICS_SCHEMA_VERSION,
-                event = "session_started",
-                controller_kind = context.controller_kind.profile_name(),
-                reporting_kind = reporting_name(context.reporting_kind),
-                session_id = context.session_id.get(),
-            ),
-            Self::LifecycleChanged { context, lifecycle } => tracing::event!(
-                target: DIAGNOSTICS_TARGET,
-                tracing::Level::INFO,
-                schema = DIAGNOSTICS_SCHEMA,
-                schema_version = DIAGNOSTICS_SCHEMA_VERSION,
-                event = "lifecycle_changed",
-                controller_kind = context.controller_kind.profile_name(),
-                reporting_kind = reporting_name(context.reporting_kind),
-                session_id = context.session_id.get(),
-                lifecycle = lifecycle_name(lifecycle),
-            ),
-            Self::SubcommandObserved {
-                context,
-                subcommand_id,
-            } => tracing::event!(
-                target: DIAGNOSTICS_TARGET,
-                tracing::Level::INFO,
-                schema = DIAGNOSTICS_SCHEMA,
-                schema_version = DIAGNOSTICS_SCHEMA_VERSION,
-                event = "subcommand_observed",
-                controller_kind = context.controller_kind.profile_name(),
-                reporting_kind = reporting_name(context.reporting_kind),
-                session_id = context.session_id.get(),
-                subcommand_id,
-            ),
-            Self::ReportTxAccepted {
-                context,
-                report_mode,
-                imu_mode,
-                input_reports_accepted,
-            } => tracing::event!(
-                target: DIAGNOSTICS_TARGET,
-                tracing::Level::INFO,
-                schema = DIAGNOSTICS_SCHEMA,
-                schema_version = DIAGNOSTICS_SCHEMA_VERSION,
-                event = "report_tx_accepted",
-                controller_kind = context.controller_kind.profile_name(),
-                reporting_kind = reporting_name(context.reporting_kind),
-                session_id = context.session_id.get(),
-                report_mode,
-                imu_mode,
-                input_reports_accepted,
-            ),
-            Self::ReplyTxAccepted {
-                context,
-                report_mode,
-                imu_mode,
-                replies_accepted,
-            } => tracing::event!(
-                target: DIAGNOSTICS_TARGET,
-                tracing::Level::INFO,
-                schema = DIAGNOSTICS_SCHEMA,
-                schema_version = DIAGNOSTICS_SCHEMA_VERSION,
-                event = "reply_tx_accepted",
-                controller_kind = context.controller_kind.profile_name(),
-                reporting_kind = reporting_name(context.reporting_kind),
-                session_id = context.session_id.get(),
-                report_mode,
-                imu_mode,
-                replies_accepted,
-            ),
-            Self::SessionEnded {
-                context,
-                lifecycle,
-                disconnect_reason,
-            } => tracing::event!(
-                target: DIAGNOSTICS_TARGET,
-                tracing::Level::INFO,
-                schema = DIAGNOSTICS_SCHEMA,
-                schema_version = DIAGNOSTICS_SCHEMA_VERSION,
-                event = "session_ended",
-                controller_kind = context.controller_kind.profile_name(),
-                reporting_kind = reporting_name(context.reporting_kind),
-                session_id = context.session_id.get(),
-                lifecycle = lifecycle_name(lifecycle),
-                disconnect_reason,
-            ),
-            Self::WorkerFailed {
-                context,
-                failure_category,
-            } => tracing::event!(
-                target: DIAGNOSTICS_TARGET,
-                tracing::Level::INFO,
-                schema = DIAGNOSTICS_SCHEMA,
-                schema_version = DIAGNOSTICS_SCHEMA_VERSION,
-                event = "worker_failed",
-                controller_kind = context.controller_kind.profile_name(),
-                reporting_kind = reporting_name(context.reporting_kind),
-                session_id = context.session_id.get(),
-                failure_category = failure_category.name(),
-            ),
-            Self::UnsupportedButton {
-                context,
-                button_kind,
-            } => tracing::event!(
-                target: DIAGNOSTICS_TARGET,
-                tracing::Level::INFO,
-                schema = DIAGNOSTICS_SCHEMA,
-                schema_version = DIAGNOSTICS_SCHEMA_VERSION,
-                event = "unsupported_button",
-                controller_kind = context.controller_kind.profile_name(),
-                reporting_kind = reporting_name(context.reporting_kind),
-                session_id = context.session_id.get(),
-                button_kind = button_name(button_kind),
-            ),
-        }
+        let record = serde_json::to_string(&self.to_value())
+            .expect("diagnostics records contain only JSON scalar values");
+        tracing::event!(
+            target: DIAGNOSTICS_TARGET,
+            tracing::Level::INFO,
+            record = record.as_str(),
+        );
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "diagnostics-schema"))]
     pub(crate) fn to_value(self) -> Value {
         match self {
             Self::SessionStarted { context } => record(context, "session_started", Map::new()),
@@ -373,7 +268,7 @@ impl DiagnosticEvent {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "diagnostics-schema"))]
 fn record(context: DiagnosticContext, event: &'static str, extra: Map<String, Value>) -> Value {
     let mut record = json!({
         "schema": DIAGNOSTICS_SCHEMA,
@@ -387,7 +282,7 @@ fn record(context: DiagnosticContext, event: &'static str, extra: Map<String, Va
     record
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "diagnostics-schema"))]
 fn fields<const N: usize>(fields: [(&'static str, Value); N]) -> Map<String, Value> {
     fields
         .into_iter()
@@ -395,6 +290,7 @@ fn fields<const N: usize>(fields: [(&'static str, Value); N]) -> Map<String, Val
         .collect()
 }
 
+#[cfg(any(test, feature = "diagnostics-schema"))]
 const fn reporting_name(kind: ReportingKind) -> &'static str {
     match kind {
         ReportingKind::Periodic => "periodic",
@@ -402,6 +298,7 @@ const fn reporting_name(kind: ReportingKind) -> &'static str {
     }
 }
 
+#[cfg(any(test, feature = "diagnostics-schema"))]
 const fn lifecycle_name(state: LifecycleState) -> &'static str {
     match state {
         LifecycleState::Configured => "configured",
@@ -414,6 +311,7 @@ const fn lifecycle_name(state: LifecycleState) -> &'static str {
     }
 }
 
+#[cfg(any(test, feature = "diagnostics-schema"))]
 const fn button_name(kind: ButtonKind) -> &'static str {
     match kind {
         ButtonKind::A => "a",

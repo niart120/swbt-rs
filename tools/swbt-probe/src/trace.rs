@@ -72,17 +72,21 @@ impl TraceSession {
 }
 
 pub(super) fn emit_environment<M: ControllerModel, R: ReportingMode>() {
+    let record = serde_json::json!({
+        "schema": SCHEMA,
+        "schema_version": SCHEMA_VERSION,
+        "event": "environment",
+        "controller_kind": M::KIND.profile_name(),
+        "reporting_kind": reporting_kind_name(R::KIND),
+        "package_version": env!("CARGO_PKG_VERSION"),
+        "target_os": std::env::consts::OS,
+        "target_arch": std::env::consts::ARCH,
+    })
+    .to_string();
     tracing::event!(
         target: TARGET,
         tracing::Level::INFO,
-        schema = SCHEMA,
-        schema_version = SCHEMA_VERSION,
-        event = "environment",
-        controller_kind = M::KIND.profile_name(),
-        reporting_kind = reporting_kind_name(R::KIND),
-        package_version = env!("CARGO_PKG_VERSION"),
-        target_os = std::env::consts::OS,
-        target_arch = std::env::consts::ARCH,
+        record = record.as_str(),
     );
 }
 
@@ -149,11 +153,19 @@ impl Subscriber for NdjsonSubscriber {
     fn event(&self, event: &Event<'_>) {
         let mut visitor = JsonVisitor::default();
         event.record(&mut visitor);
-        if visitor.invalid || !normalize_and_validate(&mut visitor.fields) {
+        let Some(Value::String(encoded)) = visitor.fields.remove("record") else {
+            self.state.failed.store(true, Ordering::Release);
+            return;
+        };
+        let Ok(Value::Object(mut record)) = serde_json::from_str(&encoded) else {
+            self.state.failed.store(true, Ordering::Release);
+            return;
+        };
+        if visitor.invalid || !visitor.fields.is_empty() || !normalize_and_validate(&mut record) {
             self.state.failed.store(true, Ordering::Release);
             return;
         }
-        self.state.write(visitor.fields);
+        self.state.write(record);
     }
 
     fn enter(&self, _span: &Id) {}
@@ -312,19 +324,22 @@ mod tests {
         tracing::subscriber::with_default(subscriber, || {
             tracing::info!(target: "swbt::transport", message = "T08_SECRET_NOISE");
             emit_environment::<swbt::model::Pro, swbt::reporting::Periodic>();
-            let report_mode: Option<u8> = None;
+            let record = serde_json::json!({
+                "schema": SCHEMA,
+                "schema_version": 1,
+                "event": "report_tx_accepted",
+                "controller_kind": "pro",
+                "reporting_kind": "periodic",
+                "session_id": 7,
+                "report_mode": null,
+                "imu_mode": 2,
+                "input_reports_accepted": 3,
+            })
+            .to_string();
             tracing::event!(
                 target: TARGET,
                 tracing::Level::INFO,
-                schema = SCHEMA,
-                schema_version = 1_u64,
-                event = "report_tx_accepted",
-                controller_kind = "pro",
-                reporting_kind = "periodic",
-                session_id = 7_u64,
-                report_mode,
-                imu_mode = 2_u64,
-                input_reports_accepted = 3_u64,
+                record = record.as_str(),
             );
         });
         session.finish().expect("finish trace");
@@ -358,18 +373,22 @@ mod tests {
         let (session, subscriber) = TraceSession::create(&path).expect("create trace");
 
         tracing::subscriber::with_default(subscriber, || {
+            let record = serde_json::json!({
+                "schema": SCHEMA,
+                "schema_version": 1,
+                "event": "environment",
+                "controller_kind": "pro",
+                "reporting_kind": "periodic",
+                "package_version": "0.1.0",
+                "target_os": "windows",
+                "target_arch": "x86_64",
+                "profile_path": "T08_SECRET_PROFILE",
+            })
+            .to_string();
             tracing::event!(
                 target: TARGET,
                 tracing::Level::INFO,
-                schema = SCHEMA,
-                schema_version = 1_u64,
-                event = "environment",
-                controller_kind = "pro",
-                reporting_kind = "periodic",
-                package_version = "0.1.0",
-                target_os = "windows",
-                target_arch = "x86_64",
-                profile_path = "T08_SECRET_PROFILE",
+                record = record.as_str(),
             );
         });
 
