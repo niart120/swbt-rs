@@ -66,7 +66,10 @@ ACL flush 観測、Vendor Event 応答の実動作修正3 commitだけを含む�
 | green | T06c: Classic L2CAP、SDP、HIDPを内部化する | backend protocol | LE credit channelを含めず、Classic signaling、SDP continuation、HIDP codecが移植testを通る |
 | green | T06d: Classic host と bond state を抽出する | backend host | pairing/reconnect、ACL credit、L2CAP channel、link-key永続化がtest-only peerで動く |
 | green | T06e: USB HCI と external reader を抽出する | backend transport | command/event/ACL、reader cancellation/join、adapter metadataがscripted/USB testを通る |
-| pending | T06f: backend session と最終archiveを完成する | backend integration / package | 公開APIがBumble内部型を隠し、pair→SDP→HID、close、clean archive build/testが成功する |
+| pending | T06f1: backend の公開境界を定義する | backend public API | adapter、設定、bond store、event、error、session APIがBumble内部型を露出せず、公開API testとrustdocを通る |
+| pending | T06f2: HCI session 初期化とevent変換を実装する | backend session | controller初期化、identity設定、pair/reconnectに必要なcommand/event変換がscripted testを通る |
+| pending | T06f3: SDP/HID session を統合する | backend integration | pair→SDP continuation→HID channel→HID outputとinterrupt sendが公開event境界で動く |
+| pending | T06f4: 終了処理と最終archiveを完成する | backend lifecycle / package | disconnect、reader cancellation/join、残留入力なし、clean archive build/testが成功する |
 | pending | T07: swbt-rs を registry backendへ切り替える | integration/package | default/all-feature gate、`cargo package --locked`、archive smokeが成功する |
 | pending | T08: 実機回帰を確認する | hardware | pairing、再接続、入力、IMU、明示local address、power-cycle、reader cleanupの既存契約を再確認する |
 | green | T09: 旧改名branchを後片付けする | repository cleanup | 実験revisionの参照を不採用証跡だけに残し、remote/local branchを削除してIssue #1へ記録する |
