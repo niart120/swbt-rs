@@ -194,7 +194,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::TransportClosed`] when no runtime is open.
-    /// Queue, timeout, disconnect, transport, protocol, and worker failures are
+    /// Timeout, disconnect, transport, protocol, and worker failures are
     /// returned as structured [`crate::Error`] values.
     pub fn pair(&mut self, timeout: Duration) -> crate::Result<()> {
         self.runtime_mut()?.pair(timeout)
@@ -272,7 +272,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     ///
     /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
     /// runtime, or in Direct mode when the transport is not Ready. An empty
-    /// button set returns [`ErrorKind::InvalidInput`]. Queue, shutdown,
+    /// button set returns [`ErrorKind::InvalidInput`]. Shutdown,
     /// transport, and worker failures are returned as structured
     /// [`crate::Error`] values.
     pub fn press(&mut self, buttons: impl IntoIterator<Item = Button<M>>) -> crate::Result<()> {
@@ -288,7 +288,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     ///
     /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
     /// runtime, or in Direct mode when the transport is not Ready. An empty
-    /// button set returns [`ErrorKind::InvalidInput`]. Queue, shutdown,
+    /// button set returns [`ErrorKind::InvalidInput`]. Shutdown,
     /// transport, and worker failures are returned as structured
     /// [`crate::Error`] values.
     pub fn release(&mut self, buttons: impl IntoIterator<Item = Button<M>>) -> crate::Result<()> {
@@ -306,7 +306,7 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
     /// runtime or the transport is not Ready. Empty buttons or a duration
     /// greater than 24 hours return
-    /// [`ErrorKind::InvalidInput`]. Queue, shutdown, transport, and worker
+    /// [`ErrorKind::InvalidInput`]. Shutdown, transport, and worker
     /// failures are returned as structured [`crate::Error`] values.
     pub fn tap(
         &mut self,
@@ -327,8 +327,8 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
-    /// runtime, or in Direct mode when the transport is not Ready. Queue,
-    /// shutdown, transport, and worker failures are returned as structured
+    /// runtime, or in Direct mode when the transport is not Ready.
+    /// Shutdown, transport, and worker failures are returned as structured
     /// [`crate::Error`] values.
     pub fn neutral(&mut self) -> crate::Result<()> {
         self.request_common(CommonCommand::Neutral)
@@ -462,7 +462,7 @@ impl<M: ControllerModel> Controller<M, reporting::Periodic> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
-    /// runtime. Queue, shutdown, and worker failures are returned as structured
+    /// runtime. Shutdown and worker failures are returned as structured
     /// [`crate::Error`] values.
     pub fn apply(&mut self, state: InputState<M>) -> crate::Result<()> {
         self.runtime_mut()?.request(PeriodicCommand::Apply(state))
@@ -483,7 +483,7 @@ impl<M: ControllerModel> Controller<M, reporting::Direct> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::TransportClosed`] when the controller has no active
-    /// runtime or the transport is not Ready. Queue, shutdown, transport, and
+    /// runtime or the transport is not Ready. Shutdown, transport, and
     /// worker failures are returned as structured [`crate::Error`] values.
     pub fn send(&mut self, state: InputState<M>) -> crate::Result<()> {
         self.runtime_mut()?.request(DirectCommand::Send(state))
