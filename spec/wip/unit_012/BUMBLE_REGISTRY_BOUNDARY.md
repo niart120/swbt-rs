@@ -55,7 +55,7 @@
 | green | T02: 対象 package 名と内部依存を一意に変換する | fork manifest | rename 24 package、alias/exact version 付き内部依存 87 辺、対象外 2 package を確認。fork commit `2f5c853` |
 | green | T03: manifest だけの変更で fork workspace の挙動を保つ | fork gate | 旧 import 名を `[lib] name` で維持。MSRV check、workspace test、24 package file list、基底 package verify が成功。fork commit `5fb0f6d` |
 | green | T04: swbt-rs が renamed fork revision を同一 import surface で利用する | integration | default/all-feature check、clippy、test、build、doc が成功。fork 由来 22 package を単一 revision から解決 |
-| pending | T05: 公開順序と公開前検査を再現可能にする | release | 依存 DAG の順序、owner、name availability、package checksum、公開停止点を記録する |
+| green | T05: 公開順序と公開前検査を再現可能にする | release | 9 layer の依存順序、未登録/owner なし、prefix 検索 0 件、24 archive checksum、公開停止点を evidence に記録 |
 | blocked | T06: registry archive から clean install を検証する | package | 明示承認後に 24 package を公開し、`cargo package --locked` と archive smoke を成功させる |
 | pending | T07: M9 と公開手順を current evidence に更新する | docs/spec | unit_011 完了、current revision/lock hash/CI、残る停止条件を反映する |
 
@@ -112,6 +112,8 @@ fork 側は対象 package ごとの `cargo package --list` と workspace gate �
 
 public fork branch は `niart120/bumble-rs` の `feat/swbt-registry-package-names`、head は
 `5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07` である。upstream PR / issue は作成していない。
+公開順序、archive checksum、正規化 manifest、name availability は
+[`evidence/bumble-package-preflight-20260801.md`](evidence/bumble-package-preflight-20260801.md) に記録した。
 
 ## 9. 先送り事項
 
