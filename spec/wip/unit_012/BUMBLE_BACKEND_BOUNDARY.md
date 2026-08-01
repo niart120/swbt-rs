@@ -64,7 +64,7 @@ ACL flush 観測、Vendor Event 応答の実動作修正3 commitだけを含む�
 | green | T06a: backend crate の配布骨格を作る | package / license | 自己所有forkの独立packageがfork/path/Git通常依存なしでpackageでき、LICENSE、NOTICE、README、改変表示を含む |
 | green | T06b: core value と HCI codec を内部化する | backend codec | address、UUID、Classic key、必要なHCI command/event/ACLだけを内部moduleとtestへ移す |
 | green | T06c: Classic L2CAP、SDP、HIDPを内部化する | backend protocol | LE credit channelを含めず、Classic signaling、SDP continuation、HIDP codecが移植testを通る |
-| pending | T06d: Classic host と bond state を抽出する | backend host | pairing/reconnect、ACL credit、L2CAP channel、link-key永続化がtest-only peerで動く |
+| green | T06d: Classic host と bond state を抽出する | backend host | pairing/reconnect、ACL credit、L2CAP channel、link-key永続化がtest-only peerで動く |
 | pending | T06e: USB HCI と external reader を抽出する | backend transport | command/event/ACL、reader cancellation/join、adapter metadataがscripted/USB testを通る |
 | pending | T06f: backend session と最終archiveを完成する | backend integration / package | 公開APIがBumble内部型を隠し、pair→SDP→HID、close、clean archive build/testが成功する |
 | pending | T07: swbt-rs を registry backendへ切り替える | integration/package | default/all-feature gate、`cargo package --locked`、archive smokeが成功する |
@@ -151,6 +151,7 @@ git diff --check
 | backend crate scaffold | success: fork `feat/swbt-bumble-backend@53fe453` の依存0件のarchive 8 files / 15.8 KiBがLICENSE、NOTICE、READMEを含み、package verifyと1 testが成功 |
 | backend core/HCI codec | success: fork `feat/swbt-bumble-backend@f396aeb` のbackend所有値型、command/event/ACL framing、L2CAP fragmentation/reassembly、SCO/ISO拒否を10 testで確認。archive verify成功 |
 | backend Classic protocols | success: fork `feat/swbt-bumble-backend@35e62e0` のClassic L2CAP/ERTM、SDP continuation、HIDPを27 testで確認。LE credit sourceと既存L2CAP adapterを含まない21-file archive verify成功 |
+| backend Classic host | success: fork `feat/swbt-bumble-backend@50df9e3` のbond load/store、pairing/encryption、ACL credit、test-only peer SDU、disconnect cleanupを36 testで確認。archive verify成功 |
 | crates.io publish / production tag / GitHub Release | not run: 対象外かつ明示承認なし |
 | 実機回帰 | not run: Rust sourceとfork実装は変更せず、package metadataと作業境界だけを変更 |
 
