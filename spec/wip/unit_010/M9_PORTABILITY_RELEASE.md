@@ -88,6 +88,9 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | refactor-skipped | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | unit_012で公開済み`swbt-bumble-backend@0.1.1`へ更新し、registryだけを使うarchive verification buildと展開archiveのoffline/all-feature testが成功。検査後の構造変更は不要 |
 | refactor-skipped | T09: local gate と public docs review が変更範囲に対して成功し、未実行 hardware/publish を明記する | regression | quality gate | all/default/no-default、MSRV、doc、dependency policy、diff、archive gateがgreen。unit_012のWindows実機回帰は完了し、remote CIはmerge gate、`swbt-rs` publishは別承認事項として残した。検査後の構造変更は不要 |
 | refactor-done | T10: Bumble session 統合 test が reader thread の packet 分割順序に依存せず公開 transport event を検査する | regression | test harness / CI | PR #11 run `30649447099` で `CommandStatus` 後に空で返る red を記録。残り期限内の再 poll に変更し、対象100回と全 library testが green |
+| pending | T11: registry backend 0.1.1 の現行 dependency graph、license、Windows/Linux SBOM、package archive を再生成できる | regression | package / release | 2026-08-01 evidence は旧 Git dependency graph の履歴として保持し、registry sourceだけの現行結果を別 evidenceへ記録する |
+| pending | T12: 非公開脆弱性報告先が実際に有効で、`SECURITY.md` からその入口へ到達できる | new | repository security / docs | GitHub API の有効値と実在URLを確認し、public issueへ秘密情報を出さない契約を維持する |
+| pending | T13: workload soak と Python backend への切戻し訓練が、adapter排他・profile非破壊・neutral終了を満たす | acceptance | operational cutover / hardware | unit_012 の連続60秒runをsoakとして評価し、Rust終了後のadapter再利用、Python再接続、入力、neutral closeを新しい非秘密 evidenceへ記録する |
 
 ## 7. 設計メモ
 
@@ -211,3 +214,6 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 - [x] release/rollback runbook と blocker を検査した
 - [x] 検証結果または未実行理由を記録した
 - [x] package / release / public API に触れる gate を記録した
+- [ ] registry backend 0.1.1 の dependency/license/SBOM/package evidence を再生成した
+- [ ] GitHub の非公開脆弱性報告先を有効化し、`SECURITY.md` を更新した
+- [ ] workload soak と backend rollback rehearsal の結果を記録した
