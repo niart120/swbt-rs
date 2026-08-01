@@ -61,7 +61,7 @@ ACL flush 観測、Vendor Event 応答の実動作修正3 commitだけを含む�
 | green | T03: 現在の registry blocker を再現する | package | clean `cargo package --locked --list` は成功し、`cargo package --locked` は `bumble-controller` 不在で停止する |
 | green | T04: 単一 backend の作業境界を自己所有 fork に記録する | cross-repo design | Issue #1 に対象範囲、対象外、ライセンス、clean archive、実機回帰条件がある |
 | green | T05: 必要な Bumble source と API を inventory する | backend design | USB HCI、HCI、Classic host、L2CAP、SDP、HIDP、key storeの採否をsource/test単位で記録する |
-| pending | T06a: backend crate の配布骨格を作る | package / license | 自己所有forkの独立packageがfork/path/Git通常依存なしでpackageでき、LICENSE、NOTICE、README、改変表示を含む |
+| green | T06a: backend crate の配布骨格を作る | package / license | 自己所有forkの独立packageがfork/path/Git通常依存なしでpackageでき、LICENSE、NOTICE、README、改変表示を含む |
 | pending | T06b: core value と HCI codec を内部化する | backend codec | address、UUID、Classic key、必要なHCI command/event/ACLだけを内部moduleとtestへ移す |
 | pending | T06c: Classic L2CAP、SDP、HIDPを内部化する | backend protocol | LE credit channelを含めず、Classic signaling、SDP continuation、HIDP codecが移植testを通る |
 | pending | T06d: Classic host と bond state を抽出する | backend host | pairing/reconnect、ACL credit、L2CAP channel、link-key永続化がtest-only peerで動く |
@@ -148,6 +148,7 @@ git diff --check
 | `cargo package --locked` | blocked: crates.io に `bumble-controller@0.1.0` がない |
 | fork branch cleanup | success: `feat/swbt-registry-package-names` のremote/local refを削除し、`git ls-remote --heads origin main feat/swbt-registry-package-names` は `main@cb55e2d` だけを返した |
 | backend source/API inventory | success: USB/HCI/Classic host/L2CAP/SDP/HIDP/bondの採否、public API、test移行単位をfixed source pathへ対応付けた |
+| backend crate scaffold | success: fork `feat/swbt-bumble-backend@53fe453` の依存0件のarchive 8 files / 15.8 KiBがLICENSE、NOTICE、READMEを含み、package verifyと1 testが成功 |
 | crates.io publish / production tag / GitHub Release | not run: 対象外かつ明示承認なし |
 | 実機回帰 | not run: Rust sourceとfork実装は変更せず、package metadataと作業境界だけを変更 |
 
