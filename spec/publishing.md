@@ -1,7 +1,9 @@
 # 0.1.0 公開手順
 
-- 状態: **公開承認済み・実行待ち**
-- candidate: `0.1.0`
+- 状態: **公開済み**
+- 公開版: `0.1.0`
+- crates.io公開日時: 2026-08-02 03:41:11 JST (2026-08-01T18:41:11.828209Z)
+- 公開元main: `0dc1f7c9a42a47f04b4c56d34502af9cd4f88168`
 - 最終監査日: 2026-08-02 (JST)
 
 この文書は release candidate の再現、停止条件、検査、rollback を一か所にまとめる。2026-08-02の
@@ -31,12 +33,12 @@
   では、連続2回の60秒IMU run、RustからPython 0.6.0への同一profile copyによる切戻し、A入力、
   neutral終了、両backend終了後のadapter再利用、profileのバイト不変を確認した。
 
-## 公開前条件と固定点
+## 公開前条件の解消と固定点
 
-公開承認前の停止条件だった`publish = false`は専用release changeで解除する。監査基準にしたmainは
-`a8378f9657b986f74a8f2f50c86c36eb2eacf885`で、同じSHAの
-[CI run 30712408463](https://github.com/niart120/swbt-rs/actions/runs/30712408463)は全job成功である。
-公開元となるrelease changeのmerge後main SHAとremote checkを固定してから`cargo publish`を実行する。
+公開承認前の停止条件だった`publish = false`は専用の
+[release PR #15](https://github.com/niart120/swbt-rs/pull/15)で解除した。PRの9 checksと、merge後main
+`0dc1f7c9a42a47f04b4c56d34502af9cd4f88168`の
+[CI run 30713005380](https://github.com/niart120/swbt-rs/actions/runs/30713005380)は全job成功である。
 
 fork 元 `chaitanyarahalkar/bumble-rs` への issue/PR はこの手順に含めない。自己所有 fork の
 [Issue #1](https://github.com/niart120/bumble-rs/issues/1) だけでbackend切り出しを追跡する。
@@ -53,11 +55,12 @@ release candidate では次を同じ記録へ残す。
 - Windows/Linux の依存一覧、license 判定、CycloneDX SBOM hash
 - 実機確認した OS、adapter、driver、console version と未検証条件
 
-現在の `Cargo.lock` SHA-256 は
-`40109791FB91C479AF355F4B1A07F59A3E7F3680F35C8E5CF0E311A3D021629F`。release commit は merge 前に
-確定できないため、release changeのmerge後にmainの対象SHAとともに固定する。
+公開元mainの`Cargo.lock` SHA-256は
+`40109791FB91C479AF355F4B1A07F59A3E7F3680F35C8E5CF0E311A3D021629F`。clean mainから生成した
+120 files / 1.5 MiB（圧縮259.0 KiB）の最終archiveとcrates.io registry checksumは
+`387c32c578d283ee0ea3195b5b2a0c79b397ad0cf95539070e81825498015a13`で一致した。
 
-T13後のclean archive SHA-256は
+公開前T13監査時点のclean archive SHA-256は
 `57C6496601BFD721C71B7771BD8B2847AE1E584DA6FC172939F9103CFB5383A2`。Windows/Linux SBOM SHA-256は
 それぞれ`C66AA641628F00E13B1C4FDDC0A582AA12D7E9F9FC27A77EC60D46150CDA1346`、
 `3F085008B1D3F44A2ADF89BCAC6973D120C25C3455E61A499CD5959B0BC81085`である。
@@ -111,18 +114,18 @@ key material がないことを検査する。`cargo-cyclonedx`のroot local pat
 unsupported、明示 local address の実機確認が CSR8510 A10 に限られること、`Drop` の best-effort
 cleanup を release note に残す。
 
-## swbt-rs 公開実行
+## 公開結果
 
-停止条件をすべて解消し、当該turnで得た公開操作の明示承認の範囲で次へ進む。
-
-1. `publish = false` の解除と配布 dependency を専用 release change として review する。
-2. GitHub Private Vulnerability Reporting が有効で、`SECURITY.md` の非公開報告 URL が現在の
-   repositoryを指すことを再確認する。
-3. main の candidate SHA、Cargo.lock hash、backend version、SBOM hash、全 check を記録する。
-4. crates.io credentialの設定を秘密値を表示せず確認する。現在はpublish workflowを置かず、承認済みの
-   この公開操作に限ってローカルのCargo credentialを使用する。
-5. 承認済み candidate だけを一度公開し、`cargo info swbt-rs@0.1.0` と新規 project から取得・build する。
-6. 公開した同じ commit に production tag と GitHub Release を対応付ける。
+- clean `main@0dc1f7c9a42a47f04b4c56d34502af9cd4f88168`から、ローカルのCargo credentialを使って
+  `cargo publish --locked`を1回実行した。publish workflowは使用しておらず、credential値は記録していない。
+- [`swbt-rs@0.1.0`](https://crates.io/crates/swbt-rs/0.1.0)はyankされておらず、ownerは`niart120`である。
+  crates.io APIのchecksumは最終archiveと一致した。
+- local packageを依存に使わない新規Cargo projectで`swbt-rs = "=0.1.0"`と`bumble` featureをregistryから解決し、
+  Rust 1.87でbuildした。lockfileは`swbt-rs`と`swbt-bumble-backend`のregistry sourceとchecksumを持つ。
+- annotated tag `v0.1.0`のtag objectは`46a508ee77e78831155350ae7da6f91a32ad83ca`、peeled commitは
+  公開元mainと同じ`0dc1f7c9a42a47f04b4c56d34502af9cd4f88168`である。
+- [GitHub Release v0.1.0](https://github.com/niart120/swbt-rs/releases/tag/v0.1.0)は
+  2026-08-02 03:41:55 JSTに公開し、draftでもprereleaseでもない。
 
 ## rollback と中断
 
