@@ -31,9 +31,8 @@ use crate::{
         readiness::ReadinessError,
         test_support::{TestTransport, TestTransportControl},
         transport::{
-            ActivityNotifier, ClassicAclBufferInfo, HidChannel, SendAcceptance,
-            TransportCapabilities, TransportError, TransportErrorKind, TransportEvent,
-            TransportPort, TransportResult, UsbTransportMetadata,
+            ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities, TransportError,
+            TransportErrorKind, TransportEvent, TransportPort, TransportResult,
         },
         worker::{
             ChannelWorkerWaiter, MonotonicClock, WorkerReporting, WorkerWaitError,
@@ -1020,14 +1019,8 @@ fn non_classic_capabilities_fail_before_worker_spawn_and_clean_up_transport() {
     let controller = ProController::builder("fake-adapter")
         .build()
         .expect("build configured Pro controller");
-    let capabilities = TransportCapabilities::from_initialized_controller(
-        DEVICE_INFO_ADDRESS,
-        None,
-        Some([0, 0, 0, 0, 0x20, 0, 0, 0]),
-        Some(ClassicAclBufferInfo::new(1021, 8)),
-        UsbTransportMetadata::new(0x0a12, 0x0001, 1, 7),
-    )
-    .expect("non-Classic controller still has valid identity metadata");
+    let capabilities = TransportCapabilities::for_test(DEVICE_INFO_ADDRESS, false)
+        .expect("non-Classic controller still has valid identity metadata");
     let (transport, control) = TestTransport::with_capabilities(8, 3, capabilities);
     let clock = ManualClock::at(Duration::ZERO);
     let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
@@ -1363,14 +1356,8 @@ fn common_input_bridge_dispatches_for_periodic_and_direct_workers() {
 #[test]
 fn initialized_address_feeds_device_info_reply_without_reversal() {
     let local_address = [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc];
-    let capabilities = TransportCapabilities::from_initialized_controller(
-        local_address,
-        None,
-        Some([0; 8]),
-        Some(ClassicAclBufferInfo::new(1021, 8)),
-        UsbTransportMetadata::new(0x0a12, 0x0001, 1, 7),
-    )
-    .expect("valid custom controller capabilities");
+    let capabilities = TransportCapabilities::for_test(local_address, true)
+        .expect("valid custom controller capabilities");
     let controller = ProController::builder("fake-adapter")
         .build()
         .expect("build configured Pro controller");

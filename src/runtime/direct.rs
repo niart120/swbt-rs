@@ -1,7 +1,6 @@
 use std::{error::Error as StdError, fmt, time::Duration};
 
 use crate::{
-    controller::input::TapPlan,
     input::InputState,
     model::ControllerModel,
     protocol::SwitchHidProtocol,
@@ -201,7 +200,7 @@ impl<M: ControllerModel> PendingDirectTap<M> {
 
 pub(crate) fn begin_tap<M: ControllerModel>(
     ready: bool,
-    plan: TapPlan<M>,
+    plan: (InputState<M>, InputState<M>, Duration),
     started_at: Duration,
     state: &mut InputStateStore<M>,
     protocol: &SwitchHidProtocol<M>,
@@ -212,7 +211,7 @@ pub(crate) fn begin_tap<M: ControllerModel>(
         return Err(DirectTapError::NotReady);
     }
 
-    let (pressed, released, duration) = plan.into_parts();
+    let (pressed, released, duration) = plan;
     let release_at = started_at
         .checked_add(duration)
         .ok_or(DirectTapError::DeadlineOverflow)?;
@@ -571,7 +570,7 @@ mod tests {
         fn begin_tap(
             &mut self,
             ready: bool,
-            plan: crate::controller::input::TapPlan<Pro>,
+            plan: (InputState<Pro>, InputState<Pro>, Duration),
             started_at: Duration,
         ) -> Result<PendingDirectTap<Pro>, DirectTapError> {
             begin_direct_tap(

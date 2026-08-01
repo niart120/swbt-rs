@@ -153,24 +153,6 @@ impl ModelProtocolSpec {
             hid_sdp_policy,
         }
     }
-
-    fn is_well_formed(self) -> bool {
-        let _type_checked_colors = self.default_colors.to_spi_bytes();
-        !self.local_name.is_empty()
-            && self.class_of_device <= 0xFF_FFFF
-            && self.device_type != 0
-            && self.device_info_tail != [0; 2]
-            && self.battery_connection == 0x80
-            && self.vibrator_input == 0
-            && !self.pairing_trigger_buttons.is_empty()
-            && self.accepted_imu_modes == [0, 1, 2, 3, 4, 5]
-            && self.accelerometer_calibration.zero_raw == [0; 3]
-            && self.accelerometer_calibration.reference_raw == [0x4000; 3]
-            && self.gyroscope_calibration.zero_raw == [0; 3]
-            && self.gyroscope_calibration.reference_raw == [0x343B; 3]
-            && self.hid_report_descriptor.len() == 203
-            && self.hid_sdp_policy.is_well_formed()
-    }
 }
 
 /// Read-only model data shared by typed and dynamic boundaries.
@@ -239,7 +221,6 @@ impl ModelSpec {
     /// Returns whether `button` is valid for this model.
     #[must_use]
     pub fn supports_button(self, button: ButtonKind) -> bool {
-        debug_assert!(self.protocol.is_well_formed());
         button_wire_position(self.kind, button).is_some()
     }
 

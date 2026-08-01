@@ -630,10 +630,6 @@ fn receive_response(response: CommandResponse) -> crate::Result<()> {
         .map_err(map_command_error)
 }
 
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "M4 activates terminal recovery while pairing")
-)]
 fn finish_terminal_owner<C>(
     owner: &mut Option<WorkerOwner<C>>,
     fallback: Error,

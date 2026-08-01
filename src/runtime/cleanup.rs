@@ -28,33 +28,28 @@ pub(crate) enum CleanupPhase {
 
 #[derive(Debug)]
 pub(crate) struct CleanupFailure {
-    #[allow(
-        dead_code,
-        reason = "T24 and T26 map cleanup failures after joining the worker"
-    )]
+    #[cfg(test)]
     phase: CleanupPhase,
     error: TransportError,
 }
 
 impl CleanupFailure {
-    pub(crate) const fn new(phase: CleanupPhase, error: TransportError) -> Self {
-        Self { phase, error }
+    pub(crate) const fn new(_phase: CleanupPhase, error: TransportError) -> Self {
+        Self {
+            #[cfg(test)]
+            phase: _phase,
+            error,
+        }
     }
 
+    #[cfg(test)]
     #[must_use]
-    #[allow(
-        dead_code,
-        reason = "T24 and T26 map cleanup failures after joining the worker"
-    )]
     pub(crate) const fn phase(&self) -> CleanupPhase {
         self.phase
     }
 
+    #[cfg(test)]
     #[must_use]
-    #[allow(
-        dead_code,
-        reason = "T24 and T26 preserve the cleanup transport source"
-    )]
     pub(crate) const fn source_error(&self) -> &TransportError {
         &self.error
     }
@@ -73,10 +68,6 @@ impl StdError for CleanupFailure {
 }
 
 #[derive(Debug)]
-#[allow(
-    dead_code,
-    reason = "T24 and T26 combine cleanup, join, and public close errors"
-)]
 pub(crate) enum ExplicitCloseError<J> {
     Cleanup(CleanupFailure),
     Join(J),
@@ -175,15 +166,7 @@ impl CleanupSequence {
 }
 
 pub(crate) struct CloseCompletion {
-    #[allow(
-        dead_code,
-        reason = "T24 consumes the one-shot completion before joining the worker"
-    )]
     performed: bool,
-    #[allow(
-        dead_code,
-        reason = "T24 and T26 preserve cleanup failure through worker join"
-    )]
     first_failure: Option<CleanupFailure>,
 }
 
@@ -200,10 +183,6 @@ impl CloseCompletion {
         self.performed
     }
 
-    #[allow(
-        dead_code,
-        reason = "T24 joins the worker after consuming cleanup completion"
-    )]
     pub(crate) fn finish_with_join<J>(
         self,
         join: impl FnOnce() -> Result<(), J>,

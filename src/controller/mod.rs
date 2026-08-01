@@ -38,7 +38,7 @@ use crate::{
     CreateProfileOptions,
 };
 
-use build::{FileProfileReader, ProfileReadPort, read_typed_profile};
+use build::{ProfileReadPort, read_typed_profile};
 #[cfg(test)]
 use config::ProfileConfig;
 use config::{BuilderConfig, ControllerConfig};
@@ -606,7 +606,7 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     /// belonging to another model, or [`crate::ErrorKind::Internal`] when the
     /// profile cannot be read for another filesystem reason.
     pub fn build(self) -> crate::Result<Controller<M, R>> {
-        let mut reader = FileProfileReader;
+        let mut reader = FileProfileStore;
         self.build_with_profile_reader(&mut reader)
     }
 

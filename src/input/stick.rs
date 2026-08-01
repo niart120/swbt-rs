@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use crate::error::{Error, ErrorKind, Result};
 
 /// A 12-bit two-axis stick position.
@@ -44,10 +46,10 @@ impl Stick {
     /// Returns [`ErrorKind::InvalidInput`] when either axis is non-finite or
     /// outside the accepted range.
     pub fn normalized(x: f32, y: f32) -> Result<Self> {
-        Self::raw(
-            normalized_axis_to_raw("x", x)?,
-            normalized_axis_to_raw("y", y)?,
-        )
+        Ok(Self {
+            x: axis_input_to_raw("x", x, -1.0..=1.0, 1.0)?,
+            y: axis_input_to_raw("y", y, -1.0..=1.0, 1.0)?,
+        })
     }
 
     /// Creates a stick from normalized tilt axes.
@@ -67,8 +69,10 @@ impl Stick {
     /// Returns [`ErrorKind::InvalidInput`] when `amount` is non-finite or
     /// outside `0.0..=1.0`.
     pub fn up(amount: f32) -> Result<Self> {
-        validate_amount(amount)?;
-        Self::tilt(0.0, amount)
+        Ok(Self {
+            x: Self::CENTER,
+            y: axis_input_to_raw("amount", amount, 0.0..=1.0, 1.0)?,
+        })
     }
 
     /// Returns a stick tilted downward by `amount`.
@@ -78,8 +82,10 @@ impl Stick {
     /// Returns [`ErrorKind::InvalidInput`] when `amount` is non-finite or
     /// outside `0.0..=1.0`.
     pub fn down(amount: f32) -> Result<Self> {
-        validate_amount(amount)?;
-        Self::tilt(0.0, -amount)
+        Ok(Self {
+            x: Self::CENTER,
+            y: axis_input_to_raw("amount", amount, 0.0..=1.0, -1.0)?,
+        })
     }
 
     /// Returns a stick tilted left by `amount`.
@@ -89,8 +95,10 @@ impl Stick {
     /// Returns [`ErrorKind::InvalidInput`] when `amount` is non-finite or
     /// outside `0.0..=1.0`.
     pub fn left(amount: f32) -> Result<Self> {
-        validate_amount(amount)?;
-        Self::tilt(-amount, 0.0)
+        Ok(Self {
+            x: axis_input_to_raw("amount", amount, 0.0..=1.0, -1.0)?,
+            y: Self::CENTER,
+        })
     }
 
     /// Returns a stick tilted right by `amount`.
@@ -100,8 +108,10 @@ impl Stick {
     /// Returns [`ErrorKind::InvalidInput`] when `amount` is non-finite or
     /// outside `0.0..=1.0`.
     pub fn right(amount: f32) -> Result<Self> {
-        validate_amount(amount)?;
-        Self::tilt(amount, 0.0)
+        Ok(Self {
+            x: axis_input_to_raw("amount", amount, 0.0..=1.0, 1.0)?,
+            y: Self::CENTER,
+        })
     }
 
     /// Returns the raw horizontal axis.
@@ -134,30 +144,28 @@ fn validate_raw_axis(name: &str, value: u16) -> Result<()> {
     }
 }
 
-fn normalized_axis_to_raw(name: &str, value: f32) -> Result<u16> {
-    if !value.is_finite() || !(-1.0..=1.0).contains(&value) {
+fn axis_input_to_raw(
+    name: &str,
+    value: f32,
+    accepted: RangeInclusive<f32>,
+    direction: f32,
+) -> Result<u16> {
+    if !value.is_finite() || !accepted.contains(&value) {
         return Err(Error::new(
             ErrorKind::InvalidInput,
-            format!("{name} must be finite and between -1.0 and 1.0: {value}"),
+            format!("{name} must be finite and within {accepted:?}: {value}"),
         ));
     }
 
+    Ok(normalized_axis_to_raw(value * direction))
+}
+
+fn normalized_axis_to_raw(value: f32) -> u16 {
     let distance = if value < 0.0 {
         f32::from(Stick::CENTER - Stick::MIN)
     } else {
         f32::from(Stick::MAX - Stick::CENTER)
     };
     let raw = f32::from(Stick::CENTER) + (value * distance).round_ties_even();
-    Ok(raw as u16)
-}
-
-fn validate_amount(value: f32) -> Result<()> {
-    if value.is_finite() && (0.0..=1.0).contains(&value) {
-        Ok(())
-    } else {
-        Err(Error::new(
-            ErrorKind::InvalidInput,
-            format!("amount must be finite and between 0.0 and 1.0: {value}"),
-        ))
-    }
+    raw as u16
 }

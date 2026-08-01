@@ -69,14 +69,6 @@ impl LifecycleStateMachine {
         }
     }
 
-    #[allow(
-        dead_code,
-        reason = "a later reconnect path resets an interrupted logical open"
-    )]
-    pub(crate) fn fail_open(&mut self) {
-        self.opening = false;
-    }
-
     pub(crate) fn mark_failed(&mut self) {
         self.opening = false;
         self.state = LifecycleState::Failed;
@@ -190,10 +182,6 @@ mod tests {
         assert_eq!(lifecycle.request_open(), Ok(LifecycleAction::OpenTransport));
         assert_eq!(lifecycle.state(), LifecycleState::Configured);
         assert_eq!(lifecycle.request_open(), Ok(LifecycleAction::None));
-        lifecycle.fail_open();
-        assert_eq!(lifecycle.state(), LifecycleState::Configured);
-        assert_eq!(lifecycle.complete_open(), LifecycleAction::None);
-        assert_eq!(lifecycle.request_open(), Ok(LifecycleAction::OpenTransport));
         assert_eq!(lifecycle.complete_open(), LifecycleAction::Opened);
         assert_eq!(lifecycle.state(), LifecycleState::Open);
         assert_eq!(lifecycle.request_open(), Ok(LifecycleAction::None));

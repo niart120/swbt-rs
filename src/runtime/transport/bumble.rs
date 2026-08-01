@@ -6,9 +6,8 @@ use crate::{adapter::AdapterSelector, profile::ProfileIdentity};
 
 use super::profile_key_store::ProfileKeyStoreFactory;
 use super::{
-    ActivityNotifier, ControllerVersionInfo, HidChannel, SendAcceptance, TransportCapabilities,
-    TransportConfig, TransportError, TransportErrorKind, TransportEvent, TransportPort,
-    TransportResult, UsbTransportMetadata,
+    ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities, TransportConfig,
+    TransportError, TransportErrorKind, TransportEvent, TransportPort, TransportResult,
 };
 
 pub(super) trait BackendSessionPort: Send {
@@ -275,19 +274,9 @@ fn capabilities_from_backend(
 ) -> TransportResult<TransportCapabilities> {
     let address = capabilities.local_address();
     let bytes = address.as_le_bytes();
-    let version = capabilities.controller_version();
-    let usb = capabilities.usb();
-    TransportCapabilities::from_validated_classic_controller(
-        [bytes[5], bytes[4], bytes[3], bytes[2], bytes[1], bytes[0]],
-        ControllerVersionInfo::new(
-            version.hci_version,
-            version.hci_subversion,
-            version.lmp_version,
-            version.company_identifier,
-            version.lmp_subversion,
-        ),
-        UsbTransportMetadata::new(usb.vendor_id, usb.product_id, usb.bus, usb.device_address),
-    )
+    TransportCapabilities::from_validated_classic_controller([
+        bytes[5], bytes[4], bytes[3], bytes[2], bytes[1], bytes[0],
+    ])
 }
 
 pub(super) fn map_backend_event(event: backend::Event) -> TransportResult<TransportEvent> {
