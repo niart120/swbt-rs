@@ -114,7 +114,7 @@ administrator が専用 group と `MODE="0660"` を定義してください。ud
 
 ### kernel driver detach と reattach
 
-固定 Bumble revision `b8c7cd625bc2ac2f58a4beb4ade1264426969819` の
+固定 Bumble revision `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1` の
 `bumble-transport/src/usb.rs` は、USB handle に `set_auto_detach_kernel_driver(true)` を設定してから
 HCI interface を claim します。libusb の契約では、auto detach が有効な handle は claim 時に kernel
 driver を detach し、interface release 時に attach します。詳細は

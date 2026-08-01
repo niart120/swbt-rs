@@ -158,7 +158,7 @@ characterization で使った未割当 universal dummy address は製品経路�
 | refactor-skipped | T06 Python schema v2 local-address fixture と、3 model・Periodic/Direct の identity projection を検査する | compatibility | integration/virtual | address/key非表示 |
 | refactor-done | T07 probe の local-address 引数、identity-kind output、usage/error/redaction と公開 docs を確定する | new/docs | CLI/public | raw addressを出力しない |
 | refactor-done | T08 CSR8510 A10 で Pro Periodic pair/reconnect、Direct reconnect、neutral cleanup、power-cycle recovery を期限付きで記録する | hardware | Windows/Switch | machine/UI分離 |
-| pending | T09 completion gate、rustdoc/API review、dependency revision/source baseline、self-review を確定する | gate | package/docs | publish/tagなし |
+| refactor-skipped | T09 completion gate、rustdoc/API review、dependency revision/source baseline、self-review を確定する | gate | package/docs | publish/tagなし |
 
 各 item は red、green、必要な refactor を完了してから、その item だけを Conventional Commit で commit する。
 Bumble fork 側 T02 は fork repository の専用 branch に独立 commit を作り、その commit SHA を本仕様と `Cargo.toml` に固定する。
@@ -175,6 +175,7 @@ Bumble fork 側 T02 は fork repository の専用 branch に独立 commit を作
 | refactor-skipped | T06 | red: Python fixtureの期待caseを3件から6件へ先に拡張し、既存fixtureがadapter-default 3件だけだったためcase-set検査3件が失敗した。green: source commit `84d2723b127f70fc78e12f4496f5c40af0ccfb0a`のPython v0.6.0実装と一致する`exp-local-address` profileをPro / Joy-Con L / Joy-Con Rへ追加し、全6件のtyped JSON round-trip、未知field保持、local addressとlink keyのDebug非表示を検査した。Periodic / Directを組み合わせた6種のruntime configも同じtyped `ProfileIdentity::LocalAddress`を保持した。`cargo test --all-features --test profile_compat`は3 passed / 1 ignored、identity projection targeted testは1 passed。refactor: 製品コードはT05のmodel-independent projectionで既にgreenとなり、T06は互換fixtureとcharacterization testだけで完結したため追加の構造変更を行わなかった |
 | refactor-done | T07 | red: explicit identityを持つprobe request testは`ConnectionRequest.identity`未定義の`E0609`/`E0560`で失敗し、write後recovery categoryも汎用`operation_failed`だった。green: `pair`だけが任意の`--local-address <XX:XX:XX:XX:XX:XX>`を受け、未指定時はadapter-default、reconnectでの指定・不正値・重複指定はusage errorとした。pairは指定identityをcreate-profileへ渡し、reconnectはvalidated profile summaryからidentity kindを取得する。成功NDJSONはaddress-freeな`identity_kind`、write後不確定は`adapter_identity_recovery_required`を出す。integration testは既存profileでhardware open前まで進み、stderr/traceへのraw address非表示を検査した。probe unit 11 passed、probe CLI 8 passed、all-features full test（library 319 passed / 2 ignoredを含む）、all-feature build、all-target/all-feature clippy `-D warnings`、format、diff checkが成功した。README、platform support、troubleshootingにCSR8510 A10限定、profile/address/dongleの一対一管理、再試行禁止とphysical power cycleを記載した。refactor: production successで必ず確定するidentity kindをoptional evidenceから必須fieldへ狭めた |
 | refactor-done | T08 | red 1: 最初のfresh Pro pairはSETREQ後約1秒で`adapter_identity_recovery_required`となり、fake testでreset後の初回session close failureを`RecoveryRequired / Close`として再現した。green 1: 初回close結果を再列挙・read-backで決着するよう変更し、identity 7 testsが成功したが、2回目の実機pairも同じ公開errorで停止した。ignored `adapter-tests`診断で内部stageを秘密値なしに限定し、`WarmReset`を特定した。red 2: warm reset同期transfer failure後にtarget read-backできるtestは`RecoveryRequired / WarmReset`で失敗した。green 2: 同期transferと初回closeのold-handle結果を保留し、bounded再列挙・CSR metadata・exact target read-back・read-back session closeを必須にしてidentity 8 testsを成功させた。再列挙timeoutと旧address read-backが引き続きrecovery-requiredになることも固定した。実機identity-only runは`Rewritten`、fresh Periodic pairはbond/namespace各1・A反映・neutral close、保存鍵Periodic/Direct reconnectはprofile bytes不変・A反映・neutral closeで成功した。各write後にphysical power cycleとprivate adapter-default baseline一致を確認し、最終的にbaseline、profile、比較copy、3 traceを`target/`から削除した。`adapter-tests`を含むclippy `-D warnings`、format、diff checkも成功した。refactor: 実機診断を製品の公開error/traceへ混ぜず、ignored test helperへ分離し、保持evidenceをclosed machine resultとUI観測だけに限定した |
+| refactor-skipped | T09 | completion: Rust 1.87.0 all-target/all-feature check、stable default/all-feature testとbuild、all-target/all-feature clippy `-D warnings`、all-feature rustdoc `-D warnings`、rustfmt、diff checkが成功した。default libは268 passed / 1 ignored、all-feature libは321 passed / 4 ignoredで、対応するintegration、probe、example、doc testも成功した。公開API reviewではBumble型を露出せず、`ProfileIdentity::LocalAddress`、`CreateProfileOptions`、typed `AdapterIdentityRecoveryRequired`、feature-disabled順序、秘密値非保持を維持した。rustdocへCSR8510 A10 / WinUSB、volatile、profile/address/adapter一対一、physical recovery条件を補った。Cargo metadataはBumble 22 packageがpublic fork `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1`の単一sourceであることを示し、remote branch headも同SHA、forkはpublic、upstream PRは0件だった。source baseline、README、platform supportの旧candidate SHAを修正し、過去hardware evidenceの当時SHAは変更していない。self-reviewでcritical/high findingはなく、single hardware environment、固定fork、crates.io namespaceをresidual riskとして残した。package、publish、tag、GitHub release、Linux/macOS実機、cross compile、Miriは対象外。completion gateと文書/API整合のitemで製品構造を変える必要がなかったため追加refactorを行わなかった |
 
 ## 7. 対象ファイル
 
@@ -195,7 +196,7 @@ Bumble fork 側 T02 は fork repository の専用 branch に独立 commit を作
 - `docs/platform-support.md`
 - `docs/troubleshooting.md`
 - `README.md`（入口の変更が必要な場合だけ）
-- `spec/wip/unit_011/evidence/`
+- `spec/complete/unit_011/evidence/`
 - Bumble fork の `bumble-transport/src/host.rs` と対応 test
 
 実装中に責務境界が確定した場合は filename を調整し、この一覧へ反映する。
@@ -218,19 +219,61 @@ git diff --check
 Bumble fork は変更 package の unit test、`cargo fmt --check`、対象 package の clippy を実行する。hardware test は
 固定 timeout、adapter、driver、console version、run index、cleanup、power-cycle recovery を evidence に残す。
 
+### 8.1 完了結果
+
+2026-08-01 JST に次を実行し、すべて成功した。
+
+- `cargo +1.87.0 check --all-targets --all-features --locked`
+- `cargo clippy --all-targets --all-features --locked -- -D warnings`
+- `cargo test --locked`
+- `cargo test --all-targets --all-features --locked`
+- `cargo build --locked`
+- `cargo build --all-features --locked`
+- `$env:RUSTDOCFLAGS="-D warnings"; cargo doc --all-features --no-deps --locked`
+- `cargo fmt --check`
+- `git diff --check`
+
+default lib は 268 passed / 1 ignored、all-feature lib は 321 passed / 4 ignored で、対応する integration、
+probe、example、doc test も成功した。実機を要求する ignored test は、T08 の明示手順で対象2件だけを実行した。
+package、publish、tag、GitHub release、Linux/macOS実機、cross compile、Miriはunit_011の対象外であり未実行とした。
+
+### 8.2 API、依存、文書 review
+
+- 公開境界は `LocalAddress`、`ProfileIdentity`、`CreateProfileOptions`、`ErrorKind` に閉じ、Bumble型を露出しない
+- local-address createは`bumble` feature無効時にtarget inspectionとadapter I/Oより前で拒否する
+- write後に状態を確定できない失敗は`AdapterIdentityRecoveryRequired`で分岐でき、Display、Debug、source、traceに
+  address、selector、path、packet、key、backend messageを出さない
+- rustdocはCSR8510 A10 / WinUSB、volatile identity、profile/address/adapter一対一、physical recovery条件を説明する
+- Cargo metadata上のBumble 22 packageはpublic fork `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1`の単一sourceである
+- remote `feat/external-host-vendor-command` headは同SHA、forkはpublic、Bumble upstream PRは0件である
+- candidate source baseline、README、platform supportを現行SHAへ合わせ、過去evidenceの当時SHAは維持した
+
+### 8.3 Self-review
+
+| severity | finding | evidence | disposition |
+|---|---|---|---|
+| medium | `bumble` featureはpublic forkの固定SHAに依存し、同名crateのcrates.io namespaceでは現在のpackageを公開できない | `Cargo.toml`、Cargo metadata、unit_010 | `publish=false`を維持し、releaseはunit_010の未解決条件から分離しない |
+| low | local-address実機はWindows 11 / WinUSB / CSR8510 A10 / Switch 2 22.5.0 / Pro各1環境で、反復成功率を測っていない | T08 evidence | 成功runを一般的な信頼性へ拡張せず、他OS、adapter、Joy-Con実機を先送りする |
+| low | warm reset同期transfer failureはcommand到達の直接証明にならない | fake tests、D03/D04 | bounded再列挙、CSR metadata、exact target read-back、read-back closeの全成功を必須にする |
+| low | diagnostic helperは対象USB adapterを書き換える | ignored `adapter-tests` | `cfg(test)`かつ明示ignoredに限定し、通常test/CIでは実行しない |
+
+critical/high findingはない。追加差分に`unsafe`、広いlint抑制、製品入力境界の`unwrap` / `expect`はない。
+test設計はpure codec、fake identity backend、scripted Bumble、profile/CLI integration、ignored adapter test、
+machine evidence、UI観測を分離している。単一runのUI観測をprotocol、profile persistence、復旧の代替根拠にしていない。
+
 ## 9. 先送り事項
 
 - non-CSR identity backend
 - persistent local address
 - duplicate address detection
 - Linux / macOS hardware matrix
-- upstream issue / PR と official revision への復帰
+- upstream issue / PR はユーザ指示により作成しない。equivalent capabilityを持つofficial revisionへの復帰は先送り
 - crates.io へ配布可能な Bumble dependency namespace
 
 ## 10. 完了チェックリスト
 
-- [ ] T01–T09 が `refactor-done` または理由付き `refactor-skipped`
-- [ ] test item ごとの commit がある
+- [x] T01–T09 が `refactor-done` または理由付き `refactor-skipped`
+- [x] test item ごとの commit がある
 - [x] local-address create-profile が `UnsupportedCapability` ではなく実装済み
 - [x] local-address existing profile の reconnect が実装済み
 - [x] expected-address guard が pairing / advertising 前に働く
@@ -240,7 +283,9 @@ Bumble fork は変更 package の unit test、`cargo fmt --check`、対象 packa
 - [x] address / key / selector / path / raw packet が公開 error と trace に出ない
 - [x] duplicate address guidance と対応範囲が公開 docs にある
 - [x] Bumble fork branch / commit / 差分 / rollback を記録した
-- [ ] default / all-features gate が成功した
-- [ ] `agentic-self-review` の指摘を採否記録した
-- [ ] `spec/complete/unit_011/` へ移動した
-- [ ] PR merge 後に default branch を同期し、作業 branch を削除した
+- [x] default / all-features gate が成功した
+- [x] `agentic-self-review` の指摘を採否記録した
+- [x] `spec/complete/unit_011/` へ移動した
+
+PR merge、default branch同期、作業branch削除は、このcompletion commit後に`pr-merge-cleanup`で実行し、
+repository外のGitHub/ローカルbranch状態として検証する。

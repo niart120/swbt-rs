@@ -33,9 +33,9 @@ archive smoke が完了するまで `publish = false` を維持します。利�
   前 session の入力状態と stale event を持ち越しません。
 - `build()` 直後の Configured controller には open runtime がないため、入力操作は
   `ErrorKind::TransportClosed` を返します。
-- default feature は空です。`bumble` feature を有効にした場合だけ、reader shutdown と
-  join、および ACL パケットがホスト側の待ち行列を離れた状態の判定を追加した一時 fork の commit
-  `b8c7cd625bc2ac2f58a4beb4ade1264426969819` と `rusb` を組み込みます。
+- default feature は空です。`bumble` feature を有効にした場合だけ、reader shutdown と join、ACL パケットが
+  host queue を離れた状態の判定、CSR command 用の Vendor Event 応答待ちと応答を待たない command 送信を追加した
+  一時 fork の commit `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1` と `rusb` を組み込みます。
 - `list_adapters()` は `bumble` feature で USB device/config/interface descriptor を読み、
   Bluetooth HCI class の candidate を返します。device open、driver detach、interface claim、
   HCI command は行いません。feature 無効時は `ErrorKind::UnsupportedCapability` を返します。
