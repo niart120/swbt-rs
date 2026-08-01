@@ -1,0 +1,257 @@
+{
+  "command": {
+    "enqueue_ns": {
+      "count": 10000,
+      "max": 14200,
+      "p50": 200,
+      "p95": 200,
+      "p99": 300
+    },
+    "response_ns": {
+      "count": 10000,
+      "max": 26700,
+      "p50": 1100,
+      "p95": 1200,
+      "p99": 1400
+    },
+    "transport_accept_ns": {
+      "count": 10000,
+      "max": 26300,
+      "p50": 600,
+      "p95": 800,
+      "p99": 900
+    }
+  },
+  "fairness": {
+    "burst_intervals_below_4ms": 0,
+    "command_response_ns": {
+      "count": 10000,
+      "max": 208700,
+      "p50": 53000,
+      "p95": 81000,
+      "p99": 105800
+    },
+    "commands_completed": 10000,
+    "interval_error_ns": {
+      "count": 9999,
+      "max": 756100,
+      "p50": -6200,
+      "p95": 313700,
+      "p99": 402500
+    },
+    "interval_error_ppm": {
+      "basis": "period_ns",
+      "distribution": {
+        "count": 9999,
+        "max": 94512,
+        "p50": -775,
+        "p95": 39212,
+        "p99": 50312
+      },
+      "formula": "(interval_ns - period_ns) * 1000000 / period_ns",
+      "ideal": 0
+    },
+    "interval_ns": {
+      "count": 9999,
+      "max": 8756100,
+      "p50": 7993800,
+      "p95": 8313700,
+      "p99": 8402500
+    },
+    "latency_scope": {
+      "command_completion": "caller observation after all periodic and reply send observations; conservative upper bound",
+      "post_release": "gate release request through worker observation",
+      "staging": "target deadline through one command and 64 event placement while the worker gate is held"
+    },
+    "lateness_ns": {
+      "count": 10000,
+      "max": 937300,
+      "p50": 318100,
+      "p95": 553200,
+      "p99": 581300
+    },
+    "post_release_accept_ns": {
+      "count": 10000,
+      "max": 186700,
+      "p50": 37200,
+      "p95": 59600,
+      "p99": 75200
+    },
+    "post_release_command_completion_observed_ns": {
+      "count": 10000,
+      "max": 189500,
+      "p50": 39700,
+      "p95": 63900,
+      "p99": 83300
+    },
+    "post_release_reply_attempt_ns": {
+      "count": 640000,
+      "max": 184100,
+      "p50": 28300,
+      "p95": 44400,
+      "p99": 63200
+    },
+    "reply_attempt_ns": {
+      "count": 640000,
+      "max": 184300,
+      "p50": 33400,
+      "p95": 50300,
+      "p99": 70100
+    },
+    "reply_boundary": "send_attempt",
+    "reply_outcome": "rejected_for_fairness_probe",
+    "skipped_ticks": 0,
+    "staging_ns": {
+      "count": 10000,
+      "max": 895100,
+      "p50": 278000,
+      "p95": 514000,
+      "p99": 539500
+    },
+    "transport_errors": 0,
+    "transport_events_drained": 640000
+  },
+  "idle": {
+    "cpu_percent_one_core": 0.0,
+    "elapsed_ns": 10000479700,
+    "process_cpu_ticks_100ns": 0,
+    "process_cpu_wall_ns": 10030498500,
+    "transport_poll_calls_delta": 0,
+    "transport_poll_events_delta": 0,
+    "wait_entries_delta": 0,
+    "wait_returns_delta": 0,
+    "worker_loop_wake_delta": 0
+  },
+  "jitter": {
+    "burst_intervals_below_4ms": 0,
+    "interval_error_ns": {
+      "count": 9999,
+      "max": 1460200,
+      "p50": 39500,
+      "p95": 1042000,
+      "p99": 1060800
+    },
+    "interval_error_ppm": {
+      "basis": "period_ns",
+      "distribution": {
+        "count": 9999,
+        "max": 182525,
+        "p50": 4937,
+        "p95": 130250,
+        "p99": 132600
+      },
+      "formula": "(interval_ns - period_ns) * 1000000 / period_ns",
+      "ideal": 0
+    },
+    "interval_ns": {
+      "count": 9999,
+      "max": 9460200,
+      "p50": 8039500,
+      "p95": 9042000,
+      "p99": 9060800
+    },
+    "lateness_ns": {
+      "count": 10000,
+      "max": 2164500,
+      "p50": 642200,
+      "p95": 1568700,
+      "p99": 1813600
+    },
+    "skipped_ticks": 0
+  },
+  "meta": {
+    "cfg_test": true,
+    "feature_set": "no-default-features",
+    "git_sha": "c00147506c6d4384fd9025633b9c50561c7f613f",
+    "host": {
+      "arch": "x86_64",
+      "cpu": "AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD",
+      "logical_cpus": 32,
+      "os": "Microsoft Windows 10.0.26200"
+    },
+    "interval_error_ppm": {
+      "basis": "period_ns",
+      "formula": "(interval_ns - period_ns) * 1000000 / period_ns",
+      "ideal": 0
+    },
+    "measured_layers": [
+      "ActivityNotifier coalescing channel",
+      "ChannelWorkerWaiter deadline and activity waits",
+      "WorkerCore step and spawned production worker loop",
+      "protocol input and subcommand-reply preparation",
+      "typed bounded command queue and one-shot response",
+      "priority explicit shutdown, cleanup, completion, and join",
+      "TestTransport activity notification and non-blocking drain",
+      "Periodic real-ready accepted 8 ms sends",
+      "absolute Periodic deadlines under the production one-command/4-poll work budget"
+    ],
+    "mode": "full",
+    "profile": "release-test",
+    "raw_format": "ndjson-one-sample-per-line",
+    "samples": {
+      "command": 10000,
+      "fairness_ticks": 10000,
+      "idle_ms": 10000,
+      "jitter": 10000,
+      "shutdown_each": 1000,
+      "transport": 10000
+    },
+    "toolchain": {
+      "cargo": "cargo 1.96.1 (356927216 2026-06-26)",
+      "rustc": "rustc 1.96.1 (31fca3adb 2026-06-26)"
+    },
+    "tuning": {
+      "command_capacity": 1,
+      "commands_per_iteration": 1,
+      "fairness_command_completion_boundary": "caller observation after periodic and reply send observations; conservative upper bound",
+      "fairness_release_boundary": "gate release request",
+      "fairness_reply_boundary": "send_attempt",
+      "fairness_reply_outcome": "rejected_for_fairness_probe",
+      "fairness_staging": "after target deadline, place one configured command and event batch while the worker gate is held",
+      "fake_event_capacity": 64,
+      "fake_poll_batch": 16,
+      "poll_batches": 4
+    },
+    "unmeasured_layers": [
+      "Controller, ControllerRuntime, and WorkerOwner wrapper overhead",
+      "Bumble backend and USB/HCI driver latency",
+      "Bluetooth air delivery and Switch acknowledgement",
+      "hardware long-run jitter and power management"
+    ],
+    "worktree_dirty": false
+  },
+  "schema": "swbt.m2.activity-wait.summary.v2",
+  "shutdown": {
+    "idle_ns": {
+      "count": 1000,
+      "max": 79000,
+      "p50": 36800,
+      "p95": 48600,
+      "p99": 52800
+    },
+    "saturated_ns": {
+      "count": 1000,
+      "max": 73600,
+      "p50": 33600,
+      "p95": 46300,
+      "p99": 53100
+    }
+  },
+  "transport": {
+    "drained_ns": {
+      "count": 10000,
+      "max": 13600,
+      "p50": 600,
+      "p95": 800,
+      "p99": 1100
+    },
+    "inject_return_ns": {
+      "count": 10000,
+      "max": 5100,
+      "p50": 200,
+      "p95": 200,
+      "p99": 300
+    },
+    "overflow_count": 0
+  }
+}
