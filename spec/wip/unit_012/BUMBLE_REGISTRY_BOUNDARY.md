@@ -111,7 +111,7 @@ fork 側は対象 package ごとの `cargo package --list` と workspace gate �
 | `cargo fmt --all --check` / `git diff --check` | success |
 | current `cargo package --locked --allow-dirty --list` | success: 126 files |
 | current `cargo package --locked --allow-dirty` | blocked: crates.io に `swbt-bumble@0.1.0` がない |
-| fork `cargo publish --dry-run --locked -p swbt-bumble` | success: upload 前に dry-run で中止、外部変更なし |
+| fork layer 0 の `cargo publish --dry-run --locked` | success: 8/8 package、upload 前に dry-run で中止、外部変更なし |
 | GitHub Private Vulnerability Reporting API | `enabled:false` |
 | changed docs relative-link / placeholder audit | success |
 

@@ -79,7 +79,9 @@ local path patch を使った verify は各 package archive の内容と compile
 
 layer 0 の `swbt-bumble` は `cargo publish --dry-run --locked -p swbt-bumble` が成功した。18 files、
 圧縮 63.7 KiB の package と verify build を完了し、upload は dry-run により中止された。crates.io の
-状態は変更していない。
+状態は変更していない。残りの `swbt-bumble-at`、`swbt-bumble-audio`、`swbt-bumble-avc`、
+`swbt-bumble-codecs`、`swbt-bumble-crypto`、`swbt-bumble-l2cap`、`swbt-bumble-rtp` も同じ
+`cargo publish --dry-run --locked` が成功した。layer 0 は 8/8 package が公開前検査を通過した。
 
 公開 turn では各 package について、公開直前の name availability、対象 `.crate` の checksum、
 `cargo publish --dry-run`、公開後の `cargo info` と owner 一覧を確認する。実際の publish は当該 turn の
