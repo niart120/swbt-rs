@@ -79,12 +79,12 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | 一件のcommand responseがpending、同一step完了、caller drop、欠落時failureの各状態で正しい相手へ一度だけ配送される | regression / edge | unit | 複数FIFO配送testを単一in-flight状態遷移へ置換する |
-| todo | workerが一反復で一件だけcommandを処理し、transport eventとPeriodic deadlineへ進む | regression | unit | command batch値と複数command結果を削除する |
-| todo | pair/reconnect/tapのpending中もHID output、disconnect、priority shutdownを処理し、待機callerがtyped結果または`WorkerFailed`を受け取る | regression | worker integration | queued waiterを前提にしない |
-| todo | 公開controller操作が同期完了し、公開・CLI・exampleのerror分類に`Busy`が残らない | behavior change | integration / package | deprecated variantを残さない |
-| todo | 単一command条件のruntime measurementでcommand latency、8 ms interval、pending接続中のreply、shutdownに明確な悪化がない | performance | release measurement | 現行mainの変更前測定を同一環境で先に保持する |
-| todo | 既存プロファイルのPro ControllerがPeriodic／Directの両modeで再接続し、HID応答、入力、正常終了を観測できる | regression | hardware | machine logとSwitch画面上の観測を分けて記録する |
+| done | 一件のcommand responseがpending、同一step完了、caller drop、欠落時failureの各状態で正しい相手へ一度だけ配送される | regression / edge | unit | 複数FIFO配送testを単一in-flight状態遷移へ置換した |
+| done | workerが一反復で一件だけcommandを処理し、transport eventとPeriodic deadlineへ進む | regression | unit | command batch値と複数command結果を削除した |
+| done | pair/reconnect/tapのpending中もHID output、disconnect、priority shutdownを処理し、待機callerがtyped結果または`WorkerFailed`を受け取る | regression | worker integration | 単一in-flightと一件のqueued waiterで終了経路を検証した |
+| done | 公開controller操作が同期完了し、公開・CLI・exampleのerror分類に`Busy`が残らない | behavior change | integration / package | deprecated variantを残していない |
+| done | 単一command条件のruntime measurementでcommand latency、8 ms interval、pending接続中のreply、shutdownに明確な悪化がない | performance | release measurement / worker integration | release測定、pending接続test、実機reconnectを組み合わせて確認した |
+| machine done / UI pending | 既存プロファイルのPro ControllerがPeriodic／Directの両modeで再接続し、HID応答、入力、正常終了を観測できる | regression | hardware | machine logは成功。Switch画面上の観測はユーザ確認待ち |
 
 ## 7. 設計メモ
 
@@ -121,20 +121,32 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 
 | command | result | notes |
 |---|---|---|
-| `cargo test --lib runtime::command::tests --locked` | not run | TDD item 1 |
-| `cargo test --lib runtime::worker::tests --locked` | not run | TDD item 2 |
-| `cargo test --lib runtime::worker_thread::tests --locked` | not run | TDD item 3 |
-| `cargo test --all-targets --all-features --locked` | not run | 全feature回帰 |
-| `cargo fmt --all --check` | not run | Rust formatting |
-| `cargo clippy --all-targets --all-features --locked -- -D warnings` | not run | 全target lint |
-| `cargo +1.87 check --all-targets --all-features --locked` | not run | MSRV |
-| `cargo build --all-features --locked` | not run | production build |
-| `cargo test --doc --all-features --locked` | not run | public rustdoc |
+| `cargo test --lib runtime::command::tests --all-features --locked` | success | 4 passed |
+| `cargo test --lib runtime::worker::tests --all-features --locked` | success | 28 passed |
+| `cargo test --lib runtime::worker_thread::tests --all-features --locked` | success | 9 passed |
+| `cargo test --all-targets --all-features --locked` | success | lib 269 passed / 1 ignored、bin・integration・example target成功、hardware manual 5 ignored、profile compat manual 1 ignored |
+| `cargo test --locked` | success | lib 253 passed / 1 ignored、default integration・doctest成功、profile compat manual 1 ignored |
+| `cargo fmt --all --check` | success | 差分なし |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | success | warning 0 |
+| `cargo +1.87 check --all-targets --all-features --locked` | success | MSRV 1.87 |
+| `cargo build --all-features --locked` / `cargo build --locked` | success | all-feature / default production build |
+| `cargo test --doc --all-features --locked` | success | 1 passed |
 | `cargo package --locked` | not run | 公開API変更のpackage gate。versionは変更しない |
 | `git diff --check` | not run | whitespace |
-| `pwsh -NoProfile -File tools/measure_m2_runtime.ps1 -OutputDirectory target\\measurements\\m2-activity-wait\\unit014-before-20260802` | before success / after not run | release profile、42,002 records、clean commit `afb20b0`。response p99 1.4 µs、Periodic lateness p99 1.9693 ms、skip 0、idle shutdown p99 56.1 µs、16-command飽和shutdown p99 54.4 µs |
-| `cargo run --release --locked --all-features --example pro_profile_hardware -- ... --mode periodic ...` | not run | 既存プロファイルを使用し、秘密情報を記録しない |
-| `cargo run --release --locked --all-features --example pro_profile_hardware -- ... --mode direct ...` | not run | 既存プロファイルを使用し、秘密情報を記録しない |
+| `pwsh -NoProfile -File tools/measure_m2_runtime.ps1 -OutputDirectory target\\measurements\\m2-activity-wait\\unit014-before-20260802` | success | release profile、42,002 records、clean commit `afb20b0`。response p99 1.4 µs、Periodic lateness p99 1.9693 ms、skip 0、idle shutdown p99 56.1 µs、16-command飽和shutdown p99 54.4 µs |
+| `pwsh -NoProfile -File tools/measure_m2_runtime.ps1 -OutputDirectory target\\measurements\\m2-activity-wait\\unit014-after-20260802` | success | release profile、42,002 records、clean commit `c001475`。response p99 1.4 µs、Periodic lateness p99 1.8136 ms、skip 0、idle shutdown p99 52.8 µs、単一queued shutdown p99 53.1 µs、fairness skip / burst 0 |
+| `cargo run --release --locked --all-features --example pro_periodic_hardware -- ... --run 15` | success | fresh Pairは5.292秒でReady。reply 16件、入力、neutral、close、profile検証、adapter reopen成功 |
+| `cargo run --release --locked --all-features --example pro_profile_hardware -- ... --mode periodic ... --run 16` | success | reconnectは1.987秒でReady。reply 16件、入力、neutral、close、adapter reopen、profile byte不変を確認 |
+| `cargo run --release --locked --all-features --example pro_profile_hardware -- ... --mode direct ... --run 17` | success | reconnectは2.625秒でReady。Ready後idle入力0件、reply 16件、入力、neutral、close、adapter reopen、profile byte不変を確認 |
+
+### 9.1 実機観測の境界
+
+- 既存の旧プロファイルを使ったPeriodic run 15は、adapterとschema v2 profileの検出後、`NoBond`で
+  接続前に終了した。ファイルは変更されていない。
+- 旧プロファイルを上書きせず別プロファイルへfresh Pairし、そのprofileでPeriodic run 16とDirect
+  run 17を成功させた。machine logにはpath、raw profile、peer address、key materialを出していない。
+- machine logはtransport受理とworker状態を示す。Switch画面上のA、L+R、左右stick、neutralの反映は
+  ユーザ観測待ちであり、確認前にmachine結果から推定しない。
 
 ## 10. 先送り事項
 
