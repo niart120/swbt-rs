@@ -2064,7 +2064,7 @@ mod tests {
             client.try_enqueue(DirectCommand::Common(CommonCommand::Press(vec![
                 ProButton::A,
             ]))),
-            Err(CommandEnqueueError::Busy)
+            Err(CommandEnqueueError::InvariantViolation)
         ));
         assert_eq!(wakes.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty));
         let mut shutdown = ShutdownLatch::default();

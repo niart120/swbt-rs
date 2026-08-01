@@ -423,8 +423,8 @@ fn status_and_snapshot_return_while_transport_poll_is_blocked() {
 #[test]
 fn public_error_mapping_preserves_categories_sources_and_redaction() {
     assert_eq!(
-        map_enqueue_error(CommandEnqueueError::Busy).kind(),
-        ErrorKind::Busy
+        map_enqueue_error(CommandEnqueueError::InvariantViolation).kind(),
+        ErrorKind::Internal
     );
     assert_eq!(
         map_enqueue_error(CommandEnqueueError::Disconnected).kind(),

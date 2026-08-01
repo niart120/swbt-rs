@@ -1381,7 +1381,7 @@ fn one_saturated_shutdown_sample(tuning: (usize, usize, usize)) -> u64 {
             .try_enqueue(RuntimeCommand::Input(DirectCommand::Send(
                 InputState::neutral(),
             ))),
-        Err(CommandEnqueueError::Busy)
+        Err(CommandEnqueueError::InvariantViolation)
     ));
     assert!(matches!(
         next_wait_entry(&wait_entry_receiver, "full queue wait"),
@@ -1475,7 +1475,7 @@ fn measure_fairness(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Valu
                 .try_enqueue(RuntimeCommand::Input(PeriodicCommand::Apply(
                     InputState::neutral(),
                 ))),
-            Err(CommandEnqueueError::Busy)
+            Err(CommandEnqueueError::InvariantViolation)
         ));
         busy = busy.saturating_add(1);
 
