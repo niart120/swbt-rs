@@ -84,7 +84,7 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 | done | pair/reconnect/tapのpending中もHID output、disconnect、priority shutdownを処理し、待機callerがtyped結果または`WorkerFailed`を受け取る | regression | worker integration | 単一in-flightと一件のqueued waiterで終了経路を検証した |
 | done | 公開controller操作が同期完了し、公開・CLI・exampleのerror分類に`Busy`が残らない | behavior change | integration / package | deprecated variantを残していない |
 | done | 単一command条件のruntime measurementでcommand latency、8 ms interval、pending接続中のreply、shutdownに明確な悪化がない | performance | release measurement / worker integration | release測定、pending接続test、実機reconnectを組み合わせて確認した |
-| machine done / UI pending | 既存プロファイルのPro ControllerがPeriodic／Directの両modeで再接続し、HID応答、入力、正常終了を観測できる | regression | hardware | machine logは成功。Switch画面上の観測はユーザ確認待ち |
+| done | 既存プロファイルのPro ControllerがPeriodic／Directの両modeで再接続し、HID応答、入力、正常終了を観測できる | regression | hardware | machine logは成功。Switch画面上でA、L+R、左右stickの反映をユーザが確認した |
 
 ## 7. 設計メモ
 
@@ -114,8 +114,8 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 | `src/runtime/error_map.rs`、`src/error.rs` | modify | `Busy`削除と内部不変条件error投影 |
 | `src/controller/mod.rs` | modify | 公開rustdocからqueue error説明を削除 |
 | `src/bin/swbt-probe.rs`、`examples/*.rs` | modify | 公開`Busy`分類削除 |
-| `spec/wip/unit_014/evidence/` | new | 変更前後のraw、summary、manifest |
-| `spec/wip/unit_014/WORKER_SINGLE_IN_FLIGHT.md` | new / modify | 作業仕様、TDD、検証、self-review |
+| `spec/complete/unit_014/evidence/` | new | 変更前後のraw、summary、manifest |
+| `spec/complete/unit_014/WORKER_SINGLE_IN_FLIGHT.md` | new / modify | 作業仕様、TDD、検証、self-review |
 
 ## 9. 検証
 
@@ -146,8 +146,25 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
   接続前に終了した。ファイルは変更されていない。
 - 旧プロファイルを上書きせず別プロファイルへfresh Pairし、そのprofileでPeriodic run 16とDirect
   run 17を成功させた。machine logにはpath、raw profile、peer address、key materialを出していない。
-- machine logはtransport受理とworker状態を示す。Switch画面上のA、L+R、左右stick、neutralの反映は
-  ユーザ観測待ちであり、確認前にmachine結果から推定しない。
+- Switch画面上でA、L+R、左右stickの反映をユーザが確認した。画面遷移後のneutral反映は目視確認
+  できていない。neutral command、worker close、adapter reopenの成功はmachine logで確認した。
+- fresh Pair、Periodic reconnect、Direct reconnectの各runnerは、固定操作列の先頭でAを500 ms押す。
+  3回を連続実行したためAは合計3回送られ、意図しない画面遷移が発生した。単一run内でA commandが
+  重複した事実はなく、unit_014のcommand経路による二重実行とは判定しない。
+
+### 9.2 Self-review
+
+- command channelは一件のin-flightとは別に一件を待機できるが、公開controller操作はresponse完了まで
+  `&mut self`を保持するため、通常の公開API呼び出しから二重enqueueには到達しない。worker終了時は
+  receiver dropにより待機callerも`WorkerFailed`となるtestを保持した。
+- response channelはrequestごとに一つ生成され、`CommandCompletion::respond`がsenderの所有権を消費する。
+  caller dropを無視しても別commandへの誤配送や二重配送は発生しない。
+- pending pair/reconnect/tap、transport poll batch、priority shutdown、cleanup順序に変更を広げていない。
+- 公開`ErrorKind::Busy`の即時削除はsource compatibilityを壊す。これはユーザ判断どおりであり、
+  version更新とpublishは本unitから除外した。
+- 実機試験の意図しない画面遷移をcommand経路の不具合として扱う根拠はない。runnerを3回連続実行し、
+  各runでAを500 ms送った操作上の影響として記録した。画面上のneutral反映は未確認と明記した。
+- 差分全体、公開API境界、rustdoc、仕様、測定manifestを再確認し、修正必須の指摘は残っていない。
 
 ## 10. 先送り事項
 
@@ -160,5 +177,6 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test List を更新した
-- [ ] 検証結果または未実行理由を記録した
+- [x] 検証結果または未実行理由を記録した
 - [x] package / release / public APIに触れる場合のgateを記録した
+- [x] Self-reviewの指摘と未検証境界を記録した
