@@ -1,0 +1,161 @@
+# Bumble backend 配布境界 仕様書
+
+## 1. 目的
+
+`swbt-rs` 0.1.0 の `cargo package --locked` を止めている Bumble Git dependency を、
+Bluetooth Classic HID に必要な実装だけを持つ単一の `swbt-bumble-backend` crate へ置き換える。
+fork workspace 24 package の crates.io 公開案は採用せず、暫定期間は自己所有 fork
+`niart120/bumble-rs` の `main` に固定する。
+
+## 2. 起点
+
+- `spec/initial/roadmap.md` M9 の `cargo package`、clean install、release dependency 固定
+- `spec/wip/unit_010/M9_PORTABILITY_RELEASE.md` T08 の registry dependency blocker
+- `spec/publishing.md` の 0.1.0 公開停止条件
+- 自己所有 fork の [Issue #1](https://github.com/niart120/bumble-rs/issues/1)
+- 24 package 改名案の公開範囲、保守責任、Apache-2.0 配布物検査
+
+2026-08-01 時点で自己所有 fork の `main` は
+`cb55e2d98dc7b7b0227c43772c9ae184034dd9a1` である。この revision は reader shutdown、
+ACL flush 観測、Vendor Event 応答の実動作修正3 commitだけを含む。
+
+## 3. 対象範囲
+
+- `swbt-rs` の暫定 Git dependency を元の `bumble*` package 名と fork `main@cb55e2d` に戻す。
+- `swbt-bumble-backend` が所有する最小 API と実装範囲を固定する。
+- USB HCI、必要な HCI command/event/ACL、Classic pairing/reconnect/link key、Classic L2CAP、
+  SDP、HIDP、session close を backend 候補に含める。
+- backend の公開 API から Bumble workspace 固有型を隠し、`swbt-rs` との循環依存を作らない。
+- Apache-2.0 の `LICENSE`、`NOTICE`、attribution、改変表示を backend archive に収録する。
+- `swbt-rs` を registry 上の単一 backend crate へ切り替え、clean archive smoke まで検証する。
+- 旧 package 改名案と dry-run を、採用しなかった実験として証跡に残す。
+
+## 4. 対象外
+
+- fork workspace 24 package を `swbt-bumble*` 名で crates.io に公開すること。
+- fork 元 `chaitanyarahalkar/bumble-rs` または `google/bumble` への issue / PR。
+- A2DP、AVRCP、audio codec、GATT、ATT、LE advertising、RFCOMM、Android emulator、
+  汎用 TCP / WebSocket transport を backend の要件に含めること。
+- この作業だけを根拠にした `cargo publish`、production tag、GitHub Release。
+- Bluetooth/HID の観測可能な振る舞い変更。
+
+## 5. 振る舞い仕様
+
+| 入力または状態 | 期待結果 |
+|---|---|
+| 暫定 `bumble` feature build | 8 direct dependency が元の `bumble*` package 名と単一 revision `cb55e2d` を解決する |
+| 暫定 fork `main` | 実動作修正3 commitを含み、package 改名2 commitを含まない |
+| current `cargo package --locked` | crates.io に `bumble-controller@0.1.0` がないため停止し、公開可能と報告しない |
+| backend public API | open、pair、reconnect、poll、interrupt send、disconnect、close を提供し、Bumble固有型を露出しない |
+| backend dependency graph | fork 由来の別 package、Git dependency、local path dependencyを正規化 manifest に残さない |
+| backend archive | `LICENSE`、`NOTICE`、README、改変表示を含み、clean directory で build/testできる |
+| swbt-rs backend adoption | `bumble` feature が registry version の `swbt-bumble-backend` だけをfork由来依存として持つ |
+| publish authorizationなし | `publish = false` を維持し、crate upload、tag、Releaseを実行しない |
+
+## 6. TDD Test List
+
+| status | item | layer | 完了条件 |
+|---|---|---|---|
+| green | T01: 実動作修正だけを fork `main` に固定する | fork history | `main@cb55e2d` が改名前の3 commitを含み、workspace check/testが成功する |
+| green | T02: swbt-rs の暫定依存を元 package 名へ戻す | Cargo metadata | `Cargo.toml` と `Cargo.lock` が `bumble*`、`cb55e2d` だけを解決し、default/all-feature gateが成功する |
+| green | T03: 現在の registry blocker を再現する | package | clean `cargo package --locked --list` は成功し、`cargo package --locked` は `bumble-controller` 不在で停止する |
+| green | T04: 単一 backend の作業境界を自己所有 fork に記録する | cross-repo design | Issue #1 に対象範囲、対象外、ライセンス、clean archive、実機回帰条件がある |
+| pending | T05: 必要な Bumble source と API を inventory する | backend design | USB HCI、HCI、Classic host、L2CAP、SDP、HIDP、key storeの採否をsource/test単位で記録する |
+| pending | T06: 単一 backend archive を作る | backend implementation | `swbt-bumble-backend` が未公開fork packageなしでpackage/build/testできる |
+| pending | T07: swbt-rs を registry backendへ切り替える | integration/package | default/all-feature gate、`cargo package --locked`、archive smokeが成功する |
+| pending | T08: 実機回帰を確認する | hardware | pairing、再接続、入力、IMU、power-cycle、reader cleanupの既存契約を再確認する |
+| pending | T09: 旧改名branchを後片付けする | repository cleanup | current dependencyとcurrent release文書から `5fb0f6d` 参照を除き、remote branchを削除してIssue #1へ記録する |
+
+T05-T08 は backend 実装を伴うため、この依存・文書整理だけで green にしない。全項目完了前に
+unit_012 を `spec/complete` へ移動せず、0.1.0 を公開しない。
+
+## 7. 設計判断
+
+### 7.1 採用しなかった案
+
+24 package の一括改名は Cargo 上の名前衝突を回避できるが、利用しない protocol を含む全 package の
+版管理、脆弱性対応、yank、問い合わせ対応を引き受ける。dry-run archive には root の
+`LICENSE` と `NOTICE` が含まれておらず、そのまま公開できる状態でもなかった。この案は
+「技術的に未完了」ではなく「配布境界として不採用」とする。
+
+詳細は
+[`evidence/abandoned-registry-package-experiment-20260801.md`](evidence/abandoned-registry-package-experiment-20260801.md)
+に残す。
+
+### 7.2 暫定境界
+
+`swbt-rs` は backend 完成まで自己所有 fork `main@cb55e2d` を Git dependency として使う。
+これは repository source からの build を支えるが、crates.io 公開条件を満たさない。
+`publish = false` は維持する。
+
+### 7.3 恒久境界
+
+`swbt-bumble-backend` は薄い facade にしない。必要な Apache-2.0 派生コードを単一 package 内へ
+整理し、fork workspace packageへの依存を残さない。小さいのは公開 API と配布単位であり、
+Classic host と USB transport の切り出し作業量を小さいと仮定しない。
+
+## 8. 対象ファイル
+
+- `Cargo.toml`
+- `Cargo.lock`
+- `README.md`
+- `docs/platform-support.md`
+- `spec/initial/source-baseline.md`
+- `spec/publishing.md`
+- `spec/wip/unit_010/M9_PORTABILITY_RELEASE.md`
+- `spec/wip/unit_012/`
+- 自己所有 fork `niart120/bumble-rs` の Issue #1 と branch
+
+## 9. 検証
+
+```powershell
+cargo metadata --all-features --locked --format-version 1
+cargo fmt --all --check
+cargo +1.87.0 check --all-targets --all-features --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-targets --all-features --locked
+cargo test --all-targets --locked
+cargo build --all-features --locked
+cargo build --no-default-features --locked
+cargo package --locked --list
+cargo package --locked
+git diff --check
+```
+
+### 9.1 現在の検証結果
+
+| command / check | result |
+|---|---|
+| fork `main` fast-forward | success: `bbac2a6..cb55e2d`、実動作修正3 commit |
+| fork `cargo +1.87.0 check --workspace --all-targets --all-features --locked` | success |
+| fork `cargo test --workspace --all-features --locked` | success |
+| `cargo metadata --all-features --locked --format-version 1 --no-deps` | success: 8 direct Git dependency、元の `bumble*` package名、単一 `cb55e2d` |
+| `cargo +1.87.0 check --all-targets --all-features --locked` | success |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | success |
+| `cargo test --all-targets --all-features --locked --quiet` | success: library 321 passed / 4 ignored、hardware 5 ignored、他target success |
+| `cargo test --all-targets --locked --quiet` | success: library 268 passed / 1 ignored、他target success |
+| default/all-feature build | success |
+| `cargo package --locked --list` | success |
+| `cargo package --locked` | blocked: crates.io に `bumble-controller@0.1.0` がない |
+| crates.io publish / production tag / GitHub Release | not run: 対象外かつ明示承認なし |
+| 実機回帰 | not run: Rust sourceとfork実装は変更せず、package metadataと作業境界だけを変更 |
+
+## 10. 先送り事項
+
+- backend source/API inventory と実装: 自己所有 fork Issue #1 で追跡する。
+- registry archive と clean-install smoke: `swbt-bumble-backend` 公開後にT07で実行する。
+- 実機回帰: backend implementation後にT08で実行する。
+- GitHub Private Vulnerability Reporting: M9 の独立した公開停止条件として残す。
+
+## 11. 完了チェックリスト
+
+- [x] 目的、対象範囲、対象外を更新した
+- [x] 24 package公開案を不採用として記録した
+- [x] 暫定依存をfork `main@cb55e2d`へ戻した
+- [x] package blockerをclean worktreeで再現した
+- [x] 単一backendのIssueと完了条件を記録した
+- [ ] backend inventoryと実装を完了した
+- [ ] registry archive smokeを完了した
+- [ ] 実機回帰を完了した
+- [ ] 旧改名branchを削除した
+- [ ] unit_012をcompleteへ移動した
