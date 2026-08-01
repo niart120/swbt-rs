@@ -93,23 +93,23 @@ workstation path、profile、Bluetooth address、link key、USB serial、token�
 
 ## T13 後の最終 refresh
 
-T13 の Python profile 互換修正と公開文書更新後、package収録内容が確定した
-`a9a96e05d854b488911b503fc852cc7a2ac6d5f0`からclean gateを再実行した。後続のspec完了移動は
+T13 の Python profile 互換修正、公開文書更新、spec完了移動後、package収録内容が確定した
+`9285e9998ea6f333f668c24ab79e8662b75122d5`からclean gateを再実行した。後続のevidence値更新は
 package対象外であり、収録内容を変更しない。
 
 | 検査 | 最終結果 |
 |---|---|
 | `cargo package --locked --list` | 120 files、禁止path 0 |
-| `cargo package --locked` | verification build成功。1.5 MiB、圧縮259.1 KiB、archive 265,301 bytes |
-| archive SHA-256 | `BBDF261350C4A384457961B055DD4D7FEA473C24FB67CF1DA0B839908ECCD401` |
+| `cargo package --locked` | verification build成功。1.5 MiB、圧縮259.1 KiB、archive 265,343 bytes |
+| archive SHA-256 | `57C6496601BFD721C71B7771BD8B2847AE1E584DA6FC172939F9103CFB5383A2` |
 | 展開archive MSRV offline all-feature test | library 273 passed / 1 ignored、probe 11 passed、hardware 5 ignored、他target成功 |
 | 展開archive MSRV offline default test | library 257 passed / 1 ignored、backend-unavailable 1 passed、他target成功 |
 | 展開archive MSRV offline build | all-features / no-default-features とも成功 |
 
-SBOMはsource commit timestamp `SOURCE_DATE_EPOCH=1785607784`で再生成した。依存component数、license、
+SBOMはsource commit timestamp `SOURCE_DATE_EPOCH=1785608226`で再生成した。依存component数、license、
 dependency reference、local source検査はT11と同じ結果で、最終hashは次のとおり。
 
 | file | dependency components | license欠落 | 未解決dependency ref | local source | SHA-256 |
 |---|---:|---:|---:|---:|---|
-| `swbt-rs-0.1.0-windows-registry.cdx.json` | 33 | 0 | 0 | 0 | `17153B1EE077E5536EB6F2B7F3ACE945EF00F165C777043AA4112907D20B1960` |
-| `swbt-rs-0.1.0-linux-registry.cdx.json` | 34 | 0 | 0 | 0 | `A5424DE0A812D54D41F82DC23AEAB9A2E0DDC09489954CFFA7A170D168C18A1D` |
+| `swbt-rs-0.1.0-windows-registry.cdx.json` | 33 | 0 | 0 | 0 | `C66AA641628F00E13B1C4FDDC0A582AA12D7E9F9FC27A77EC60D46150CDA1346` |
+| `swbt-rs-0.1.0-linux-registry.cdx.json` | 34 | 0 | 0 | 0 | `3F085008B1D3F44A2ADF89BCAC6973D120C25C3455E61A499CD5959B0BC81085` |
