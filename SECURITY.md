@@ -12,13 +12,13 @@
 
 ## 報告方法
 
-この repository の GitHub Private Vulnerability Reporting は 2026-08-01 時点で無効である。
-脆弱性の詳細を public issue、discussion、pull request、ログへ投稿しないこと。
+この repository では GitHub Private Vulnerability Reporting を有効にしている。脆弱性は
+[Report a vulnerability](https://github.com/niart120/swbt-rs/security/advisories/new) から非公開で
+報告する。脆弱性の詳細を public issue、discussion、pull request、ログへ投稿しないこと。
 
-非公開の連絡経路が必要な場合は、詳細を含めずに
+GitHub の非公開報告画面を利用できない場合は、詳細を含めずに
 [repository owner の GitHub profile](https://github.com/niart120) から連絡手段を確認する。機密性の
-ない通常の不具合だけを public issue で報告する。0.1.0 公開前に Private Vulnerability Reporting
-を有効化し、この節を GitHub の非公開報告先へ更新する。
+ない通常の不具合だけを public issue で報告する。
 
 ## 報告に含めない情報
 

@@ -89,7 +89,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | refactor-skipped | T09: local gate と public docs review が変更範囲に対して成功し、未実行 hardware/publish を明記する | regression | quality gate | all/default/no-default、MSRV、doc、dependency policy、diff、archive gateがgreen。unit_012のWindows実機回帰は完了し、remote CIはmerge gate、`swbt-rs` publishは別承認事項として残した。検査後の構造変更は不要 |
 | refactor-done | T10: Bumble session 統合 test が reader thread の packet 分割順序に依存せず公開 transport event を検査する | regression | test harness / CI | PR #11 run `30649447099` で `CommandStatus` 後に空で返る red を記録。残り期限内の再 poll に変更し、対象100回と全 library testが green |
 | refactor-done | T11: registry backend 0.1.1 の現行 dependency graph、license、Windows/Linux SBOM、package archive を再生成できる | regression | package / release | red: 旧evidenceはGit Bumble 22 componentsとWindows 220 / Linux 222 dependenciesを記録し、現行graphと不一致。green: registry sourceだけでcargo-deny、120-file archive、MSRV offline test、33 / 34 component SBOM、license欠落0が成功。refactor: 旧Git allowlistと未使用license例外を削除し、SBOM local path正規化とreference検査をtool化 |
-| pending | T12: 非公開脆弱性報告先が実際に有効で、`SECURITY.md` からその入口へ到達できる | new | repository security / docs | GitHub API の有効値と実在URLを確認し、public issueへ秘密情報を出さない契約を維持する |
+| refactor-skipped | T12: 非公開脆弱性報告先が実際に有効で、`SECURITY.md` からその入口へ到達できる | new | repository security / docs | red: GitHub APIは`enabled:false`で、SECURITYはowner profileだけを案内。green: 自己所有repoのPrivate Vulnerability Reportingを有効化し、APIの`enabled:true`と`security/advisories/new`の入口を記録。public issueへ秘密情報を出さない契約を維持。設定と文書の小変更で追加構造は不要 |
 | pending | T13: workload soak と Python backend への切戻し訓練が、adapter排他・profile非破壊・neutral終了を満たす | acceptance | operational cutover / hardware | unit_012 の連続60秒runをsoakとして評価し、Rust終了後のadapter再利用、Python再接続、入力、neutral closeを新しい非秘密 evidenceへ記録する |
 
 ## 7. 設計メモ
@@ -111,9 +111,9 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 
 ### 7.2 判断
 
-- `publish = false` は維持する。registry archive gateとunit_012のWindows実機回帰は解消したが、
-  release candidateのremote CI、dependency/license/SBOM再監査、非公開脆弱性報告先の停止条件を
-  先に解消する。
+- `publish = false` は維持する。registry archive gate、unit_012のWindows実機回帰、
+  dependency/license/SBOM再監査、非公開脆弱性報告先は解消した。release candidateのremote CIと
+  当該turnでの公開承認は別に確認する。
 - unit_010時点のGit dependencyにはfork workspaceと一致するexact version requirementを追加した。
   unit_012 T07でGit dependencyを削除し、backendのexact registry versionへ置き換えた。
 - package の `include` を allowlist とし、運用記録や hardware evidence が将来増えても crate に
@@ -124,8 +124,8 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
   単体archive、初回公開、registry archiveだけを使うswbt-rs smokeまで完了した。
 - T11で現行registry graphのWindows/Linux SBOMを再生成し、旧Git graphのevidenceを履歴として分離した。
   `deny.toml`はGit sourceをすべて拒否し、backend 0.1.1のregistry checksumをSBOMでも固定する。
-- GitHub Private Vulnerability Reporting が無効の間は、恒久的な非公開報告先がない。0.1.0 の公開前に
-  有効化し、`SECURITY.md` を実際の報告先へ更新する。
+- GitHub Private Vulnerability Reportingは2026-08-02に有効化し、APIの`enabled:true`を確認した。
+  `SECURITY.md`はrepositoryの`security/advisories/new`を非公開報告先として案内する。
 
 ### 7.3 public API / model mapping audit
 
@@ -194,6 +194,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | T11 `cargo package --locked --allow-dirty` | success | 120 files / 1.4 MiB（圧縮258.0 KiB）、verification build成功 |
 | T11 展開archive MSRV offline test | success | library 271 passed / 1 ignored、hardware 5 ignored、他target success |
 | T11 `cargo-cyclonedx 0.5.9` Windows/Linux all-features | success | CycloneDX 1.5、33/34 dependency components、license欠落0、local pathなし、dependency ref整合 |
+| GitHub API `PUT` / `GET repos/niart120/swbt-rs/private-vulnerability-reporting` | success | 自己所有repositoryだけを変更し、GETは`enabled:true`を返した |
 | fixture/package secret audit | success | JSON fixture 4件の provenance と合成 key 3件を確認。代表 credential pattern 0件、実機 profile/trace の収録なし |
 | release docs placeholder scan | success | `[TODO]`、`TBD`、`xxx` の残存なし |
 | release docs relative-link audit | success | README、CHANGELOG、SECURITY、platform/troubleshooting、publishing の local link 解決を確認 |
@@ -222,5 +223,5 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 - [x] 検証結果または未実行理由を記録した
 - [x] package / release / public API に触れる gate を記録した
 - [x] registry backend 0.1.1 の dependency/license/SBOM/package evidence を再生成した
-- [ ] GitHub の非公開脆弱性報告先を有効化し、`SECURITY.md` を更新した
+- [x] GitHub の非公開脆弱性報告先を有効化し、`SECURITY.md` を更新した
 - [ ] workload soak と backend rollback rehearsal の結果を記録した
