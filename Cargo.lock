@@ -174,6 +174,236 @@ dependencies = [
 ]
 
 [[package]]
+name = "bumble"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bumble-a2dp"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble",
+ "bumble-avdtp",
+ "bumble-host",
+ "bumble-l2cap",
+ "bumble-rtp",
+ "bumble-sdp",
+]
+
+[[package]]
+name = "bumble-att"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble",
+ "bumble-crypto",
+]
+
+[[package]]
+name = "bumble-audio"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+
+[[package]]
+name = "bumble-avc"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+
+[[package]]
+name = "bumble-avctp"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble-host",
+ "bumble-l2cap",
+]
+
+[[package]]
+name = "bumble-avdtp"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble-host",
+ "bumble-l2cap",
+]
+
+[[package]]
+name = "bumble-avrcp"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble",
+ "bumble-avc",
+ "bumble-avctp",
+ "bumble-sdp",
+]
+
+[[package]]
+name = "bumble-codecs"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "lc3-codec",
+]
+
+[[package]]
+name = "bumble-controller"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble",
+ "bumble-crypto",
+ "bumble-hci",
+]
+
+[[package]]
+name = "bumble-crypto"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "aes",
+ "p256",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "bumble-gatt"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble",
+ "bumble-att",
+ "bumble-crypto",
+]
+
+[[package]]
+name = "bumble-hci"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble",
+]
+
+[[package]]
+name = "bumble-hid"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble-l2cap",
+]
+
+[[package]]
+name = "bumble-host"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble",
+ "bumble-att",
+ "bumble-controller",
+ "bumble-crypto",
+ "bumble-gatt",
+ "bumble-hci",
+ "bumble-l2cap",
+ "bumble-profiles",
+ "bumble-smp",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bumble-l2cap"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+
+[[package]]
+name = "bumble-profiles"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble",
+ "bumble-crypto",
+ "bumble-gatt",
+ "bumble-hci",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "bumble-rfcomm"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble-l2cap",
+]
+
+[[package]]
+name = "bumble-rtp"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+
+[[package]]
+name = "bumble-sdp"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble",
+ "bumble-l2cap",
+]
+
+[[package]]
+name = "bumble-smp"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble",
+ "bumble-crypto",
+]
+
+[[package]]
+name = "bumble-transport"
+version = "0.1.0"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
+dependencies = [
+ "bumble",
+ "bumble-a2dp",
+ "bumble-att",
+ "bumble-audio",
+ "bumble-avctp",
+ "bumble-avdtp",
+ "bumble-avrcp",
+ "bumble-codecs",
+ "bumble-controller",
+ "bumble-gatt",
+ "bumble-hci",
+ "bumble-host",
+ "bumble-l2cap",
+ "bumble-profiles",
+ "bumble-rfcomm",
+ "bumble-rtp",
+ "bumble-sdp",
+ "bumble-smp",
+ "libc",
+ "libusb1-sys",
+ "prost",
+ "protoc-bin-vendored",
+ "regex",
+ "rusb",
+ "serde",
+ "serde_json",
+ "serialport",
+ "tokio",
+ "tokio-stream",
+ "toml",
+ "tonic",
+ "tonic-build",
+ "tungstenite",
+]
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1625,251 +1855,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
-name = "swbt-bumble"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "swbt-bumble-a2dp"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble",
- "swbt-bumble-avdtp",
- "swbt-bumble-host",
- "swbt-bumble-l2cap",
- "swbt-bumble-rtp",
- "swbt-bumble-sdp",
-]
-
-[[package]]
-name = "swbt-bumble-att"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble",
- "swbt-bumble-crypto",
-]
-
-[[package]]
-name = "swbt-bumble-audio"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-
-[[package]]
-name = "swbt-bumble-avc"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-
-[[package]]
-name = "swbt-bumble-avctp"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble-host",
- "swbt-bumble-l2cap",
-]
-
-[[package]]
-name = "swbt-bumble-avdtp"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble-host",
- "swbt-bumble-l2cap",
-]
-
-[[package]]
-name = "swbt-bumble-avrcp"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble",
- "swbt-bumble-avc",
- "swbt-bumble-avctp",
- "swbt-bumble-sdp",
-]
-
-[[package]]
-name = "swbt-bumble-codecs"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "lc3-codec",
-]
-
-[[package]]
-name = "swbt-bumble-controller"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble",
- "swbt-bumble-crypto",
- "swbt-bumble-hci",
-]
-
-[[package]]
-name = "swbt-bumble-crypto"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "aes",
- "p256",
- "rand_core 0.6.4",
-]
-
-[[package]]
-name = "swbt-bumble-gatt"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble",
- "swbt-bumble-att",
- "swbt-bumble-crypto",
-]
-
-[[package]]
-name = "swbt-bumble-hci"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble",
-]
-
-[[package]]
-name = "swbt-bumble-hid"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble-l2cap",
-]
-
-[[package]]
-name = "swbt-bumble-host"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "serde",
- "serde_json",
- "swbt-bumble",
- "swbt-bumble-att",
- "swbt-bumble-controller",
- "swbt-bumble-crypto",
- "swbt-bumble-gatt",
- "swbt-bumble-hci",
- "swbt-bumble-l2cap",
- "swbt-bumble-profiles",
- "swbt-bumble-smp",
-]
-
-[[package]]
-name = "swbt-bumble-l2cap"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-
-[[package]]
-name = "swbt-bumble-profiles"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "rand_core 0.6.4",
- "swbt-bumble",
- "swbt-bumble-crypto",
- "swbt-bumble-gatt",
- "swbt-bumble-hci",
-]
-
-[[package]]
-name = "swbt-bumble-rfcomm"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble-l2cap",
-]
-
-[[package]]
-name = "swbt-bumble-rtp"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-
-[[package]]
-name = "swbt-bumble-sdp"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble",
- "swbt-bumble-l2cap",
-]
-
-[[package]]
-name = "swbt-bumble-smp"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "swbt-bumble",
- "swbt-bumble-crypto",
-]
-
-[[package]]
-name = "swbt-bumble-transport"
-version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07#5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07"
-dependencies = [
- "libc",
- "libusb1-sys",
- "prost",
- "protoc-bin-vendored",
- "regex",
- "rusb",
- "serde",
- "serde_json",
- "serialport",
- "swbt-bumble",
- "swbt-bumble-a2dp",
- "swbt-bumble-att",
- "swbt-bumble-audio",
- "swbt-bumble-avctp",
- "swbt-bumble-avdtp",
- "swbt-bumble-avrcp",
- "swbt-bumble-codecs",
- "swbt-bumble-controller",
- "swbt-bumble-gatt",
- "swbt-bumble-hci",
- "swbt-bumble-host",
- "swbt-bumble-l2cap",
- "swbt-bumble-profiles",
- "swbt-bumble-rfcomm",
- "swbt-bumble-rtp",
- "swbt-bumble-sdp",
- "swbt-bumble-smp",
- "tokio",
- "tokio-stream",
- "toml",
- "tonic",
- "tonic-build",
- "tungstenite",
-]
-
-[[package]]
 name = "swbt-rs"
 version = "0.1.0"
 dependencies = [
  "atomic-write-file",
+ "bumble",
+ "bumble-controller",
+ "bumble-hci",
+ "bumble-hid",
+ "bumble-host",
+ "bumble-l2cap",
+ "bumble-sdp",
+ "bumble-transport",
  "fs2",
  "rusb",
  "serde_json",
- "swbt-bumble",
- "swbt-bumble-controller",
- "swbt-bumble-hci",
- "swbt-bumble-hid",
- "swbt-bumble-host",
- "swbt-bumble-l2cap",
- "swbt-bumble-sdp",
- "swbt-bumble-transport",
  "tracing",
 ]
 
