@@ -24,7 +24,7 @@ use crate::{
     reporting::{Direct, Periodic, ReportingMode},
     runtime::{
         cleanup::CloseMode,
-        command::{CommandClient, CommandEnqueueError, CommandResponse, command_channel},
+        command::{CommandClient, CommandResponse, command_channel},
         test_support::{TestTransport, TestTransportControl},
         transport::{
             ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities, TransportEvent,
@@ -90,7 +90,7 @@ fn activity_wait_decision() {
     let shutdown = measure_shutdown_latency(&config, tuning);
     emit_shutdown_records(&mut raw, &shutdown["raw"]);
     let fairness = measure_fairness(&config, tuning);
-    emit_fairness_records(&mut raw, &fairness["raw"], tuning.0);
+    emit_fairness_records(&mut raw, &fairness["raw"], 1);
     raw.finish();
     let summary = json!({
         "schema": "swbt.m2.activity-wait.summary.v2",
@@ -691,7 +691,7 @@ fn gate_channels(enabled: bool) -> (GateControl, GateWaiterParts) {
 }
 
 fn spawn_direct_worker<W>(
-    tuning: (usize, usize, usize),
+    tuning: usize,
     waiter: impl FnOnce(Receiver<()>) -> W,
 ) -> WorkerHarness<Direct>
 where
@@ -702,11 +702,11 @@ where
     let worker = crate::runtime::worker::WorkerCore::new_direct(
         protocol(),
         Box::new(transport),
-        WorkerBudget::new(tuning.1, tuning.2),
+        WorkerBudget::new(tuning),
         Box::new(|_| {}),
     );
     let (commands, command_receiver) =
-        command_channel::<RuntimeCommand<Pro, Direct>>(tuning.0, activity.clone());
+        command_channel::<RuntimeCommand<Pro, Direct>>(activity.clone());
     let (shutdown, shutdown_receiver) = priority_shutdown_channel(activity.clone());
     let clock = InstantClock::new();
     let thread = spawn_worker_thread(
@@ -729,7 +729,7 @@ where
 }
 
 fn spawn_periodic_worker<W>(
-    tuning: (usize, usize, usize),
+    tuning: usize,
     waiter: impl FnOnce(Receiver<()>) -> W,
 ) -> WorkerHarness<Periodic>
 where
@@ -741,12 +741,12 @@ where
         protocol(),
         Box::new(transport),
         PERIOD,
-        WorkerBudget::new(tuning.1, tuning.2),
+        WorkerBudget::new(tuning),
         Box::new(|_| {}),
     )
     .expect("8 ms measurement period is valid");
     let (commands, command_receiver) =
-        command_channel::<RuntimeCommand<Pro, Periodic>>(tuning.0, activity.clone());
+        command_channel::<RuntimeCommand<Pro, Periodic>>(activity.clone());
     let (shutdown, shutdown_receiver) = priority_shutdown_channel(activity.clone());
     let clock = InstantClock::new();
     let thread = spawn_worker_thread(
@@ -894,7 +894,7 @@ fn subcommand_report(subcommand_id: u8, payload: &[u8]) -> Vec<u8> {
     raw
 }
 
-fn measure_idle(config: &ProbeConfig, output: &Path, tuning: (usize, usize, usize)) -> Value {
+fn measure_idle(config: &ProbeConfig, output: &Path, tuning: usize) -> Value {
     let (first_wait, first_wait_receiver) = sync_channel(1);
     let wait_counters = Arc::new(WaitCounters::default());
     let worker_wait_counters = Arc::clone(&wait_counters);
@@ -1015,7 +1015,7 @@ fn wait_for_json(path: &Path, label: &str) -> Value {
     }
 }
 
-fn measure_jitter(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Value {
+fn measure_jitter(config: &ProbeConfig, tuning: usize) -> Value {
     let (deadline_sender, deadline_receiver) = channel();
     let mut harness = spawn_periodic_worker(tuning, |receiver| {
         DeadlineWaiter::new(receiver, deadline_sender)
@@ -1181,7 +1181,7 @@ fn next_input_send(sends: &Receiver<SendObservation>, label: &str) -> Instant {
     }
 }
 
-fn measure_command_latency(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Value {
+fn measure_command_latency(config: &ProbeConfig, tuning: usize) -> Value {
     let wait_entries = Arc::new(AtomicU64::new(0));
     let worker_wait_entries = Arc::clone(&wait_entries);
     let mut harness = spawn_direct_worker(tuning, |receiver| {
@@ -1256,7 +1256,7 @@ fn measure_command_latency(config: &ProbeConfig, tuning: (usize, usize, usize)) 
     })
 }
 
-fn measure_transport_latency(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Value {
+fn measure_transport_latency(config: &ProbeConfig, tuning: usize) -> Value {
     let wait_entries = Arc::new(AtomicU64::new(0));
     let worker_wait_entries = Arc::clone(&wait_entries);
     let mut harness = spawn_direct_worker(tuning, |receiver| {
@@ -1314,7 +1314,7 @@ fn measure_transport_latency(config: &ProbeConfig, tuning: (usize, usize, usize)
     })
 }
 
-fn measure_shutdown_latency(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Value {
+fn measure_shutdown_latency(config: &ProbeConfig, tuning: usize) -> Value {
     let mut idle = Vec::with_capacity(config.shutdown_samples);
     let mut saturated = Vec::with_capacity(config.shutdown_samples);
     for _ in 0..config.shutdown_samples {
@@ -1333,7 +1333,7 @@ fn measure_shutdown_latency(config: &ProbeConfig, tuning: (usize, usize, usize))
     })
 }
 
-fn one_idle_shutdown_sample(tuning: (usize, usize, usize)) -> u64 {
+fn one_idle_shutdown_sample(tuning: usize) -> u64 {
     let (first_wait, first_wait_receiver) = sync_channel(1);
     let counters = Arc::new(WaitCounters::default());
     let mut harness = spawn_direct_worker(tuning, |receiver| {
@@ -1348,7 +1348,7 @@ fn one_idle_shutdown_sample(tuning: (usize, usize, usize)) -> u64 {
     duration_ns(started.elapsed())
 }
 
-fn one_saturated_shutdown_sample(tuning: (usize, usize, usize)) -> u64 {
+fn one_saturated_shutdown_sample(tuning: usize) -> u64 {
     let (wait_entries, wait_entry_receiver) = sync_channel(0);
     let mut harness = spawn_direct_worker(tuning, move |receiver| {
         RequestEntryWaiter::new(receiver, wait_entries)
@@ -1364,25 +1364,12 @@ fn one_saturated_shutdown_sample(tuning: (usize, usize, usize)) -> u64 {
         WorkerWaitRequest::ActivityOrDeadline(_)
     ));
 
-    let mut queued = Vec::with_capacity(tuning.0);
-    for _ in 0..tuning.0 {
-        queued.push(
-            harness
-                .commands
-                .try_enqueue(RuntimeCommand::Input(DirectCommand::Send(
-                    InputState::neutral(),
-                )))
-                .expect("fill production command queue while worker is gated"),
-        );
-    }
-    assert!(matches!(
-        harness
-            .commands
-            .try_enqueue(RuntimeCommand::Input(DirectCommand::Send(
-                InputState::neutral(),
-            ))),
-        Err(CommandEnqueueError::InvariantViolation)
-    ));
+    let queued = harness
+        .commands
+        .try_enqueue(RuntimeCommand::Input(DirectCommand::Send(
+            InputState::neutral(),
+        )))
+        .expect("queue one command behind the pending pair while worker is gated");
     assert!(matches!(
         next_wait_entry(&wait_entry_receiver, "full queue wait"),
         WorkerWaitRequest::ActivityOrDeadline(_)
@@ -1402,10 +1389,8 @@ fn one_saturated_shutdown_sample(tuning: (usize, usize, usize)) -> u64 {
         "in-flight Pair must receive the typed shutdown result"
     );
     assert!(
-        queued
-            .iter()
-            .all(|response| matches!(response.try_recv(), Err(TryRecvError::Disconnected))),
-        "priority shutdown must win before saturated commands are processed"
+        matches!(queued.try_recv(), Err(TryRecvError::Disconnected)),
+        "priority shutdown must win before the queued command is processed"
     );
     elapsed
 }
@@ -1416,7 +1401,7 @@ fn next_wait_entry(entries: &Receiver<WorkerWaitRequest>, label: &str) -> Worker
         .unwrap_or_else(|_| panic!("{label} exceeds 5 s watchdog"))
 }
 
-fn measure_fairness(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Value {
+fn measure_fairness(config: &ProbeConfig, tuning: usize) -> Value {
     let (gate, waiter) = gate_channels(false);
     let mut harness = spawn_periodic_worker(tuning, move |receiver| waiter.with_receiver(receiver));
     pair_periodic(&harness);
@@ -1434,9 +1419,8 @@ fn measure_fairness(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Valu
     let mut intervals = Vec::with_capacity(config.fairness_ticks.saturating_sub(1));
     let mut interval_errors = Vec::with_capacity(config.fairness_ticks.saturating_sub(1));
     let mut interval_error_ppm = Vec::with_capacity(config.fairness_ticks.saturating_sub(1));
-    let mut command_response = Vec::with_capacity(config.fairness_ticks.saturating_mul(tuning.0));
-    let mut post_release_command =
-        Vec::with_capacity(config.fairness_ticks.saturating_mul(tuning.0));
+    let mut command_response = Vec::with_capacity(config.fairness_ticks);
+    let mut post_release_command = Vec::with_capacity(config.fairness_ticks);
     let mut reply_attempt =
         Vec::with_capacity(config.fairness_ticks.saturating_mul(FAKE_EVENT_CAPACITY));
     let mut post_release_reply =
@@ -1446,7 +1430,6 @@ fn measure_fairness(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Valu
     let mut skipped = 0_u64;
     let mut bursts = 0_u64;
     let mut previous = None;
-    let mut busy = 0_u64;
 
     for _ in 0..config.fairness_ticks {
         let target = loop {
@@ -1458,26 +1441,14 @@ fn measure_fairness(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Valu
         while harness.telemetry.sends.try_recv().is_ok() {}
         sleep_until(&harness.clock, target);
 
-        let mut commands = Vec::with_capacity(tuning.0);
-        for _ in 0..tuning.0 {
-            let submitted = Instant::now();
-            let response = harness
-                .commands
-                .try_enqueue(RuntimeCommand::Input(PeriodicCommand::Apply(
-                    InputState::neutral(),
-                )))
-                .expect("fill fairness command capacity while worker is gated");
-            commands.push((submitted, response));
-        }
-        assert!(matches!(
-            harness
-                .commands
-                .try_enqueue(RuntimeCommand::Input(PeriodicCommand::Apply(
-                    InputState::neutral(),
-                ))),
-            Err(CommandEnqueueError::InvariantViolation)
-        ));
-        busy = busy.saturating_add(1);
+        let submitted = Instant::now();
+        let response = harness
+            .commands
+            .try_enqueue(RuntimeCommand::Input(PeriodicCommand::Apply(
+                InputState::neutral(),
+            )))
+            .expect("enqueue one fairness command while worker is gated");
+        let commands = [(submitted, response)];
 
         let poll_events_before = harness.telemetry.poll_events.load(Ordering::Acquire);
         harness.control.reject_next_sends(FAKE_EVENT_CAPACITY);
@@ -1572,7 +1543,7 @@ fn measure_fairness(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Valu
         },
         "summary": {
             "latency_scope": {
-                "staging": "target deadline through 16 command and 64 event placement while the worker gate is held",
+                "staging": "target deadline through one command and 64 event placement while the worker gate is held",
                 "post_release": "gate release request through worker observation",
                 "command_completion": "caller observation after all periodic and reply send observations; conservative upper bound",
             },
@@ -1597,7 +1568,6 @@ fn measure_fairness(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Valu
             "skipped_ticks": skipped,
             "burst_intervals_below_4ms": bursts,
             "commands_completed": commands_completed,
-            "command_busy": busy,
             "transport_events_drained": transport_events_drained,
             "transport_errors": transport_errors,
         }
@@ -1663,7 +1633,7 @@ fn wait_atomic_at_least(counter: &AtomicU64, expected: u64, label: &str) {
     }
 }
 
-fn measurement_meta(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Value {
+fn measurement_meta(config: &ProbeConfig, tuning: usize) -> Value {
     json!({
         "git_sha": env::var("SWBT_MEASUREMENT_GIT_SHA").unwrap_or_else(|_| "unrecorded".to_owned()),
         "profile": env::var("SWBT_MEASUREMENT_PROFILE")
@@ -1693,9 +1663,9 @@ fn measurement_meta(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Valu
             "cargo": command_version("cargo"),
         },
         "tuning": {
-            "command_capacity": tuning.0,
-            "command_batch": tuning.1,
-            "poll_batches": tuning.2,
+            "command_capacity": 1,
+            "commands_per_iteration": 1,
+            "poll_batches": tuning,
             "fake_event_capacity": FAKE_EVENT_CAPACITY,
             "fake_poll_batch": FAKE_POLL_BATCH,
             "fairness_reply_boundary": "send_attempt",
@@ -1723,7 +1693,7 @@ fn measurement_meta(config: &ProbeConfig, tuning: (usize, usize, usize)) -> Valu
             "priority explicit shutdown, cleanup, completion, and join",
             "TestTransport activity notification and non-blocking drain",
             "Periodic real-ready accepted 8 ms sends",
-            "absolute Periodic deadlines under production 16/16/4 work budgets",
+            "absolute Periodic deadlines under the production one-command/4-poll work budget",
         ],
         "unmeasured_layers": [
             "Controller, ControllerRuntime, and WorkerOwner wrapper overhead",

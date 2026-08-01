@@ -1,4 +1,6 @@
-use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel};
+use std::sync::mpsc::{
+    Receiver, Sender, SyncSender, TryRecvError, TrySendError, channel, sync_channel,
+};
 
 use super::{
     transport::ActivityNotifier,
@@ -29,7 +31,7 @@ struct CommandRequest<C> {
 }
 
 struct CommandCompletion {
-    sender: SyncSender<CommandResult>,
+    sender: Sender<CommandResult>,
 }
 
 impl CommandCompletion {
@@ -46,7 +48,7 @@ pub(crate) struct CommandClient<C> {
 
 impl<C> CommandClient<C> {
     pub(crate) fn try_enqueue(&self, command: C) -> Result<CommandResponse, CommandEnqueueError> {
-        let (response_sender, response) = sync_channel(1);
+        let (response_sender, response) = channel();
         let request = CommandRequest {
             command,
             completion: CommandCompletion {
@@ -74,7 +76,10 @@ impl<C> CommandReceiver<C> {
         &mut self,
         progress: &mut StepProgress,
     ) -> Result<(), CommandDeliveryError> {
-        self.deliver(progress.take_command_results())
+        if let Some(result) = progress.take_command_result() {
+            self.deliver_completion(result)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn deliver_completion(
@@ -140,11 +145,9 @@ impl CommandResponse {
 }
 
 pub(crate) fn command_channel<C>(
-    capacity: usize,
     activity: ActivityNotifier,
 ) -> (CommandClient<C>, CommandReceiver<C>) {
-    assert!(capacity > 0, "worker command capacity must be positive");
-    let (sender, receiver) = sync_channel(capacity);
+    let (sender, receiver) = sync_channel(1);
     (
         CommandClient { sender, activity },
         CommandReceiver {
@@ -175,7 +178,7 @@ mod tests {
     #[test]
     fn full_queue_is_an_internal_invariant_violation_and_does_not_wake() {
         let (activity, wakes) = activity_channel();
-        let (client, mut worker) = command_channel(1, activity);
+        let (client, mut worker) = command_channel(activity);
 
         let first = client
             .try_enqueue(TestCommand::First)
@@ -204,7 +207,7 @@ mod tests {
     #[test]
     fn receiver_disconnect_is_not_reported_as_busy_or_woken() {
         let (activity, wakes) = activity_channel();
-        let (client, worker) = command_channel(1, activity);
+        let (client, worker) = command_channel(activity);
         let _queued = client
             .try_enqueue(TestCommand::First)
             .expect("prefill command queue");
@@ -221,7 +224,7 @@ mod tests {
     #[test]
     fn pending_command_keeps_its_response_until_typed_completion() {
         let (activity, _wakes) = activity_channel();
-        let (client, mut worker) = command_channel(1, activity);
+        let (client, mut worker) = command_channel(activity);
         let response = client
             .try_enqueue(TestCommand::First)
             .expect("enqueue pending command");
@@ -275,7 +278,7 @@ mod tests {
     #[test]
     fn completion_without_an_in_flight_response_is_rejected() {
         let (activity, _wakes) = activity_channel();
-        let (_client, mut worker) = command_channel::<TestCommand>(1, activity);
+        let (_client, mut worker) = command_channel::<TestCommand>(activity);
 
         assert_eq!(
             worker.deliver([WorkerCommandProgress::Complete(Ok(()))]),

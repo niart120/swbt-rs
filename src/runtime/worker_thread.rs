@@ -801,7 +801,7 @@ mod tests {
         reporting::Direct,
         runtime::{
             cleanup::{CleanupPhase, CloseMode},
-            command::{CommandResponseError, command_channel},
+            command::{CommandEnqueueError, CommandResponseError, command_channel},
             direct::{DirectTapError, DirectTapInterruption},
             transport::{
                 ActivityNotifier, HidChannel, SendAcceptance, TransportCapabilities,
@@ -828,7 +828,7 @@ mod tests {
     const DEADLOCK_WATCHDOG: Duration = Duration::from_secs(2);
 
     #[test]
-    fn core_failure_preserves_completed_response_and_fails_the_queued_waiter() {
+    fn core_failure_preserves_the_completed_response() {
         let (activity, activity_receiver) = activity_channel();
         let (mut transport, control) = FakeTransport::with_limits(8, 3);
         transport
@@ -837,20 +837,15 @@ mod tests {
         let worker = WorkerCore::new_direct(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
         );
-        let (client, commands) = command_channel(2, activity);
+        let (client, commands) = command_channel(activity);
         let completed = client
             .try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
                 CommonCommand::Neutral,
             )))
             .expect("enqueue first command");
-        let waiting = client
-            .try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
-                CommonCommand::Neutral,
-            )))
-            .expect("enqueue queued command");
         control
             .terminate_with(TestSourceError)
             .expect("terminate fake source");
@@ -868,11 +863,6 @@ mod tests {
             completed.recv(),
             Ok(Err(WorkerCommandError::Direct(DirectTapError::NotReady)))
         ));
-        assert!(matches!(
-            waiting.recv(),
-            Err(CommandResponseError::WorkerFailed)
-        ));
-
         let WorkerThreadOutcome::Failed {
             cause: WorkerFailureCause::Core(WorkerCoreError::Transport(error)),
             delivery_error: None,
@@ -909,14 +899,13 @@ mod tests {
                 inner: transport,
                 panic_on_poll: Arc::clone(&panic_on_poll),
             }),
-            WorkerBudget::new(2, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
             status,
         );
         prime_ready(&mut worker, &control, &clock);
-        panic_on_poll.store(true, Ordering::Release);
-
-        let (client, commands) = command_channel(2, activity);
+        let worker_wake = activity.clone();
+        let (client, commands) = command_channel(activity);
         let pending = client
             .try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
                 CommonCommand::Tap {
@@ -925,12 +914,6 @@ mod tests {
                 },
             )))
             .expect("enqueue pending tap");
-        let queued = client
-            .try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
-                CommonCommand::Neutral,
-            )))
-            .expect("enqueue command behind the tap");
-
         let worker_thread = spawn_worker_thread(
             worker,
             clock,
@@ -939,6 +922,26 @@ mod tests {
             ChannelWorkerWaiter::new(activity_receiver),
         )
         .expect("spawn worker thread");
+        let enqueue_deadline = std::time::Instant::now() + DEADLOCK_WATCHDOG;
+        let queued = loop {
+            match client.try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
+                CommonCommand::Neutral,
+            ))) {
+                Ok(response) => break response,
+                Err(CommandEnqueueError::InvariantViolation) => {
+                    assert!(
+                        std::time::Instant::now() < enqueue_deadline,
+                        "worker did not receive the pending command"
+                    );
+                    std_thread::yield_now();
+                }
+                Err(CommandEnqueueError::Disconnected) => {
+                    panic!("worker exited before the queued command was accepted")
+                }
+            }
+        };
+        panic_on_poll.store(true, Ordering::Release);
+        worker_wake.notify();
 
         assert!(matches!(
             pending.recv(),
@@ -988,11 +991,11 @@ mod tests {
         let worker = WorkerCore::new_direct_with_status(
             protocol(),
             Box::new(CleanupFailureAndPanicOnDropTransport { inner: transport }),
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
             status,
         );
-        let (_client, commands) = command_channel(1, activity);
+        let (_client, commands) = command_channel(activity);
         let shutdown =
             ShutdownScript::after_checks(ShutdownRequest::explicit(CloseMode::WithoutNeutral), 0);
 
@@ -1037,11 +1040,11 @@ mod tests {
         let mut worker = WorkerCore::new_direct(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(2, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
         );
         prime_ready(&mut worker, &control, &clock);
-        let (client, commands) = command_channel(1, activity);
+        let (client, commands) = command_channel(activity);
         let pending = client
             .try_enqueue(RuntimeCommand::<Pro, Direct>::Input(DirectCommand::Common(
                 CommonCommand::Tap {
@@ -1080,8 +1083,7 @@ mod tests {
     #[test]
     fn disconnected_activity_source_completes_before_the_worker_is_joined() {
         let (activity, activity_receiver) = activity_channel();
-        let (client, commands) =
-            command_channel::<RuntimeCommand<Pro, Direct>>(1, activity.clone());
+        let (client, commands) = command_channel::<RuntimeCommand<Pro, Direct>>(activity.clone());
         drop(client);
         let (drain_started, drain_started_receiver) = sync_channel(1);
         let (drain_release, drain_release_receiver) = sync_channel(1);
@@ -1099,7 +1101,7 @@ mod tests {
         let worker = WorkerCore::new_direct_with_status(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
             controller.status_publisher(),
         );
@@ -1151,13 +1153,13 @@ mod tests {
                 inner: transport,
                 trace: Arc::clone(&trace),
             }),
-            WorkerBudget::new(2, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
         );
         prime_ready(&mut worker, &control, &clock);
 
         let (shutdown_client, shutdown_receiver) = priority_shutdown_channel(activity.clone());
-        let (command_client, command_receiver) = command_channel(1, activity);
+        let (command_client, command_receiver) = command_channel(activity);
         let worker_thread = spawn_worker_thread(
             worker,
             clock,
@@ -1219,14 +1221,14 @@ mod tests {
                 teardown_started,
                 teardown_release: teardown_release_receiver,
             }),
-            WorkerBudget::new(2, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
         );
         prime_ready(&mut worker, &control, &clock);
         lock(&trace).clear();
 
         let (shutdown_client, shutdown_receiver) = priority_shutdown_channel(activity.clone());
-        let (command_client, command_receiver) = command_channel(1, activity);
+        let (command_client, command_receiver) = command_channel(activity);
         let worker_thread = spawn_worker_thread(
             worker,
             clock,
@@ -1294,7 +1296,7 @@ mod tests {
     fn drop_timeout_detaches_the_unfinished_worker_without_wall_clock_wait() {
         let (activity, _activity_receiver) = activity_channel();
         let (shutdown_client, mut shutdown_receiver) = priority_shutdown_channel(activity.clone());
-        let (command_client, _command_receiver) = command_channel::<()>(1, activity);
+        let (command_client, _command_receiver) = command_channel::<()>(activity);
         let (completion_sender, completion) = sync_channel(1);
         let (worker_started, worker_started_receiver) = sync_channel(1);
         let (worker_release, worker_release_receiver) = sync_channel(1);

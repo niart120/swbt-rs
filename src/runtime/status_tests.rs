@@ -228,7 +228,7 @@ fn runtime_projects_ordered_session_events_from_committed_status_updates() {
     let mut worker = WorkerCore::new_direct_with_status(
         protocol(),
         Box::new(transport),
-        WorkerBudget::new(2, 1),
+        WorkerBudget::new(1),
         Box::new(|_| {}),
         publisher,
     );
@@ -313,7 +313,7 @@ fn runtime_failure_emits_a_typed_category_without_its_error_source() {
     let mut worker = WorkerCore::new_direct_with_status(
         protocol(),
         Box::new(transport),
-        WorkerBudget::new(2, 1),
+        WorkerBudget::new(1),
         Box::new(|_| {}),
         publisher,
     );
@@ -377,7 +377,7 @@ fn status_and_snapshot_return_while_transport_poll_is_blocked() {
     let mut worker = WorkerCore::new_direct_with_status(
         protocol(),
         Box::new(transport),
-        WorkerBudget::new(2, 1),
+        WorkerBudget::new(1),
         Box::new(|_| {}),
         publisher,
     );
@@ -519,7 +519,7 @@ fn projected_direct_worker() -> (
     let worker = WorkerCore::new_direct_with_status(
         protocol(),
         Box::new(transport),
-        WorkerBudget::new(2, 1),
+        WorkerBudget::new(1),
         Box::new(|_| {}),
         publisher,
     );
