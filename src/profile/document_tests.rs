@@ -155,6 +155,41 @@ fn namespace_shape_and_known_key_fields_are_validated_without_secret_echo() {
 }
 
 #[test]
+fn public_peer_names_accept_only_the_bumble_public_suffix() {
+    let mut public_peer = valid_profile("pro");
+    let peers = public_peer["key_store"]["namespaces"]["02:12:34:56:78:9A"]
+        .as_object_mut()
+        .expect("test namespace is an object");
+    let keys = peers
+        .remove("AA:BB:CC:DD:EE:FF")
+        .expect("raw test peer exists");
+    peers.insert("AA:BB:CC:DD:EE:FF/P".to_owned(), keys);
+    parse(public_peer);
+
+    for invalid_peer in ["AA:BB:CC:DD:EE:FF/R", "AA:BB:CC:DD:EE:FF/Pextra"] {
+        let mut invalid = valid_profile("pro");
+        let peers = invalid["key_store"]["namespaces"]["02:12:34:56:78:9A"]
+            .as_object_mut()
+            .expect("test namespace is an object");
+        let keys = peers
+            .remove("AA:BB:CC:DD:EE:FF")
+            .expect("raw test peer exists");
+        peers.insert(invalid_peer.to_owned(), keys);
+        assert_invalid_profile_without_secret(invalid);
+    }
+
+    let mut typed_namespace = valid_profile("pro");
+    let namespaces = typed_namespace["key_store"]["namespaces"]
+        .as_object_mut()
+        .expect("test namespaces is an object");
+    let peers = namespaces
+        .remove("02:12:34:56:78:9A")
+        .expect("raw test namespace exists");
+    namespaces.insert("02:12:34:56:78:9A/P".to_owned(), peers);
+    assert_invalid_profile_without_secret(typed_namespace);
+}
+
+#[test]
 fn typed_conversion_returns_structured_model_mismatch_without_secret_echo() {
     let document = parse(valid_profile("pro"));
 

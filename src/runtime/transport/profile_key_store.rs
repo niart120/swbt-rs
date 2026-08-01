@@ -108,8 +108,11 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
     fn load(&self, peer: BluetoothAddress) -> Result<Option<ClassicBond>, BondStoreError> {
         let namespace = self.namespace(BondStoreError::LoadFailed)?;
         let (_, profile) = self.read_profile(BondStoreError::LoadFailed)?;
+        let raw_peer = format_address(peer);
+        let public_peer = format_public_peer(peer);
         profile
-            .pairing_keys(namespace, &format_address(peer))
+            .pairing_keys(namespace, &public_peer)
+            .or_else(|| profile.pairing_keys(namespace, &raw_peer))
             .map(decode_bond)
             .transpose()
             .map_err(|_| BondStoreError::LoadFailed)
@@ -122,7 +125,8 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
             .all_pairing_keys(namespace)
             .into_iter()
             .map(|(peer, value)| {
-                let peer = BluetoothAddress::parse(&peer, AddressKind::Public)
+                let raw_peer = peer.strip_suffix("/P").unwrap_or(&peer);
+                let peer = BluetoothAddress::parse(raw_peer, AddressKind::Public)
                     .map_err(|_| BondStoreError::ListFailed)?;
                 let bond = decode_bond(value).map_err(|_| BondStoreError::ListFailed)?;
                 Ok((peer, bond))
@@ -134,7 +138,7 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
         let namespace = self.namespace(BondStoreError::UpsertFailed)?.to_owned();
         let (expected, mut profile) = self.read_profile(BondStoreError::UpsertFailed)?;
         profile
-            .replace_pairing_keys(&namespace, &format_address(peer), encode_bond(&bond))
+            .replace_pairing_keys(&namespace, &format_public_peer(peer), encode_bond(&bond))
             .map_err(|_| BondStoreError::UpsertFailed)?;
         self.commit(&expected, &profile)
     }
@@ -153,7 +157,6 @@ impl<M: ControllerModel> fmt::Debug for SwbtProfileKeyStore<M> {
 
 fn encode_bond(bond: &ClassicBond) -> Value {
     json!({
-        "address_type": 0,
         "link_key": {
             "authenticated": bond.authenticated(),
             "value": encode_hex(bond.link_key()),
@@ -164,7 +167,10 @@ fn encode_bond(bond: &ClassicBond) -> Value {
 
 fn decode_bond(value: Value) -> Result<ClassicBond, ()> {
     let object = value.as_object().ok_or(())?;
-    if object.get("address_type").and_then(Value::as_u64) != Some(0) {
+    if object
+        .get("address_type")
+        .is_some_and(|address_type| address_type.as_u64() != Some(0))
+    {
         return Err(());
     }
     let link_key_type = object
@@ -215,6 +221,10 @@ fn format_address(address: BluetoothAddress) -> String {
     )
 }
 
+fn format_public_peer(address: BluetoothAddress) -> String {
+    format!("{}/P", format_address(address))
+}
+
 struct Redacted;
 
 impl fmt::Debug for Redacted {
@@ -242,7 +252,9 @@ mod tests {
 
     const LOCAL_NAMESPACE: &str = "00:11:22:33:44:55";
     const ORIGINAL_PEER: &str = "98:B6:E9:11:22:33";
+    const ORIGINAL_PUBLIC_PEER: &str = "98:B6:E9:11:22:33/P";
     const REPLACEMENT_PEER: &str = "98:B6:E9:44:55:66";
+    const REPLACEMENT_PUBLIC_PEER: &str = "98:B6:E9:44:55:66/P";
     const SECRET_SENTINEL: &str = "A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1";
     static NEXT_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
@@ -250,7 +262,15 @@ mod tests {
     fn adapter_default_reads_only_the_resolved_local_namespace() {
         let temp = TempDirectory::new("read");
         let path = temp.path().join("pro.json");
-        fs::write(&path, profile_bytes()).expect("write test profile");
+        let mut legacy: Value =
+            serde_json::from_slice(&profile_bytes()).expect("parse test profile");
+        legacy["key_store"]["namespaces"][LOCAL_NAMESPACE][ORIGINAL_PUBLIC_PEER]["address_type"] =
+            json!(0);
+        fs::write(
+            &path,
+            serde_json::to_vec_pretty(&legacy).expect("serialize legacy test profile"),
+        )
+        .expect("write test profile");
         let mut store = SwbtProfileKeyStore::<model::Pro>::new(path.clone());
 
         assert_eq!(
@@ -301,8 +321,14 @@ mod tests {
             json!({"retained": true})
         );
         assert_eq!(
-            same_peer["key_store"]["namespaces"][LOCAL_NAMESPACE][ORIGINAL_PEER]["future_peer"],
+            same_peer["key_store"]["namespaces"][LOCAL_NAMESPACE][ORIGINAL_PUBLIC_PEER]["future_peer"],
             json!({"retained": true})
+        );
+        assert!(
+            same_peer["key_store"]["namespaces"][LOCAL_NAMESPACE][ORIGINAL_PUBLIC_PEER]
+                .get("address_type")
+                .is_none(),
+            "Rust writes the same classic bond shape as Python 0.6.0"
         );
         assert_eq!(
             store.load(peer(ORIGINAL_PEER)).expect("read updated peer"),
@@ -321,6 +347,55 @@ mod tests {
                 .load(peer(ORIGINAL_PEER))
                 .expect("old peer was removed"),
             None
+        );
+        let replacement: Value =
+            serde_json::from_slice(&fs::read(&path).expect("read replacement update"))
+                .expect("replacement profile remains JSON");
+        assert!(
+            replacement["key_store"]["namespaces"][LOCAL_NAMESPACE]
+                .get(REPLACEMENT_PUBLIC_PEER)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn upsert_migrates_a_legacy_raw_peer_without_losing_extensions() {
+        let temp = TempDirectory::new("legacy-update");
+        let path = temp.path().join("pro.json");
+        let mut legacy: Value =
+            serde_json::from_slice(&profile_bytes()).expect("parse test profile");
+        let peers = legacy["key_store"]["namespaces"][LOCAL_NAMESPACE]
+            .as_object_mut()
+            .expect("test namespace is an object");
+        let keys = peers
+            .remove(ORIGINAL_PUBLIC_PEER)
+            .expect("typed test peer exists");
+        peers.insert(ORIGINAL_PEER.to_owned(), keys);
+        fs::write(
+            &path,
+            serde_json::to_vec_pretty(&legacy).expect("serialize legacy test profile"),
+        )
+        .expect("write legacy test profile");
+        let mut store = selected_store(path.clone());
+
+        assert_eq!(
+            store.load(peer(ORIGINAL_PEER)).expect("read legacy peer"),
+            Some(bond(0xA1))
+        );
+        store
+            .upsert(peer(ORIGINAL_PEER), bond(0xB2))
+            .expect("migrate legacy peer");
+
+        let migrated: Value =
+            serde_json::from_slice(&fs::read(&path).expect("read migrated profile"))
+                .expect("migrated profile remains JSON");
+        let peers = migrated["key_store"]["namespaces"][LOCAL_NAMESPACE]
+            .as_object()
+            .expect("migrated namespace remains an object");
+        assert!(!peers.contains_key(ORIGINAL_PEER));
+        assert_eq!(
+            peers[ORIGINAL_PUBLIC_PEER]["future_peer"],
+            json!({"retained": true})
         );
     }
 
@@ -378,8 +453,7 @@ mod tests {
             "key_store": {
                 "namespaces": {
                     LOCAL_NAMESPACE: {
-                        ORIGINAL_PEER: {
-                            "address_type": 0,
+                        ORIGINAL_PUBLIC_PEER: {
                             "link_key": {
                                 "authenticated": true,
                                 "value": SECRET_SENTINEL

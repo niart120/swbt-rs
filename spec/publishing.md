@@ -17,21 +17,26 @@ GitHub Release、`cargo publish`、publish workflow の実行には、その tur
   `1cc2c8d7d9c8cecfd203cd039fb3c3f8a9c39b072230f977b1e12e526b1bc667` である。
 - `swbt-rs` は一時 path patch と Bumble Git dependency を残さず、registry 上の
   `swbt-bumble-backend = "=0.1.1"` を解決する。
-- `cargo package --locked --allow-dirty` は120 files / 1.4 MiB（圧縮258.0 KiB）のarchiveを生成した。
-  展開archiveからの `cargo +1.87.0 test --all-targets --all-features --locked --offline --quiet` は
-  library 271 passed / 1 ignored、hardware 5 ignored、他target successだった。
+- T13後のclean `cargo package --locked` は120 files / 1.5 MiB（圧縮259.1 KiB）のarchiveを生成した。
+  展開archiveからのMSRV offline all-feature testはlibrary 273 passed / 1 ignored、hardware 5 ignored、
+  他target successで、default testとall/no-default buildも成功した。
+- [registry backend dependency / package audit](complete/unit_010/evidence/dependency-package-audit-20260802.md)で
+  Git source 0、cargo-denyのadvisory/license/source policy、Windows 33 / Linux 34 componentの
+  CycloneDX 1.5 SBOM、license欠落0、local pathと秘密情報の不在を確認した。
+- `niart120/swbt-rs`のGitHub Private Vulnerability Reportingを有効化し、`SECURITY.md`から
+  `https://github.com/niart120/swbt-rs/security/advisories/new`へ案内した。2026-08-02のGitHub APIは
+  `enabled:true`を返した。
+- [workload soak / backend rollback evidence](complete/unit_010/evidence/operational-cutover-windows-20260802.md)
+  では、連続2回の60秒IMU run、RustからPython 0.6.0への同一profile copyによる切戻し、A入力、
+  neutral終了、両backend終了後のadapter再利用、profileのバイト不変を確認した。
 
 ## 現在の停止条件
 
 0.1.0 は次の全条件を解消するまで公開しない。
 
 1. `Cargo.toml` の `publish = false` を維持している。
-2. unit_012 T08 の実機回帰は完了したが、公開対象となる `swbt-rs` 0.1.0 の exact head、merge SHA、
-   remote checkをまだ固定していない。
-3. backend切り替え後のlicense判定とWindows/Linux SBOMをrelease candidateで再生成していない。
-4. 2026-08-01 の GitHub API で `niart120/swbt-rs` の Private Vulnerability Reporting は
-   `enabled:false` であり、
-   `SECURITY.md` に恒久的な非公開報告先を記載できていない。
+2. 公開承認 turn で、対象となる `swbt-rs` 0.1.0 の exact main SHA と、そのSHAに対するremote checkを
+   固定する必要がある。このwork unitのmerge承認はcrates.io公開、tag、GitHub Releaseを含まない。
 
 fork 元 `chaitanyarahalkar/bumble-rs` への issue/PR はこの手順に含めない。自己所有 fork の
 [Issue #1](https://github.com/niart120/bumble-rs/issues/1) だけでbackend切り出しを追跡する。
@@ -49,8 +54,13 @@ release candidate では次を同じ記録へ残す。
 - 実機確認した OS、adapter、driver、console version と未検証条件
 
 現在の `Cargo.lock` SHA-256 は
-`861E05B96E9A3E4725A482221B95FB36D288F20515A02F1589BF118C61EB9D2C`。release commit は merge 前に
+`40109791FB91C479AF355F4B1A07F59A3E7F3680F35C8E5CF0E311A3D021629F`。release commit は merge 前に
 確定できないため、実際の release 承認後に main の対象 SHA とともに記録する。
+
+T13後のclean archive SHA-256は
+`57C6496601BFD721C71B7771BD8B2847AE1E584DA6FC172939F9103CFB5383A2`。Windows/Linux SBOM SHA-256は
+それぞれ`C66AA641628F00E13B1C4FDDC0A582AA12D7E9F9FC27A77EC60D46150CDA1346`、
+`3F085008B1D3F44A2ADF89BCAC6973D120C25C3455E61A499CD5959B0BC81085`である。
 
 ## local gate
 
@@ -91,7 +101,8 @@ release candidate PR で Linux、Windows、MSRV、dependency-policy の全 job �
 `deny.toml` は advisory、license、source の正本である。未知 license、許可していない Git source、
 advisory ignore を残した状態で公開しない。Windows/Linux の all-feature graph から CycloneDX 1.5 JSON
 を再生成し、component 数、license 欠落数、SHA-256 を記録する。SBOM に local path、token、profile、
-key material がないことを検査する。
+key material がないことを検査する。`cargo-cyclonedx`のroot local pathは
+`tools/normalize-cyclonedx.ps1`でpackage URLへ正規化し、dependency referenceを再検査する。
 
 ## hardware と既知の制限
 
@@ -105,7 +116,8 @@ cleanup を release note に残す。
 停止条件をすべて解消し、当該 turn で公開操作の明示承認を得た場合だけ、次へ進む。
 
 1. `publish = false` の解除と配布 dependency を専用 release change として review する。
-2. GitHub Private Vulnerability Reporting を有効化し、`SECURITY.md` を非公開報告 URL へ更新する。
+2. GitHub Private Vulnerability Reporting が有効で、`SECURITY.md` の非公開報告 URL が現在の
+   repositoryを指すことを再確認する。
 3. main の candidate SHA、Cargo.lock hash、backend version、SBOM hash、全 check を記録する。
 4. crates.io Trusted Publishing または同等の短命 credential を設定した専用 workflow を review する。
    現在は publish workflow を置いていない。

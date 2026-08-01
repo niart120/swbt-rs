@@ -266,7 +266,7 @@ impl ProfileDocument {
         peer: &str,
         replacement: Value,
     ) -> crate::Result<()> {
-        if !is_bluetooth_address(namespace) || !is_bluetooth_address(peer) {
+        if !is_bluetooth_address(namespace) || !is_classic_peer_name(peer) {
             return Err(invalid_profile(
                 "profile key-store update address is invalid",
             ));
@@ -276,12 +276,25 @@ impl ProfileDocument {
             invalid_profile("profile key-store update must contain a pairing-key object")
         })?;
         let peers = self.namespace_mut(namespace)?;
+        let existing_peer = if peers.contains_key(peer) {
+            Some(peer.to_owned())
+        } else {
+            peer.strip_suffix("/P")
+                .filter(|legacy_peer| peers.contains_key(*legacy_peer))
+                .map(str::to_owned)
+        };
 
-        if let Some(existing) = peers.get_mut(peer).and_then(Value::as_object_mut) {
+        if let Some(existing_peer) = existing_peer {
+            let mut existing = peers
+                .remove(&existing_peer)
+                .and_then(|value| value.as_object().cloned())
+                .ok_or_else(internal_profile_shape_error)?;
             for field in KNOWN_PAIRING_KEY_FIELDS {
                 existing.remove(field);
             }
             existing.append(&mut replacement);
+            peers.clear();
+            peers.insert(peer.to_owned(), Value::Object(existing));
         } else {
             peers.clear();
             peers.insert(peer.to_owned(), Value::Object(replacement));
@@ -341,7 +354,7 @@ fn validate_namespaces(namespaces: &serde_json::Map<String, Value>) -> crate::Re
             ));
         }
         for (peer, keys) in peers {
-            if !is_bluetooth_address(peer) {
+            if !is_classic_peer_name(peer) {
                 return Err(invalid_profile(
                     "profile key-store peer name must be a Bluetooth address",
                 ));
@@ -440,6 +453,10 @@ fn is_bluetooth_address(value: &str) -> bool {
             .iter()
             .enumerate()
             .all(|(index, byte)| matches!(index, 2 | 5 | 8 | 11 | 14) || byte.is_ascii_hexdigit())
+}
+
+fn is_classic_peer_name(value: &str) -> bool {
+    is_bluetooth_address(value) || value.strip_suffix("/P").is_some_and(is_bluetooth_address)
 }
 
 fn is_even_hex(value: &str) -> bool {

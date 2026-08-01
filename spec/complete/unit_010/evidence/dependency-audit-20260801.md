@@ -1,5 +1,8 @@
 # M9 dependency audit
 
+> 履歴: この記録は単一registry backendへ切り替える前のBumble Git dependency graphを対象とする。
+> 現行0.1.0 candidateの判定には`dependency-package-audit-20260802.md`を使う。
+
 ## 条件
 
 - 日付: 2026-08-01 JST

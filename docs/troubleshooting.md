@@ -108,3 +108,7 @@ Rust と Python の backend を同じ adapter に対して同時に開きませ�
 
 rollback で profile を変換または再生成しません。backend ごとの結果、OS、adapter、driver、console
 version を記録し、profile path、Bluetooth address、link key は証跡から除外します。
+
+`swbt-python` 0.6.0 は Classic public peer を `AA:BB:CC:DD:EE:FF/P` 形式で保存します。Rust
+backend はこの形式を読み書きし、旧 Rust profile の suffix なし peer も読み取ります。手作業で peer
+名や `address_type` を足し引きせず、profile copy が両 backend でそのまま読めることを確認します。

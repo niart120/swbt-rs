@@ -88,6 +88,9 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | refactor-skipped | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | unit_012で公開済み`swbt-bumble-backend@0.1.1`へ更新し、registryだけを使うarchive verification buildと展開archiveのoffline/all-feature testが成功。検査後の構造変更は不要 |
 | refactor-skipped | T09: local gate と public docs review が変更範囲に対して成功し、未実行 hardware/publish を明記する | regression | quality gate | all/default/no-default、MSRV、doc、dependency policy、diff、archive gateがgreen。unit_012のWindows実機回帰は完了し、remote CIはmerge gate、`swbt-rs` publishは別承認事項として残した。検査後の構造変更は不要 |
 | refactor-done | T10: Bumble session 統合 test が reader thread の packet 分割順序に依存せず公開 transport event を検査する | regression | test harness / CI | PR #11 run `30649447099` で `CommandStatus` 後に空で返る red を記録。残り期限内の再 poll に変更し、対象100回と全 library testが green |
+| refactor-done | T11: registry backend 0.1.1 の現行 dependency graph、license、Windows/Linux SBOM、package archive を再生成できる | regression | package / release | red: 旧evidenceはGit Bumble 22 componentsとWindows 220 / Linux 222 dependenciesを記録し、現行graphと不一致。green: registry sourceだけでcargo-deny、120-file archive、MSRV offline test、33 / 34 component SBOM、license欠落0が成功。refactor: 旧Git allowlistと未使用license例外を削除し、SBOM local path正規化とreference検査をtool化 |
+| refactor-skipped | T12: 非公開脆弱性報告先が実際に有効で、`SECURITY.md` からその入口へ到達できる | new | repository security / docs | red: GitHub APIは`enabled:false`で、SECURITYはowner profileだけを案内。green: 自己所有repoのPrivate Vulnerability Reportingを有効化し、APIの`enabled:true`と`security/advisories/new`の入口を記録。public issueへ秘密情報を出さない契約を維持。設定と文書の小変更で追加構造は不要 |
+| refactor-skipped | T13: workload soak と Python backend への切戻し訓練が、adapter排他・profile非破壊・neutral終了を満たす | acceptance | operational cutover / hardware | red: Python 0.6.0 profileの`/P` peerをRustが`invalid_profile`、`address_type`なしbondを`invalid_key_store`として拒否。green: fixture/unit/full test、Rust DirectとPython 0.6.0の同一copy再接続、A、neutral、両終了後adapter reopen、原本/copyのバイト不変、連続2×60秒soakが成功。peer検証・format helperとlegacy raw fallbackは責務内に収まり、green後の追加構造変更は不要 |
 
 ## 7. 設計メモ
 
@@ -108,9 +111,9 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 
 ### 7.2 判断
 
-- `publish = false` は維持する。registry archive gateとunit_012のWindows実機回帰は解消したが、
-  release candidateのremote CI、dependency/license/SBOM再監査、非公開脆弱性報告先の停止条件を
-  先に解消する。
+- `publish = false` は維持する。registry archive gate、unit_012のWindows実機回帰、
+  dependency/license/SBOM再監査、非公開脆弱性報告先は解消した。release candidateのremote CIと
+  当該turnでの公開承認は別に確認する。
 - unit_010時点のGit dependencyにはfork workspaceと一致するexact version requirementを追加した。
   unit_012 T07でGit dependencyを削除し、backendのexact registry versionへ置き換えた。
 - package の `include` を allowlist とし、運用記録や hardware evidence が将来増えても crate に
@@ -119,8 +122,10 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
   interface lifecycle を所有するため、公開 docs と source revision 監査で境界を固定する。
 - crates.io用の恒久境界はunit_012で単一`swbt-bumble-backend`とし、source/API inventory、実装、
   単体archive、初回公開、registry archiveだけを使うswbt-rs smokeまで完了した。
-- GitHub Private Vulnerability Reporting が無効の間は、恒久的な非公開報告先がない。0.1.0 の公開前に
-  有効化し、`SECURITY.md` を実際の報告先へ更新する。
+- T11で現行registry graphのWindows/Linux SBOMを再生成し、旧Git graphのevidenceを履歴として分離した。
+  `deny.toml`はGit sourceをすべて拒否し、backend 0.1.1のregistry checksumをSBOMでも固定する。
+- GitHub Private Vulnerability Reportingは2026-08-02に有効化し、APIの`enabled:true`を確認した。
+  `SECURITY.md`はrepositoryの`security/advisories/new`を非公開報告先として案内する。
 
 ### 7.3 public API / model mapping audit
 
@@ -146,13 +151,18 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | `README.md` | modify | platform support と公開 docs への入口 |
 | `docs/platform-support.md` | new | Windows/Linux/macOS、driver、udev、hardware matrix、known limitations |
 | `docs/troubleshooting.md` | new | claim/release/unplug と backend rollback |
+| `src/profile/document.rs` | modify | Python 0.6.0の`/P`付きpublic peer名を検証し、旧raw peerをcanonical名へ移行 |
+| `src/runtime/transport/profile_key_store.rs` | modify | Python/旧RustのClassic bondを読み、Python互換shapeを書き込む |
+| `src/profile/document_tests.rs` | modify | peer suffixとnamespace境界の検証 |
+| `tests/profile_compat.rs`、`tests/fixtures/python-v0.6.0/profile/` | modify | Python 0.6.0の実peer名を固定した互換fixture |
 | `CHANGELOG.md` | new | 0.1.0 の利用者向け変更履歴 |
 | `SECURITY.md` | new | 脆弱性報告と秘密情報を含む報告の扱い |
 | `deny.toml` | new | license/advisory/source policy |
 | `spec/initial/source-baseline.md` | modify | 0.1.0 candidate の fork revision と差分 |
 | `spec/publishing.md` | new | 0.1.0 release runbook と停止条件 |
-| `spec/wip/unit_010/evidence/` | new | package list、license/SBOM、source audit、gate の非秘密 evidence |
-| `spec/wip/unit_010/M9_PORTABILITY_RELEASE.md` | new | 本作業仕様 |
+| `tools/normalize-cyclonedx.ps1` | new | 生成SBOMのroot local path正規化とreference検査 |
+| `spec/complete/unit_010/evidence/` | new | package list、license/SBOM、source audit、gate の非秘密 evidence |
+| `spec/complete/unit_010/M9_PORTABILITY_RELEASE.md` | new | 完了した本作業仕様 |
 
 ## 9. 検証
 
@@ -184,12 +194,24 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | Linux adapter hardware test | not run | 専用 Linux host/adapter がなく、CI と source audit で代替しない |
 | `cargo-deny 0.20.2 --locked check` | success | advisories、bans、licenses、sources pass。複数版は warning |
 | `cargo-cyclonedx 0.5.9` Windows/Linux all-features | success | CycloneDX 1.5、220/222 dependency components、license 欠落0 |
+| T11 `cargo-deny 0.20.2 --locked check` | success | registry-only graphでadvisories、bans、licenses、sources pass。警告なし |
+| T11 `cargo package --locked --allow-dirty` | success | 120 files / 1.4 MiB（圧縮258.0 KiB）、verification build成功 |
+| T11 展開archive MSRV offline test | success | library 271 passed / 1 ignored、hardware 5 ignored、他target success |
+| T11 `cargo-cyclonedx 0.5.9` Windows/Linux all-features | success | CycloneDX 1.5、33/34 dependency components、license欠落0、local pathなし、dependency ref整合 |
+| GitHub API `PUT` / `GET repos/niart120/swbt-rs/private-vulnerability-reporting` | success | 自己所有repositoryだけを変更し、GETは`enabled:true`を返した |
 | fixture/package secret audit | success | JSON fixture 4件の provenance と合成 key 3件を確認。代表 credential pattern 0件、実機 profile/trace の収録なし |
 | release docs placeholder scan | success | `[TODO]`、`TBD`、`xxx` の残存なし |
 | release docs relative-link audit | success | README、CHANGELOG、SECURITY、platform/troubleshooting、publishing の local link 解決を確認 |
 | `cargo tree --no-default-features --edges normal --locked` | success | Bumble/rusb を含まず、直接依存は atomic-write-file、fs2、serde_json、tracing |
 | Bumble session targeted test | success | 修正後1回と同じ compiled binary の100回反復が成功。全 library 300 passed / 2 ignored、Clippy success |
 | `git diff --check` | success | whitespace error なし |
+| T13 profile compatibility focused tests | success | Python fixture round-trip、`/P`境界、Python/旧Rust bond読取、canonical updateがgreen |
+| T13 `cargo clippy --all-targets --all-features --locked -- -D warnings` | success | warning なし |
+| T13 `cargo test --all-features --locked` | success | library 273 passed / 1 ignored、probe 11 passed、hardware 5 ignored、他target/doc test成功 |
+| T13 Windows workload soak / backend rollback rehearsal | success | 2×60秒IMU、Rust→Python 0.6.0、A、neutral、adapter再利用、profile非破壊を確認 |
+| T13後 clean `cargo package --locked` | success | 120 files、禁止path 0、圧縮259.1 KiB、verification build成功、SHA-256 `57C6496601BFD721C71B7771BD8B2847AE1E584DA6FC172939F9103CFB5383A2` |
+| T13後 展開archive MSRV offline gate | success | all/default testとall/no-default build成功。all-feature library 273 passed / 1 ignored、hardware 5 ignored |
+| T13後 Windows/Linux SBOM refresh | success | 33/34 components、license欠落0、未解決ref 0、local source 0 |
 
 ## 10. 先送り事項
 
@@ -211,3 +233,6 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 - [x] release/rollback runbook と blocker を検査した
 - [x] 検証結果または未実行理由を記録した
 - [x] package / release / public API に触れる gate を記録した
+- [x] registry backend 0.1.1 の dependency/license/SBOM/package evidence を再生成した
+- [x] GitHub の非公開脆弱性報告先を有効化し、`SECURITY.md` を更新した
+- [x] workload soak と backend rollback rehearsal の結果を記録した
