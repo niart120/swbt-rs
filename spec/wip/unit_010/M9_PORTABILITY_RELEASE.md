@@ -85,8 +85,8 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | refactor-skipped | T05: Windows と Linux の CI が all-feature compile/test を実行し、hardware 未検証を置き換えない | regression | CI | `windows-latest` の check/test と既存 Linux jobが PR #11 run `30649158739` で成功。CI 結果を hardware evidence に読み替えず、追加 refactor は不要 |
 | refactor-done | T06: resolved dependency graph の license と SBOM inventory が生成され、未知 license と禁止 source を検出できる | new | package / release | cargo-deny policy と Windows/Linux CycloneDX 1.5 SBOM を追加。CI job でも検査 |
 | refactor-done | T07: changelog、security policy、hardware matrix、known limitations、source baseline、release/rollback checklist を一続きに辿れる | new | docs / release | 未公開 candidate と明記し、M8 timing variation、registry 名衝突、private vulnerability reporting 未設定を停止条件にした |
-| refactor-skipped | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | unit_012 T07で公開済み`swbt-bumble-backend@0.1.0`へ切り替え、120-file archiveのverification buildと展開archiveのoffline/all-feature testが成功。検査後の構造変更は不要 |
-| refactor-skipped | T09: local gate と public docs review が変更範囲に対して成功し、未実行 hardware/publish を明記する | regression | quality gate | all/default/no-default、MSRV、doc、dependency policy、diffに加えてarchive gateがgreen。unit_012 remote CI、T08 hardware、`swbt-rs` publishは未実行理由を記録。検査後の構造変更は不要 |
+| refactor-skipped | T08: clean package archive から default/all-feature target と examples を検証できる | new | package | unit_012で公開済み`swbt-bumble-backend@0.1.1`へ更新し、registryだけを使うarchive verification buildと展開archiveのoffline/all-feature testが成功。検査後の構造変更は不要 |
+| refactor-skipped | T09: local gate と public docs review が変更範囲に対して成功し、未実行 hardware/publish を明記する | regression | quality gate | all/default/no-default、MSRV、doc、dependency policy、diff、archive gateがgreen。unit_012のWindows実機回帰は完了し、remote CIはmerge gate、`swbt-rs` publishは別承認事項として残した。検査後の構造変更は不要 |
 | refactor-done | T10: Bumble session 統合 test が reader thread の packet 分割順序に依存せず公開 transport event を検査する | regression | test harness / CI | PR #11 run `30649447099` で `CommandStatus` 後に空で返る red を記録。残り期限内の再 poll に変更し、対象100回と全 library testが green |
 
 ## 7. 設計メモ
@@ -97,18 +97,20 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
   自己所有 fork revision `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1` に固定していた。
 - unit_010時点のclean `cargo package --locked` は、crates.io に `bumble-controller@0.1.0` が
   ないため registry 解決で停止した。
-- unit_012 T07では、公開済み`swbt-bumble-backend = "=0.1.0"`だけをregistryから解決し、
-  clean package verification buildと展開archiveのoffline/all-feature testが成功した。
+- unit_012 T07では初回公開版`swbt-bumble-backend = "=0.1.0"`だけをregistryから解決した。T08で
+  legacy LE event maskとACL credit待ちを修正した0.1.1へ更新し、clean package verification buildと
+  展開archiveのoffline/all-feature testが成功した。
 - current `Cargo.toml` は `publish = false` を維持している。
-- fixed Bumble revision の `bumble-transport/src/usb.rs` は USB handle に
+- `swbt-bumble-backend` 0.1.1 の `src/usb.rs` は USB handle に
   `set_auto_detach_kernel_driver(true)` を設定してから interface を claim する。
-- current CI は Ubuntu と Windows を含む。main へ入った PR #12 は全 9 job が成功したが、unit_012
-  head の remote check は未実行である。
+- current CI は Ubuntu と Windows を含む。main へ入った PR #12 は全 9 job が成功した。
+  unit_012 branchも同じremote checkをmerge gateとして通す。
 
 ### 7.2 判断
 
-- `publish = false` は維持する。registry archive gateは解消したが、実機回帰、remote CI、
-  dependency/license/SBOM再監査、非公開脆弱性報告先の停止条件を先に解消する。
+- `publish = false` は維持する。registry archive gateとunit_012のWindows実機回帰は解消したが、
+  release candidateのremote CI、dependency/license/SBOM再監査、非公開脆弱性報告先の停止条件を
+  先に解消する。
 - unit_010時点のGit dependencyにはfork workspaceと一致するexact version requirementを追加した。
   unit_012 T07でGit dependencyを削除し、backendのexact registry versionへ置き換えた。
 - package の `include` を allowlist とし、運用記録や hardware evidence が将来増えても crate に
@@ -191,8 +193,8 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 
 ## 10. 先送り事項
 
-- `swbt-rs` crates.io publish: backend初回公開とregistry archive gateは完了した。残る停止条件と
-  公開時の明示承認は`spec/publishing.md`と`spec/wip/unit_012/BUMBLE_BACKEND_BOUNDARY.md`で追跡する。
+- `swbt-rs` crates.io publish: backend 0.1.1公開とregistry archive gateは完了した。残る停止条件と
+  公開時の明示承認は`spec/publishing.md`と`spec/complete/unit_012/BUMBLE_BACKEND_BOUNDARY.md`で追跡する。
 - Linux hardware: 専用 Linux host/adapter を用いた pair/reconnect/close/reattach は未実行。
   `docs/platform-support.md` で build-tested と hardware-verified を分け、後続 evidence の完了条件を置く。
 - macOS: roadmap どおり unsupported。USB transport と driver ownership の調査を別 unit とする。

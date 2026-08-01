@@ -250,9 +250,9 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "swbt-bumble-backend"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4df874d56ef7dbeb62ba6f06eeac71b8ef699f8151722812a313b1099121e55"
+checksum = "1cc2c8d7d9c8cecfd203cd039fb3c3f8a9c39b072230f977b1e12e526b1bc667"
 dependencies = [
  "rusb",
 ]

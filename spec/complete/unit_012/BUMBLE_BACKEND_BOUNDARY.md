@@ -5,8 +5,8 @@
 `swbt-rs` 0.1.0 の `cargo package --locked` を止めている Bumble Git dependency を、
 Bluetooth Classic HID に必要な実装だけを持つ単一の `swbt-bumble-backend` crate へ置き換える。
 fork workspace 24 package の crates.io 公開案は採用しない。必要な実装を standalone repository
-`niart120/swbt-bumble-backend` へ抽出して `swbt-bumble-backend` 0.1.0 として公開し、
-`swbt-rs` は crates.io 上の同版だけを解決する。
+`niart120/swbt-bumble-backend` へ抽出する。初回版0.1.0の実機回帰で抽出差分2件を修正し、
+最終的に公開した0.1.1を`swbt-rs`のexact registry dependencyとする。
 
 ## 2. 起点
 
@@ -39,7 +39,7 @@ ACL flush 観測、Vendor Event 応答の実動作修正3 commitだけを含む�
   汎用 TCP / WebSocket transport を backend の要件に含めること。
 - `swbt-rs` の `cargo publish`、production tag、GitHub Release。
 - 明示承認のなかった `swbt-bumble-backend` の production tag と GitHub Release。
-- Bluetooth/HID の観測可能な振る舞い変更。
+- 固定fork基準断面との同等性回復を超えるBluetooth/HIDの振る舞い変更。
 
 ## 5. 振る舞い仕様
 
@@ -47,12 +47,12 @@ ACL flush 観測、Vendor Event 応答の実動作修正3 commitだけを含む�
 |---|---|
 | T02 時点の暫定 `bumble` feature build | 8 direct dependency が元の `bumble*` package 名と単一 revision `cb55e2d` を解決する |
 | 暫定 fork `main` | 実動作修正3 commitを含み、package 改名2 commitを含まない |
-| current `cargo package --locked` | `swbt-bumble-backend@0.1.0` を crates.io から解決し、archive の build が成功する |
+| current `cargo package --locked` | `swbt-bumble-backend@0.1.1` を crates.io から解決し、archive の build が成功する |
 | backend public API | open、pair、reconnect、poll、interrupt send、disconnect、close を提供し、Bumble固有型を露出しない |
 | backend dependency graph | fork 由来の別 package、Git dependency、local path dependencyを正規化 manifest に残さない |
 | backend archive | `LICENSE`、`NOTICE`、README、改変表示を含み、clean directory で build/testできる |
 | swbt-rs backend adoption | `bumble` feature が registry version の `swbt-bumble-backend` だけをfork由来依存として持つ |
-| backend publish authorizationあり | `swbt-bumble-backend@0.1.0` だけを crates.io に公開し、production tag と GitHub Release は作らない |
+| backend publish authorizationあり | 承認済みの`swbt-bumble-backend@0.1.0`と修正版0.1.1だけを crates.io に公開し、production tag と GitHub Release は作らない |
 
 ## 6. TDD Test List
 
@@ -73,7 +73,7 @@ ACL flush 観測、Vendor Event 応答の実動作修正3 commitだけを含む�
 | green | T06f3: SDP/HID session を統合する | backend integration | pair→SDP continuation→HID channel→HID outputとinterrupt sendが公開event境界で動く |
 | green | T06f4: 終了処理と最終archiveを完成する | backend lifecycle / package | disconnect、reader cancellation/join、残留入力なし、clean archive build/testが成功する |
 | green | T07: swbt-rs を registry backendへ切り替える | integration/package | default/all-feature gate、`cargo package --locked`、archive smokeが成功する |
-| pending | T08: 実機回帰を確認する | hardware | pairing、再接続、入力、IMU、明示local address、power-cycle、reader cleanupの既存契約を再確認する |
+| green | T08: 実機回帰を確認する | hardware | pairing、再接続、入力、IMU、明示local address、power-cycle、reader cleanupの既存契約を再確認する |
 | green | T09: 旧改名branchを後片付けする | repository cleanup | 実験revisionの参照を不採用証跡だけに残し、remote/local branchを削除してIssue #1へ記録する |
 
 T08 は実機回帰を伴うため、scripted test と archive smoke だけで green にしない。T08 完了前に
@@ -99,7 +99,7 @@ unit_012 を `spec/complete` へ移動せず、`swbt-rs` 0.1.0 を公開しな�
 ### 7.2 移行境界
 
 backend 完成までは自己所有 fork `main@cb55e2d` を Git dependency として使った。T07 では
-一時的な `[patch.crates-io]` を削除し、`swbt-bumble-backend = "=0.1.0"` を crates.io から
+一時的な `[patch.crates-io]` を削除し、`swbt-bumble-backend = "=0.1.1"` を crates.io から
 解決する境界へ移行した。`swbt-rs` の `publish = false` は維持する。
 
 ### 7.3 恒久境界
@@ -117,7 +117,7 @@ Classic host と USB transport の切り出し作業量を小さいと仮定し�
 - `spec/initial/source-baseline.md`
 - `spec/publishing.md`
 - `spec/wip/unit_010/M9_PORTABILITY_RELEASE.md`
-- `spec/wip/unit_012/`
+- `spec/complete/unit_012/`
 - 自己所有 fork `niart120/bumble-rs` の Issue #1 と branch
 
 ## 9. 検証
@@ -145,13 +145,14 @@ git diff --check
 | fork `cargo test --workspace --all-features --locked` | success |
 | T02 `cargo metadata --all-features --locked --format-version 1 --no-deps` | success: 8 direct Git dependency、元の `bumble*` package名、単一 `cb55e2d` |
 | T07 `cargo metadata --all-features --locked --format-version 1` | success: `swbt-bumble-backend@0.1.0` の source は crates.io registry、manifest は Cargo registry cache 配下。lock checksum は公開archiveのSHA-256と一致 |
+| T08 final `cargo metadata --all-features --locked --format-version 1` | success: `swbt-bumble-backend@0.1.1` を crates.io registryから解決。lock checksum `1cc2c8d7d9c8cecfd203cd039fb3c3f8a9c39b072230f977b1e12e526b1bc667` は公開archiveと一致 |
 | `cargo +1.87.0 check --all-targets --all-features --locked` | success |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | success |
 | `cargo test --all-targets --all-features --locked` | success: library 271 passed / 1 ignored、hardware 5 ignored、他target success |
 | `cargo test --all-targets --locked --quiet` | success: library 256 passed / 1 ignored、他target success |
 | default/all-feature build | success |
 | `cargo package --locked --list` | success |
-| `cargo package --locked --allow-dirty` | success: 120 files / 1.4 MiB（圧縮257.8 KiB）。公開版 `swbt-bumble-backend@0.1.0` を解決してarchive verification buildが成功 |
+| `cargo package --locked --allow-dirty` | success: 120 files / 1.4 MiB（圧縮258.0 KiB）。公開版 `swbt-bumble-backend@0.1.1` を解決してarchive verification buildが成功 |
 | 展開archive `cargo +1.87.0 test --all-targets --all-features --locked --offline --quiet` | success: library 271 passed / 1 ignored、hardware 5 ignored、他target success |
 | fork branch cleanup | success: `feat/swbt-registry-package-names` のremote/local refを削除し、`git ls-remote --heads origin main feat/swbt-registry-package-names` は `main@cb55e2d` だけを返した |
 | backend source/API inventory | success: USB/HCI/Classic host/L2CAP/SDP/HIDP/bondの採否、public API、test移行単位をfixed source pathへ対応付けた |
@@ -166,16 +167,20 @@ git diff --check
 | backend lifecycle / final archive | success: fork `feat/swbt-bumble-backend@701f0dd` でcredit待ちdrain、切断後の送信拒否、stale handle完了の回収、reader close/join後のHCI I/O解放、pending event破棄を確認。package全72 test、build、fmt、clippy `-D warnings`、rustdoc `-D warnings`が成功。clean `cargo package --locked` は29 files / 437.0 KiB（圧縮87.4 KiB）のarchiveを生成し、展開archiveの全72 testも成功。SHA-256 `bde8fb6a5948324f2094db1f359a72feb6212353ee2cc00727f12b0270f785ce` |
 | backend release candidate | success: fork `feat/swbt-bumble-backend@dfc5c86` でローカルadapter住所によるbond-store名前空間選択、失敗時の`InvalidBondStore`分類、Rust 1.87互換を確認。`cargo +1.87.0 check/test/clippy`、rustdoc、`cargo publish --dry-run --locked`が成功。clean archiveは29 files / 439.5 KiB（圧縮87.8 KiB）、展開archiveの全73 testが成功。SHA-256 `a4b2e781ff3039be1791d95561ee198083d5d1f975d857ada94368bbbebc110c` |
 | backend standalone repository | success: `git subtree split` でbackendに関係する15 commitの履歴を保持し、public repo [`niart120/swbt-bumble-backend`](https://github.com/niart120/swbt-bumble-backend) の `main@306c7ed` を正本にした。元`chaitanyarahalkar/bumble-rs@bbac2a6`、中間fork `niart120/bumble-rs@cb55e2d`、standalone抽出後の変更をREADME/NOTICE/PROVENANCEと19 fileの変更表示で分離し、元NOTICE本文の一致と全commit linkを確認した。GitHub Actions run `30702412817` はUbuntu/Windows test、Rust 1.87、fmt/Clippy/rustdoc、packageの全jobが成功し、Private Vulnerability Reportingも有効。公開archiveは32 files / 460.3 KiB（圧縮91.1 KiB）、SHA-256 `b4df874d56ef7dbeb62ba6f06eeac71b8ef699f8151722812a313b1099121e55` |
+| backend T08 regression fixes | success: `122a685`でHCI version 6以下のlegacy LE event maskを復元し、`fa40553`で明示interrupt reportをin-flight ACL credit後ろのhost queueへ受理した。各scripted testは修正前red、修正後green。backend全75 test、fmt、Clippy `-D warnings`、rustdoc `-D warnings`、build、package、展開archive testが成功 |
+| backend 0.1.1 release | success: standalone `main@0a4a2d99bc3ed3807464d4f902c20d9fd16b188a`、GitHub Actions run `30706567219` のRust 1.87、Ubuntu/Windows test、quality、packageが成功。32-file archiveのcrates.io checksumは`1cc2c8d7d9c8cecfd203cd039fb3c3f8a9c39b072230f977b1e12e526b1bc667`、ownerは`niart120` |
+| backend 0.1.1 cleanup | success: `fix/legacy-le-event-mask`がstandalone `main`と`origin/main`の`0a4a2d9`に完全包含されることを確認し、remote/local branchと修正worktreeを削除した。`swbt-rs`の一時`[patch.crates-io]` worktreeも削除した |
 | backend fork branch cleanup | success: standalone split親 `9713b9d` とprovenance反映時の `main@b1d4bab` を確認後、forkのremote/local `feat/swbt-bumble-backend` とlocal `split/swbt-bumble-backend` を削除した。fork checkoutはcleanな `main@cb55e2d` に戻り、旧`swbt-bumble-backend/` directoryとremote feature refが残っていない。standaloneのprovenance作業branchとrelease branchもmain反映・CI成功後にremote/local refと一時worktreeを削除した |
-| swbt-rs registry backend adoption | success: 一時`[patch.crates-io]`を削除し、`swbt-bumble-backend = "=0.1.0"`をregistry sourceとchecksum付きで固定した。旧Bumble Git dependency 8件と重複HCI/Classic/L2CAP/SDP/HIDP実装を除去し、adapter error/event/config/identity/session、schema v2 bond-store bridge、all-feature/default gateが成功 |
+| swbt-rs registry backend adoption | success: 一時`[patch.crates-io]`を削除し、`swbt-bumble-backend = "=0.1.1"`をregistry sourceとchecksum付きで固定した。旧Bumble Git dependency 8件と重複HCI/Classic/L2CAP/SDP/HIDP実装を除去し、adapter error/event/config/identity/session、schema v2 bond-store bridge、all-feature/default gateが成功 |
 | swbt-rs registry package | success: `cargo package --locked --allow-dirty` と展開archiveのoffline/all-feature testが成功し、sibling path、fork package、Git dependencyを必要としない |
-| backend crates.io publish | success: [`swbt-bumble-backend@0.1.0`](https://crates.io/crates/swbt-bumble-backend/0.1.0) を公開し、owner `niart120` を確認した |
+| backend crates.io publish | success: 初回0.1.0に続き、実機回帰修正版[`swbt-bumble-backend@0.1.1`](https://crates.io/crates/swbt-bumble-backend/0.1.1)を明示承認後に公開し、owner `niart120` とregistry取得を確認した |
+| registry 0.1.1 adapter sentinel | success: 別controller application実行中の初回は`transport_open`、終了後に同じregistry-backed binaryで`adapter_opened`。descriptor列挙は両者の間も成功し、WinUSBの排他owner契約と整合 |
 | production tag / GitHub Release | not run: このturnの承認対象外 |
-| 実機回帰 | not run: USB/HCI実装は追加したが、このTDD項目はscripted I/Oだけを対象とし、実機確認はT08で行うため |
+| T08 Windows実機回帰 | success: Windows 11 25H2 x86_64、CSR8510 A10 `0A12:0001` / WinUSB、Switch 2 system version 22.5.0、Pro Controllerでfresh pair、保存鍵Periodic/Direct reconnect、A、L+R、両stick、60秒IMU 2回、neutral close、profile不変、power-cycle後adapter reopenを確認。UI観測は入力反映、横移動、カクつきなし、終了後の移動・入力残りなし。詳細は`evidence/registry-backend-hardware-windows-20260802/SUMMARY.md` |
 
 ## 10. 先送り事項
 
-- 実機回帰: T08で実行する。
+- Linux、他adapter、他console versionの実機回帰は対象外とし、`docs/platform-support.md`の未検証条件を維持する。
 
 ## 11. 完了チェックリスト
 
@@ -187,6 +192,6 @@ git diff --check
 - [x] backend source/API inventoryを完了した
 - [x] backend実装を完了した
 - [x] registry archive smokeを完了した
-- [ ] 実機回帰を完了した
+- [x] 実機回帰を完了した
 - [x] 旧改名branchを削除した
-- [ ] unit_012をcompleteへ移動した
+- [x] unit_012をcompleteへ移動した

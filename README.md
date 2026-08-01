@@ -16,7 +16,7 @@ model-valid input、crate 内部の Switch HID protocol と runtime、公開 con
 descriptor-only adapter discovery を実装しています。
 
 `swbt-rs` 0.1.0 は未公開です。`bumble` feature は crates.io の
-`swbt-bumble-backend = "=0.1.0"` を使い、clean `cargo package --locked` と展開archiveの
+`swbt-bumble-backend = "=0.1.1"` を使い、clean `cargo package --locked` と展開archiveの
 all-feature testまで確認済みです。残るrelease gateが完了するまでは `publish = false` を維持します。
 利用者向けの変更は[変更履歴](CHANGELOG.md)、脆弱性報告時の注意は
 [セキュリティ方針](SECURITY.md)に記録しています。
@@ -36,7 +36,7 @@ all-feature testまで確認済みです。残るrelease gateが完了するま�
 - `build()` 直後の Configured controller には open runtime がないため、入力操作は
   `ErrorKind::TransportClosed` を返します。
 - default feature は空です。`bumble` feature を有効にした場合だけ、
-  `swbt-bumble-backend = "=0.1.0"` と `rusb` を組み込みます。backend は reader shutdown と join、
+  `swbt-bumble-backend = "=0.1.1"` と `rusb` を組み込みます。backend は reader shutdown と join、
   ACL パケットが host queue を離れた状態の判定、CSR command の Vendor Event 応答待ちと
   応答を待たない command 送信を含みます。
 - `list_adapters()` は `bumble` feature で USB device/config/interface descriptor を読み、

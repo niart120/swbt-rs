@@ -113,9 +113,11 @@ bumble-transport = { git = "https://github.com/chaitanyarahalkar/bumble-rs", rev
 unit_011 の dependency unit test と、CSR8510 A10 での明示 local-address pair / reconnect 実機試験を通した。
 24 package の crates.io 用改名は配布境界として採用せず、この candidate revision から除外した。
 必要なClassic HID実装と3 commitの修正はstandalone repository
-[`niart120/swbt-bumble-backend`](https://github.com/niart120/swbt-bumble-backend) へ抽出し、
-`swbt-bumble-backend@0.1.0` として公開した。`swbt-rs` はこのexact registry versionだけを依存に持ち、
-fork workspaceへのGit dependencyを残さない。このsource lineageは公式基準断面そのものを書き換えない。
+[`niart120/swbt-bumble-backend`](https://github.com/niart120/swbt-bumble-backend) へ抽出した。
+初回版0.1.0の実機回帰で判明したlegacy LE event maskとACL credit待ちの2件をstandalone側で修正し、
+`main@0a4a2d99bc3ed3807464d4f902c20d9fd16b188a` から`swbt-bumble-backend@0.1.1`として公開した。
+`swbt-rs` はこのexact registry versionだけを依存に持ち、fork workspaceへのGit dependencyを残さない。
+このsource lineageは公式基準断面そのものを書き換えない。
 fork 元 `chaitanyarahalkar/bumble-rs` への issue / PR は作成していない。
 0.1.0 release commit は merge 前には確定せず、公開承認後に `spec/publishing.md` の手順で main SHA、
 Cargo.lock hash、backend version/checksum、Bumble source lineageを同時に記録する。

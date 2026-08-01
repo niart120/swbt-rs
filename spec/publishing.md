@@ -2,7 +2,7 @@
 
 - 状態: **公開停止中**
 - candidate: `0.1.0`
-- 最終監査日: 2026-08-01 (JST)
+- 最終監査日: 2026-08-02 (JST)
 
 この文書は release candidate の再現、停止条件、検査、rollback を一か所にまとめる。production tag、
 GitHub Release、`cargo publish`、publish workflow の実行には、その turn でのユーザの明示承認が必要。
@@ -11,13 +11,13 @@ GitHub Release、`cargo publish`、publish workflow の実行には、その tur
 
 - standalone public repository
   [`niart120/swbt-bumble-backend`](https://github.com/niart120/swbt-bumble-backend) の
-  `main@306c7ed2a9c97a337126524374ae2b56e28822c5` から、
-  [`swbt-bumble-backend@0.1.0`](https://crates.io/crates/swbt-bumble-backend/0.1.0) を公開した。
+  `main@0a4a2d99bc3ed3807464d4f902c20d9fd16b188a` から、
+  [`swbt-bumble-backend@0.1.1`](https://crates.io/crates/swbt-bumble-backend/0.1.1) を公開した。
   crates.io owner は `niart120`、archive checksum は
-  `b4df874d56ef7dbeb62ba6f06eeac71b8ef699f8151722812a313b1099121e55` である。
+  `1cc2c8d7d9c8cecfd203cd039fb3c3f8a9c39b072230f977b1e12e526b1bc667` である。
 - `swbt-rs` は一時 path patch と Bumble Git dependency を残さず、registry 上の
-  `swbt-bumble-backend = "=0.1.0"` を解決する。
-- `cargo package --locked --allow-dirty` は120 files / 1.4 MiB（圧縮257.8 KiB）のarchiveを生成した。
+  `swbt-bumble-backend = "=0.1.1"` を解決する。
+- `cargo package --locked --allow-dirty` は120 files / 1.4 MiB（圧縮258.0 KiB）のarchiveを生成した。
   展開archiveからの `cargo +1.87.0 test --all-targets --all-features --locked --offline --quiet` は
   library 271 passed / 1 ignored、hardware 5 ignored、他target successだった。
 
@@ -26,9 +26,11 @@ GitHub Release、`cargo publish`、publish workflow の実行には、その tur
 0.1.0 は次の全条件を解消するまで公開しない。
 
 1. `Cargo.toml` の `publish = false` を維持している。
-2. unit_012 T08 の実機回帰と、unit_012 headに対するremote checkが未完了である。
+2. unit_012 T08 の実機回帰は完了したが、公開対象となる `swbt-rs` 0.1.0 の exact head、merge SHA、
+   remote checkをまだ固定していない。
 3. backend切り替え後のlicense判定とWindows/Linux SBOMをrelease candidateで再生成していない。
-4. 2026-08-01 の GitHub API で Private Vulnerability Reporting は `enabled:false` であり、
+4. 2026-08-01 の GitHub API で `niart120/swbt-rs` の Private Vulnerability Reporting は
+   `enabled:false` であり、
    `SECURITY.md` に恒久的な非公開報告先を記載できていない。
 
 fork 元 `chaitanyarahalkar/bumble-rs` への issue/PR はこの手順に含めない。自己所有 fork の
@@ -47,7 +49,7 @@ release candidate では次を同じ記録へ残す。
 - 実機確認した OS、adapter、driver、console version と未検証条件
 
 現在の `Cargo.lock` SHA-256 は
-`ABC04DDE2372AE989417920F2CC513494903B7A957A86B025D417E6B77147947`。release commit は merge 前に
+`861E05B96E9A3E4725A482221B95FB36D288F20515A02F1589BF118C61EB9D2C`。release commit は merge 前に
 確定できないため、実際の release 承認後に main の対象 SHA とともに記録する。
 
 ## local gate
