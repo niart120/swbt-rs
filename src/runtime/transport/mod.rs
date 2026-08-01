@@ -15,11 +15,7 @@ use std::time::Duration;
 
 #[cfg(feature = "bumble")]
 pub(crate) use bumble::BumbleTransportPort;
-#[cfg(test)]
-pub(crate) use capabilities::ClassicAclBufferInfo;
 pub(crate) use capabilities::TransportCapabilities;
-#[cfg(any(feature = "bumble", test))]
-pub(crate) use capabilities::{ControllerVersionInfo, UsbTransportMetadata};
 pub(crate) use config::TransportConfig;
 #[cfg(feature = "bumble")]
 pub(crate) use profile_key_store::ProfileKeyStoreFactory;
@@ -57,10 +53,10 @@ impl ActivityNotifier {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "T24 worker construction creates the shared activity channel"
+        reason = "feature-disabled builds do not create transport activity channels"
     )
 )]
 pub(crate) fn activity_channel() -> (ActivityNotifier, Receiver<()>) {
@@ -73,14 +69,23 @@ pub(crate) struct SendAcceptance(());
 
 impl SendAcceptance {
     #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "M4 constructs accepted HID interrupt send tokens")
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not accept HID interrupt sends"
+        )
     )]
     pub(in crate::runtime) const ACCEPTED: Self = Self(());
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code, reason = "M4 produces HID channel events"))]
+#[cfg_attr(
+    not(any(test, feature = "bumble")),
+    allow(
+        dead_code,
+        reason = "feature-disabled builds do not produce HID channel events"
+    )
+)]
 pub(crate) enum HidChannel {
     Control,
     Interrupt,
@@ -88,8 +93,11 @@ pub(crate) enum HidChannel {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "M4 produces connection and HID runtime events")
+    not(any(test, feature = "bumble")),
+    allow(
+        dead_code,
+        reason = "feature-disabled builds do not produce transport events"
+    )
 )]
 pub(crate) enum TransportEvent {
     Connected,
@@ -108,14 +116,15 @@ pub(crate) enum TransportEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TransportErrorKind {
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "T05 concrete transports report initialization failures"
+            reason = "feature-disabled builds do not report transport initialization failures"
         )
     )]
     OpenFailed,
     /// The controller returned an unusable all-zero public address.
+    #[cfg(any(test, feature = "bumble"))]
     InvalidControllerIdentity,
     /// The initialized controller address differs from the persisted identity.
     #[cfg_attr(
@@ -159,8 +168,11 @@ pub(crate) enum TransportErrorKind {
     )]
     DrainTimedOut,
     #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "M4 bounds the connection and HID event queue")
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not bound a transport event queue"
+        )
     )]
     EventQueueOverflow,
     #[cfg_attr(
@@ -228,6 +240,7 @@ impl fmt::Display for TransportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self.kind {
             TransportErrorKind::OpenFailed => "transport could not be opened or initialized",
+            #[cfg(any(test, feature = "bumble"))]
             TransportErrorKind::InvalidControllerIdentity => {
                 "transport controller returned an invalid identity"
             }

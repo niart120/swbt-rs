@@ -269,9 +269,10 @@ impl BackendOpener for FakeOpener {
         let actual = options.config();
         let actual_policy = actual.hid_service().sdp_policy();
         let expected_policy = &expected.hid_service.sdp_policy;
+        let expected_local_name_ad = complete_local_name_ad(expected.local_name());
         let config_matches = actual.local_name() == expected.local_name()
             && actual.class_of_device() == expected.class_of_device()
-            && actual.complete_local_name_eir() == expected.complete_local_name_ad()
+            && actual.complete_local_name_eir() == expected_local_name_ad
             && actual.hid_service().report_descriptor()
                 == expected.hid_service.report_descriptor.as_ref()
             && actual_policy.service_name == expected_policy.service_name
@@ -430,6 +431,14 @@ fn profile_bytes() -> Vec<u8> {
         }
     }))
     .expect("serialize test profile")
+}
+
+fn complete_local_name_ad(local_name: &str) -> Vec<u8> {
+    let mut data = Vec::with_capacity(local_name.len() + 2);
+    data.push((local_name.len() + 1) as u8);
+    data.push(0x09);
+    data.extend_from_slice(local_name.as_bytes());
+    data
 }
 
 struct TempDirectory {

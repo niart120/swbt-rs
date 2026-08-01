@@ -88,7 +88,7 @@ fn direct_config_uses_unit_reporting_state() {
 }
 
 #[test]
-fn transport_config_projects_model_protocol_metadata_into_complete_local_name_eir() {
+fn transport_config_projects_model_protocol_identity() {
     let configurations = [
         (
             ProController::builder("usb:0")
@@ -122,19 +122,6 @@ fn transport_config_projects_model_protocol_metadata_into_complete_local_name_ei
     for (configuration, local_name) in configurations {
         assert_eq!(configuration.local_name(), local_name);
         assert_eq!(configuration.class_of_device(), 0x002508);
-        assert_complete_local_name_eir(configuration.extended_inquiry_response(), local_name);
-        assert_eq!(
-            configuration.complete_local_name_ad(),
-            &configuration.extended_inquiry_response()[..local_name.len() + 2]
-        );
-        assert!(configuration.classic_enabled());
-        assert!(!configuration.classic_accept_any());
-        assert!(!configuration.connectable());
-        assert!(!configuration.discoverable());
-        assert!(!configuration.classic_sc_enabled());
-        assert!(configuration.classic_ssp_enabled());
-        assert!(!configuration.le_enabled());
-        assert!(!configuration.le_simultaneous_enabled());
     }
 }
 
@@ -183,13 +170,6 @@ fn transport_config_is_identical_for_periodic_and_direct_reporting() {
         joycon_r_periodic.transport_config(),
         joycon_r_direct.transport_config()
     );
-}
-
-fn assert_complete_local_name_eir(eir: &[u8; 240], local_name: &str) {
-    assert_eq!(eir[0], (local_name.len() + 1) as u8);
-    assert_eq!(eir[1], 0x09);
-    assert_eq!(&eir[2..2 + local_name.len()], local_name.as_bytes());
-    assert!(eir[2 + local_name.len()..].iter().all(|byte| *byte == 0));
 }
 
 fn assert_unit_reporting_state(config: &BuilderConfig<model::Pro, reporting::Direct>) {

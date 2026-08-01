@@ -19,14 +19,6 @@ pub(crate) struct HidSdpPolicySpec {
     pub(crate) ssr_host_min_timeout: u16,
 }
 
-impl HidSdpPolicySpec {
-    pub(crate) fn is_well_formed(self) -> bool {
-        !matches!(self.service_name, Some(""))
-            && !matches!(self.service_description, Some(""))
-            && !matches!(self.provider_name, Some(""))
-    }
-}
-
 pub(crate) const PRO_HID_SDP_POLICY: HidSdpPolicySpec = HidSdpPolicySpec {
     service_name: None,
     service_description: None,

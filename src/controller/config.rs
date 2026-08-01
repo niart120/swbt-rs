@@ -89,10 +89,10 @@ pub(super) struct ControllerConfig<M: ControllerModel, R: ReportingMode> {
     )]
     pub(super) adapter: AdapterSelector,
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "M6 supplies pairing keys from the profile to the controller runtime"
+            reason = "feature-disabled builds retain profiles without constructing a transport"
         )
     )]
     pub(super) profile: ProfileConfig<M>,

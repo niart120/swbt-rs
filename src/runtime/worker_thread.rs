@@ -471,10 +471,6 @@ impl<C> WorkerOwner<C> {
             .finish()
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "M4 activates terminal recovery while pairing")
-    )]
     pub(crate) fn finish_terminal(mut self) -> WorkerThreadOutcome {
         drop(self.commands.take());
         self.thread

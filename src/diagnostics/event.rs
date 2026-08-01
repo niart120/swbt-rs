@@ -59,10 +59,6 @@ impl WorkerFailureCategory {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DiagnosticEvent {
-    Environment {
-        controller_kind: ControllerKind,
-        reporting_kind: ReportingKind,
-    },
     SessionStarted {
         context: DiagnosticContext,
     },
@@ -102,23 +98,6 @@ pub(crate) enum DiagnosticEvent {
 }
 
 impl DiagnosticEvent {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the probe emits its pre-session environment record at the binary boundary"
-        )
-    )]
-    pub(crate) const fn environment(
-        controller_kind: ControllerKind,
-        reporting_kind: ReportingKind,
-    ) -> Self {
-        Self::Environment {
-            controller_kind,
-            reporting_kind,
-        }
-    }
-
     pub(crate) const fn session_started(context: DiagnosticContext) -> Self {
         Self::SessionStarted { context }
     }
@@ -199,21 +178,6 @@ impl DiagnosticEvent {
 
     pub(crate) fn emit(self) {
         match self {
-            Self::Environment {
-                controller_kind,
-                reporting_kind,
-            } => tracing::event!(
-                target: DIAGNOSTICS_TARGET,
-                tracing::Level::INFO,
-                schema = DIAGNOSTICS_SCHEMA,
-                schema_version = DIAGNOSTICS_SCHEMA_VERSION,
-                event = "environment",
-                controller_kind = controller_kind.profile_name(),
-                reporting_kind = reporting_name(reporting_kind),
-                package_version = env!("CARGO_PKG_VERSION"),
-                target_os = std::env::consts::OS,
-                target_arch = std::env::consts::ARCH,
-            ),
             Self::SessionStarted { context } => tracing::event!(
                 target: DIAGNOSTICS_TARGET,
                 tracing::Level::INFO,
@@ -335,19 +299,6 @@ impl DiagnosticEvent {
     #[cfg(test)]
     pub(crate) fn to_value(self) -> Value {
         match self {
-            Self::Environment {
-                controller_kind,
-                reporting_kind,
-            } => json!({
-                "schema": DIAGNOSTICS_SCHEMA,
-                "schema_version": DIAGNOSTICS_SCHEMA_VERSION,
-                "event": "environment",
-                "controller_kind": controller_kind.profile_name(),
-                "reporting_kind": reporting_name(reporting_kind),
-                "package_version": env!("CARGO_PKG_VERSION"),
-                "target_os": std::env::consts::OS,
-                "target_arch": std::env::consts::ARCH,
-            }),
             Self::SessionStarted { context } => record(context, "session_started", Map::new()),
             Self::LifecycleChanged { context, lifecycle } => record(
                 context,
@@ -513,19 +464,6 @@ mod tests {
         );
         let cases = [
             (
-                DiagnosticEvent::environment(ControllerKind::JoyConR, ReportingKind::Direct),
-                json!({
-                    "schema": "swbt.diagnostics",
-                    "schema_version": 1,
-                    "event": "environment",
-                    "controller_kind": "joycon_r",
-                    "reporting_kind": "direct",
-                    "package_version": env!("CARGO_PKG_VERSION"),
-                    "target_os": std::env::consts::OS,
-                    "target_arch": std::env::consts::ARCH,
-                }),
-            ),
-            (
                 DiagnosticEvent::session_started(context),
                 record_with_context("session_started", json!({}), 7),
             ),
@@ -587,7 +525,6 @@ mod tests {
             NonZeroU64::new(1).unwrap(),
         );
         let records = [
-            DiagnosticEvent::environment(ControllerKind::Pro, ReportingKind::Periodic),
             DiagnosticEvent::session_started(context),
             DiagnosticEvent::lifecycle_changed(context, LifecycleState::Connecting),
             DiagnosticEvent::subcommand_observed(context, 0x03),

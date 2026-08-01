@@ -1,7 +1,6 @@
 use std::{error::Error as StdError, fmt, time::Duration};
 
 use crate::{
-    controller::input::TapPlan,
     input::InputState,
     model::ControllerModel,
     protocol::SwitchHidProtocol,
@@ -17,13 +16,6 @@ use crate::{
 };
 
 const REPLY_HOLDOFF: Duration = Duration::from_millis(300);
-
-pub(crate) fn commit_candidate<M: ControllerModel>(
-    candidate: InputState<M>,
-    state: &mut InputStateStore<M>,
-) {
-    state.commit(candidate);
-}
 
 pub(crate) struct PendingPeriodicTap<M: ControllerModel> {
     released: InputState<M>,
@@ -63,7 +55,7 @@ impl<M: ControllerModel> PendingPeriodicTap<M> {
 
 pub(crate) fn begin_tap<M: ControllerModel>(
     ready: bool,
-    plan: TapPlan<M>,
+    plan: (InputState<M>, InputState<M>, Duration),
     now_ns: u64,
     state: &mut InputStateStore<M>,
     protocol: &SwitchHidProtocol<M>,
@@ -74,7 +66,7 @@ pub(crate) fn begin_tap<M: ControllerModel>(
         return Err(PeriodicError::NotReady);
     }
 
-    let (pressed, released, _duration) = plan.into_parts();
+    let (pressed, released, _duration) = plan;
     let first_error =
         commit_and_send_candidate(pressed, now_ns, state, protocol, sender, transport).err();
     let first_error = match first_error {
@@ -100,7 +92,7 @@ fn commit_and_send_candidate<M: ControllerModel>(
     sender: &mut ReportSender<M>,
     transport: &mut dyn TransportPort,
 ) -> TransportResult<SendAcceptance> {
-    commit_candidate(candidate, state);
+    state.commit(candidate);
     sender.send_input(protocol, &state.snapshot(), now_ns, transport)
 }
 

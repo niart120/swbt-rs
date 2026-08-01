@@ -31,10 +31,6 @@ pub(crate) struct ProtocolSession {
 
 impl ProtocolSession {
     #[must_use]
-    #[allow(
-        dead_code,
-        reason = "T26 projects the accepted report mode into GamepadStatus"
-    )]
     pub(crate) const fn report_mode(self) -> Option<u8> {
         match self.report_mode {
             Some(ReportModeSelection::StandardFull) => Some(SUPPORTED_INPUT_REPORT_MODE),

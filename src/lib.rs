@@ -2,72 +2,35 @@
 #![warn(missing_docs)]
 //! Rust library for NX-compatible virtual Bluetooth HID input devices.
 //!
-//! The current package surface provides typed controller identities,
-//! model-valid input values, configured controller construction, and read-only
-//! status and input snapshots, typed input operations, and explicit close
-//! operations. Building a controller without a profile is ephemeral; selecting
-//! an existing profile reads and validates that document. Construction does not
-//! open an adapter or start a worker. A configured controller therefore returns
-//! [`ErrorKind::TransportClosed`] from input operations until [`Controller::open`]
-//! installs a runtime. With the `bumble` feature, [`list_adapters`] performs
-//! descriptor-only Bluetooth HCI USB discovery without opening or claiming a
-//! device, while `open` claims and initializes the selected HCI adapter and
-//! starts an owned worker. Without that feature, `open` returns
-//! [`ErrorKind::UnsupportedCapability`] before transport side effects.
-//! [`Controller::pair`] requires an open runtime and waits for one connection
-//! session to complete NX readiness; timeout and pre-readiness disconnect are
-//! returned as failures. [`Controller::reconnect`] uses the profile's stored
-//! Classic bond without deleting it or falling back to pairing, while
-//! [`Controller::connect`] permits pairing only after `NoBond` when explicitly
-//! configured. The production USB runtime owns the same Classic pairing,
-//! reconnect, SDP, and HID session exercised by the virtual packet-path tests;
-//! pairing, stored-key reconnect, and Periodic/Direct input have been exercised
-//! on Windows 11 with a CSR8510 A10 and Switch 2 system version 22.5.0
-//! (user-reported). Other operating systems, adapters, system versions, and
-//! long-run reliability remain unverified. With
-//! the `bumble` feature, profile creation publishes a valid empty envelope
-//! without replacing an existing target before it opens the adapter and waits
-//! for pairing readiness. Feature-disabled profile creation stops before
-//! creating a file. Pairing-key updates atomically preserve the complete
-//! profile, and stored-key active/incoming reconnect reaches same-session Ready
-//! in virtual Classic tests. Three active Pro reconnect runs reached Ready and
-//! completed input, neutral close, adapter reopen, and exact profile equality on
-//! the hardware above. One Periodic run followed a user-reported power cycle;
-//! that setup action was not machine-verified. On the same hardware, Joy-Con L
-//! reached Ready through fresh Periodic pairing and Direct reconnect. Joy-Con R
-//! reached Ready through fresh Periodic pairing, Periodic reconnect, and Direct
-//! reconnect after adding the Python-compatible NFC/IR MCU state `0x22` reply.
-//! Both models completed side-specific input, neutral close, adapter reopen, and
-//! profile model checks. These runs do not establish long-run reliability.
-//! Runtime state changes also emit schema version 1 `tracing` events on the
-//! `swbt::diagnostics` target. These events expose controller/reporting kinds,
-//! session and lifecycle state, report mode, committed IMU mode, parsed
-//! subcommands, accepted-report counters, classified worker failures, and
-//! disconnect reasons. They do not expose profile paths, Bluetooth addresses,
-//! key material, USB serials, raw packets, or error source chains. Accepted
-//! counters describe transport acceptance, not radio delivery or console UI
-//! effects. The feature-gated `swbt-probe` binary records this event stream as
-//! validated NDJSON and provides adapter, pairing, reconnect, and safe profile
-//! inspection commands.
-//! On the hardware above, one 60-second Pro Periodic IMU run completed neutral
-//! close, exact profile preservation, and adapter reopen. A separate 15-second
-//! constant-yaw run produced horizontal movement without visible stutter or
-//! residual input according to the operator. Subscriber-observed interval
-//! variation remains a release limitation; these runs do not establish a
-//! reliability rate.
-//! [`PairingProfile`] parses and
-//! writes complete schema v2 JSON
-//! without discarding unknown extension fields; filesystem update is not part
-//! of that value API. Explicit close waits for cleanup
-//! completion, joins the worker, and returns cleanup or join failures. Pending
-//! interrupt sends are drained until they enter the controller's flow-control
-//! window; close does not wait for the controller to return completion credit
-//! for every in-flight packet.
-//! Dropping a controller instead uses bounded best-effort shutdown: it omits
-//! neutral reporting and pending-send draining and cannot report failures. Its
-//! internal wait duration is not a public timing guarantee. A new connection
-//! session resets the input snapshot to neutral and does not carry
-//! pre-connection or previous-session input state or stale events forward.
+//! The crate provides model-typed controllers, model-valid input values,
+//! read-only status snapshots, pairing profiles, and Periodic or Direct input
+//! reporting. Building a controller does not open an adapter or start a worker;
+//! input operations return [`ErrorKind::TransportClosed`] until
+//! [`Controller::open`] succeeds. Selecting an existing profile reads and
+//! validates it during construction.
+//!
+//! The `bumble` feature enables descriptor-only USB adapter discovery and the
+//! Bluetooth HCI runtime. Without it, adapter discovery, opening, and profile
+//! creation return [`ErrorKind::UnsupportedCapability`] before transport or
+//! filesystem side effects. [`Controller::pair`] waits for one session to reach
+//! protocol readiness. [`Controller::reconnect`] uses the stored Classic bond
+//! without deleting it or falling back to pairing; [`Controller::connect`] can
+//! permit that fallback only when configured by the caller.
+//!
+//! [`PairingProfile`] preserves unknown schema-v2 extension fields. Profile
+//! creation does not replace an existing target, and pairing-key updates replace
+//! the complete profile atomically. A new connection session resets committed
+//! input to neutral and excludes events from earlier sessions.
+//!
+//! Explicit close drains accepted interrupt sends to the controller flow-control
+//! window, disconnects, closes the transport, joins the worker, and reports
+//! cleanup or join failures. It does not wait for completion credit for every
+//! in-flight packet. Dropping a controller is bounded best-effort shutdown: it
+//! omits neutral reporting and draining and cannot report failures. Runtime
+//! changes emit secret-free schema-v1 `tracing` events on the
+//! `swbt::diagnostics` target; accepted-report counters indicate transport
+//! acceptance, not radio delivery or console behavior. Platform support and
+//! hardware verification limits are documented in `docs/platform-support.md`.
 //!
 //! # Model-valid input
 //!

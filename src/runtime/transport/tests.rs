@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use super::fake::{FakeTransport, ScriptedSendOutcome};
 use super::{
-    ClassicAclBufferInfo, ControllerVersionInfo, HidChannel, TransportCapabilities, TransportError,
-    TransportErrorKind, TransportEvent, TransportPort, UsbTransportMetadata, activity_channel,
+    HidChannel, TransportCapabilities, TransportError, TransportErrorKind, TransportEvent,
+    TransportPort, activity_channel,
 };
 
 fn assert_error_kind(error: &TransportError, expected: TransportErrorKind) {
@@ -14,82 +14,31 @@ fn assert_error_kind(error: &TransportError, expected: TransportErrorKind) {
 }
 
 #[test]
-fn initialized_capabilities_preserve_identity_versions_and_classic_requirements() {
+fn initialized_capabilities_preserve_identity_and_classic_support() {
     let local_address = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
-    let version = ControllerVersionInfo::new(0x09, 0x1234, 0x09, 0x000a, 0x5678);
-    let usb = UsbTransportMetadata::new(0x0a12, 0x0001, 1, 7);
-    let capabilities = TransportCapabilities::from_initialized_controller(
-        local_address,
-        Some(version),
-        Some([0; 8]),
-        Some(ClassicAclBufferInfo::new(1021, 8)),
-        usb,
-    )
-    .expect("valid initialized capabilities");
+    let capabilities =
+        TransportCapabilities::for_test(local_address, true).expect("valid capabilities");
 
     assert_eq!(capabilities.local_address(), local_address);
-    assert_eq!(capabilities.local_version(), Some(version));
-    assert_eq!(version.hci_version(), 0x09);
-    assert_eq!(version.hci_subversion(), 0x1234);
-    assert_eq!(version.lmp_version(), 0x09);
-    assert_eq!(version.company_identifier(), 0x000a);
-    assert_eq!(version.lmp_subversion(), 0x5678);
-    assert_eq!(capabilities.usb(), usb);
-    assert_eq!(usb.vendor_id(), 0x0a12);
-    assert_eq!(usb.product_id(), 0x0001);
-    assert_eq!(usb.bus_number(), 1);
-    assert_eq!(usb.device_address(), 7);
     assert!(capabilities.classic_capable());
     assert!(
         !format!("{capabilities:?}").contains("local_address"),
         "generic Debug must not expose the adapter address"
     );
 
-    for (feature_page_0, classic_acl) in [
-        (None, Some(ClassicAclBufferInfo::new(1021, 8))),
-        (
-            Some([0, 0, 0, 0, 0x20, 0, 0, 0]),
-            Some(ClassicAclBufferInfo::new(1021, 8)),
-        ),
-        (Some([0; 8]), None),
-        (Some([0; 8]), Some(ClassicAclBufferInfo::new(0, 8))),
-        (Some([0; 8]), Some(ClassicAclBufferInfo::new(1021, 0))),
-    ] {
-        let capabilities = TransportCapabilities::from_initialized_controller(
-            local_address,
-            Some(version),
-            feature_page_0,
-            classic_acl,
-            usb,
-        )
-        .expect("non-Classic controllers still have valid identity metadata");
+    let capabilities =
+        TransportCapabilities::for_test(local_address, false).expect("valid capabilities");
+    assert!(!capabilities.classic_capable());
 
-        assert!(!capabilities.classic_capable());
-    }
-
-    let error = TransportCapabilities::from_initialized_controller(
-        [0; 6],
-        Some(version),
-        Some([0; 8]),
-        Some(ClassicAclBufferInfo::new(1021, 8)),
-        usb,
-    )
-    .expect_err("all-zero controller address must be rejected");
+    let error = TransportCapabilities::for_test([0; 6], true)
+        .expect_err("all-zero controller address must be rejected");
     assert_error_kind(&error, TransportErrorKind::InvalidControllerIdentity);
 }
 
 #[test]
 fn fake_open_returns_the_same_initialized_capabilities_on_repeated_open() {
-    let expected = TransportCapabilities::from_initialized_controller(
-        [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d],
-        Some(ControllerVersionInfo::new(
-            0x09, 0x1234, 0x09, 0x000a, 0x5678,
-        )),
-        Some([0; 8]),
-        Some(ClassicAclBufferInfo::new(1021, 8)),
-        UsbTransportMetadata::new(0x0a12, 0x0001, 1, 7),
-    )
-    .expect("valid initialized capabilities");
+    let expected = TransportCapabilities::for_test([0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d], true)
+        .expect("valid initialized capabilities");
     let (mut transport, _control) = FakeTransport::with_capabilities(4, 4, expected);
     let (first_notifier, _first_wake_receiver) = activity_channel();
     let (second_notifier, _second_wake_receiver) = activity_channel();

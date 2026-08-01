@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    controller::input::{neutral_candidate, press_candidate, release_candidate, tap_plan},
+    controller::input::{press_candidate, release_candidate, tap_plan},
     diagnostics::event::WorkerFailureCategory,
     error::Error,
     input::{Button, InputState},
@@ -33,17 +33,20 @@ use crate::{
         },
         periodic::{
             AutomaticInput, PendingPeriodicTap, PeriodicError, PeriodicPolicy,
-            begin_tap as begin_periodic_tap, commit_candidate as commit_periodic,
+            begin_tap as begin_periodic_tap,
         },
         readiness::{ReadinessError, ReadinessGate, ReadinessProgress},
         scheduler::SchedulerError,
         sender::ReportSender,
         session::{ConnectionSessionId, ConnectionSessions, SessionError, SessionEvent},
         state::InputStateStore,
-        status::{StatusPublisher, status_projection},
+        status::StatusPublisher,
         transport::{TransportError, TransportErrorKind, TransportEvent, TransportPort},
     },
 };
+
+#[cfg(test)]
+use crate::runtime::status::status_projection;
 
 const EXPLICIT_CLOSE_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -133,10 +136,6 @@ pub(crate) enum ShutdownRequest {
 }
 
 impl ShutdownRequest {
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "T33 constructs explicit priority close requests")
-    )]
     pub(crate) const fn explicit(mode: CloseMode) -> Self {
         Self::Explicit(mode)
     }
@@ -168,10 +167,6 @@ pub(crate) struct WorkerBudget {
 }
 
 impl WorkerBudget {
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "T33 configures bounded worker batches")
-    )]
     pub(crate) const fn new(command_batch: usize, poll_batches: usize) -> Self {
         assert!(command_batch > 0, "worker command batch must be positive");
         assert!(poll_batches > 0, "worker poll batch count must be positive");
@@ -182,10 +177,6 @@ impl WorkerBudget {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "T33 controller input methods construct the complete command surface"
-)]
 pub enum CommonCommand<M: ControllerModel> {
     Press(Vec<Button<M>>),
     Release(Vec<Button<M>>),
@@ -196,19 +187,11 @@ pub enum CommonCommand<M: ControllerModel> {
     Neutral,
 }
 
-#[allow(
-    dead_code,
-    reason = "T33 Periodic controller methods construct reporting-specific commands"
-)]
 pub enum PeriodicCommand<M: ControllerModel> {
     Common(CommonCommand<M>),
     Apply(InputState<M>),
 }
 
-#[allow(
-    dead_code,
-    reason = "T33 Direct controller methods construct reporting-specific commands"
-)]
 pub enum DirectCommand<M: ControllerModel> {
     Common(CommonCommand<M>),
     Send(InputState<M>),
@@ -219,26 +202,12 @@ where
     M: ControllerModel,
     R: ReportingMode,
 {
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "M4 connects public pairing to the worker command")
-    )]
-    Pair {
-        timeout: Duration,
-    },
-    #[cfg_attr(
-        any(not(test), not(feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "T07 connects the public reconnect API to this worker command"
-        )
-    )]
-    Reconnect {
-        timeout: Duration,
-    },
+    Pair { timeout: Duration },
+    Reconnect { timeout: Duration },
     Input(<R as reporting::sealed::Sealed>::Command<M>),
 }
 
+#[cfg(test)]
 struct InputCommandSource<'a, M, R>
 where
     M: ControllerModel,
@@ -248,6 +217,7 @@ where
     _types: PhantomData<fn() -> (M, R)>,
 }
 
+#[cfg(test)]
 impl<M, R> CommandSource<RuntimeCommand<M, R>> for InputCommandSource<'_, M, R>
 where
     M: ControllerModel,
@@ -259,10 +229,6 @@ where
 }
 
 #[derive(Debug)]
-#[allow(
-    dead_code,
-    reason = "T23 and T26 response delivery maps typed command failures"
-)]
 pub(crate) enum WorkerCommandError {
     Input(Error),
     Lifecycle(LifecycleCommandError),
@@ -273,7 +239,7 @@ pub(crate) enum WorkerCommandError {
     ClockOverflow,
     DeadlineOverflow,
     Shutdown,
-    Disconnected { reason: Option<u8> },
+    Disconnected,
 }
 
 #[derive(Debug)]
@@ -283,21 +249,13 @@ pub(crate) enum WorkerCommandProgress {
 }
 
 #[derive(Debug)]
-#[allow(
-    dead_code,
-    reason = "T24 and T26 termination handling maps worker operation failures"
-)]
 pub(crate) enum WorkerOperationError {
     Output(OutputHandlingError),
     Periodic(PeriodicError),
-    Readiness(ReadinessError),
+    Readiness,
 }
 
 #[derive(Debug)]
-#[allow(
-    dead_code,
-    reason = "T24 and T26 termination handling maps worker core failures"
-)]
 pub(crate) enum WorkerCoreError {
     DeadlineOverflow,
     InvalidLifecycle,
@@ -385,25 +343,11 @@ impl StepProgress {
         ))
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T24 worker loop delivers command results after each step"
-        )
-    )]
     pub(crate) fn take_command_results(&mut self) -> Vec<WorkerCommandProgress> {
         std::mem::take(&mut self.command_results)
     }
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T24 worker thread loop consumes each completed step"
-    )
-)]
 pub(crate) fn wait_for_next_iteration(
     progress: &StepProgress,
     clock: &dyn MonotonicClock,
@@ -415,10 +359,6 @@ pub(crate) fn wait_for_next_iteration(
     waiter.wait(request, clock)
 }
 
-#[allow(
-    dead_code,
-    reason = "T24 worker loop and join handling consume step outcomes"
-)]
 pub(crate) enum WorkerStep {
     Continue(StepProgress),
     Closed {
@@ -610,13 +550,7 @@ where
 }
 
 impl<M: ControllerModel> WorkerCore<M, Periodic> {
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "tests construct isolated periodic workers without a shared status projection"
-        )
-    )]
+    #[cfg(test)]
     pub(crate) fn new_periodic(
         protocol: SwitchHidProtocol<M>,
         transport: Box<dyn TransportPort>,
@@ -652,13 +586,7 @@ impl<M: ControllerModel> WorkerCore<M, Periodic> {
 }
 
 impl<M: ControllerModel> WorkerCore<M, Direct> {
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "tests construct isolated direct workers without a shared status projection"
-        )
-    )]
+    #[cfg(test)]
     pub(crate) fn new_direct(
         protocol: SwitchHidProtocol<M>,
         transport: Box<dyn TransportPort>,
@@ -725,13 +653,6 @@ where
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "M4 connects public pairing to the worker connection seam"
-        )
-    )]
     pub(crate) fn begin_connection(
         &mut self,
         now: Duration,
@@ -768,13 +689,7 @@ where
         Ok(session_id)
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T24 worker thread loop consumes deterministic steps"
-        )
-    )]
+    #[cfg(test)]
     pub(crate) fn step(
         &mut self,
         clock: &dyn MonotonicClock,
@@ -1116,7 +1031,7 @@ where
             self.complete_connection_failure(ConnectionAttemptFailure::Readiness(error), progress);
             progress
                 .operation_errors
-                .push(WorkerOperationError::Readiness(error));
+                .push(WorkerOperationError::Readiness);
         }
         if let Some(session_id) = self.sessions.current() {
             self.sessions.end_current(session_id);
@@ -1218,7 +1133,7 @@ where
         self.complete_connection_failure(ConnectionAttemptFailure::Readiness(error), progress);
         progress
             .operation_errors
-            .push(WorkerOperationError::Readiness(error));
+            .push(WorkerOperationError::Readiness);
         if let Some(session_id) = self.sessions.current() {
             self.sessions.end_current(session_id);
         }
@@ -1469,7 +1384,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
     ) -> WorkerCommandProgress {
         match command {
             PeriodicCommand::Apply(candidate) => {
-                commit_periodic(candidate, context.input);
+                context.input.commit(candidate);
                 WorkerCommandProgress::Complete(Ok(()))
             }
             PeriodicCommand::Common(CommonCommand::Press(buttons)) => complete_input_candidate(
@@ -1481,7 +1396,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
                 context.input,
             ),
             PeriodicCommand::Common(CommonCommand::Neutral) => {
-                commit_periodic(neutral_candidate(), context.input);
+                context.input.commit(InputState::neutral());
                 WorkerCommandProgress::Complete(Ok(()))
             }
             PeriodicCommand::Common(CommonCommand::Tap { buttons, duration }) => {
@@ -1493,7 +1408,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
                         )));
                     }
                 };
-                let (now_ns, release_at) = match periodic_tap_times(context.now, plan.duration()) {
+                let (now_ns, release_at) = match periodic_tap_times(context.now, plan.2) {
                     Ok(times) => times,
                     Err(error) => {
                         return WorkerCommandProgress::Complete(Err(error));
@@ -1529,7 +1444,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
             let completion = runtime
                 .pending_tap
                 .take()
-                .map(|_| WorkerCommandError::Disconnected { reason });
+                .map(|_| WorkerCommandError::Disconnected);
             ReportingEvent::Disconnected { reason, completion }
         } else {
             ReportingEvent::Passthrough(event)
@@ -1726,7 +1641,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Direct {
                 complete_direct_candidate(candidate, context)
             }
             DirectCommand::Common(CommonCommand::Neutral) => {
-                complete_direct_send(neutral_candidate(), context)
+                complete_direct_send(InputState::neutral(), context)
             }
             DirectCommand::Common(CommonCommand::Tap { buttons, duration }) => {
                 let plan = match tap_plan(&context.input.snapshot(), buttons, duration) {
@@ -1918,7 +1833,7 @@ fn complete_input_candidate<M: ControllerModel>(
 ) -> WorkerCommandProgress {
     match candidate {
         Ok(candidate) => {
-            commit_periodic(candidate, input);
+            input.commit(candidate);
             WorkerCommandProgress::Complete(Ok(()))
         }
         Err(error) => WorkerCommandProgress::Complete(Err(WorkerCommandError::Input(error))),
@@ -3313,10 +3228,8 @@ mod tests {
         let WorkerStep::Continue(progress) = step else {
             panic!("a clean disconnect keeps the worker available");
         };
-        let [WorkerOperationError::Readiness(ReadinessError::Disconnected { reason: Some(0x13) })] =
-            progress.operation_errors.as_slice()
-        else {
-            panic!("connecting readiness must complete with the disconnect reason");
+        let [WorkerOperationError::Readiness] = progress.operation_errors.as_slice() else {
+            panic!("connecting readiness must record its operation failure");
         };
         assert_eq!(progress.hci_events, 1);
         assert_eq!(progress.due_actions, 0);
@@ -3572,10 +3485,8 @@ mod tests {
         let WorkerStep::Continue(progress) = step else {
             panic!("connection timeout is an operation error, not a worker failure");
         };
-        let [WorkerOperationError::Readiness(ReadinessError::TimedOut)] =
-            progress.operation_errors.as_slice()
-        else {
-            panic!("deadline boundary must return the readiness timeout");
+        let [WorkerOperationError::Readiness] = progress.operation_errors.as_slice() else {
+            panic!("deadline boundary must record its operation failure");
         };
         assert_eq!(progress.due_actions, 0);
         assert_eq!(control.accepted_interrupts().len(), 2);

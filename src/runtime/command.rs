@@ -17,25 +17,11 @@ pub(crate) enum CommandEnqueueError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T26 blocking controller calls map a disconnected response to WorkerFailed"
-    )
-)]
 pub(crate) enum CommandResponseError {
     WorkerFailed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T24 worker loop handles response delivery invariant failures"
-    )
-)]
 pub(crate) enum CommandDeliveryError {
     MissingResponse,
     ResponseBufferFull,
@@ -46,24 +32,10 @@ struct CommandRequest<C> {
     completion: CommandCompletion,
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T24 worker loop owns each dequeued command completion"
-    )
-)]
 struct CommandCompletion {
     sender: SyncSender<CommandResult>,
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T24 worker loop delivers each command result exactly once"
-    )
-)]
 impl CommandCompletion {
     fn respond(self, result: CommandResult) -> Result<(), CommandDeliveryError> {
         match self.sender.try_send(result) {
@@ -73,26 +45,12 @@ impl CommandCompletion {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T24 controller worker construction owns the command client"
-    )
-)]
 pub(crate) struct CommandClient<C> {
     sender: SyncSender<CommandRequest<C>>,
     activity: ActivityNotifier,
 }
 
 impl<C> CommandClient<C> {
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T24 controller worker construction submits typed commands"
-        )
-    )]
     pub(crate) fn try_enqueue(&self, command: C) -> Result<CommandResponse, CommandEnqueueError> {
         let (response_sender, response) = sync_channel(1);
         let request = CommandRequest {
@@ -117,13 +75,6 @@ pub(crate) struct CommandReceiver<C> {
     in_flight: VecDeque<CommandCompletion>,
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T24 worker loop delivers deterministic step results"
-    )
-)]
 impl<C> CommandReceiver<C> {
     pub(crate) fn deliver_progress(
         &mut self,
@@ -174,50 +125,23 @@ impl<C> CommandSource<C> for CommandReceiver<C> {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T24 public command calls wait on the one-shot response"
-    )
-)]
 pub(crate) struct CommandResponse {
     receiver: Receiver<CommandResult>,
 }
 
 impl CommandResponse {
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T26 blocking controller calls wait for a response or worker termination"
-        )
-    )]
     pub(crate) fn recv(self) -> Result<CommandResult, CommandResponseError> {
         self.receiver
             .recv()
             .map_err(|_| CommandResponseError::WorkerFailed)
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "T24 public command calls wait on the one-shot response"
-        )
-    )]
+    #[cfg(test)]
     pub(crate) fn try_recv(&self) -> Result<CommandResult, TryRecvError> {
         self.receiver.try_recv()
     }
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "T24 controller worker construction chooses the measured queue capacity"
-    )
-)]
 pub(crate) fn command_channel<C>(
     capacity: usize,
     activity: ActivityNotifier,

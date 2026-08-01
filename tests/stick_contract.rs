@@ -68,9 +68,11 @@ fn directional_helpers_validate_amount_and_preserve_the_other_axis() {
         (3072, 2048)
     );
 
-    for amount in [-0.1, 1.1, f32::NAN, f32::INFINITY] {
-        let error = Stick::up(amount).expect_err("amount must be rejected");
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    for direction in [Stick::up, Stick::down, Stick::left, Stick::right] {
+        for amount in [-0.1, 1.1, f32::NAN, f32::INFINITY] {
+            let error = direction(amount).expect_err("amount must be rejected");
+            assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        }
     }
 }
 

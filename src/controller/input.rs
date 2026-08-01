@@ -8,24 +8,6 @@ use crate::{
 
 pub(crate) const MAX_TAP_DURATION: Duration = Duration::from_secs(24 * 60 * 60);
 
-#[derive(Debug)]
-pub(crate) struct TapPlan<M: ControllerModel> {
-    pressed: InputState<M>,
-    released: InputState<M>,
-    duration: Duration,
-}
-
-impl<M: ControllerModel> TapPlan<M> {
-    #[must_use]
-    pub(crate) const fn duration(&self) -> Duration {
-        self.duration
-    }
-
-    pub(crate) fn into_parts(self) -> (InputState<M>, InputState<M>, Duration) {
-        (self.pressed, self.released, self.duration)
-    }
-}
-
 pub(crate) fn press_candidate<M: ControllerModel>(
     current: &InputState<M>,
     buttons: impl IntoIterator<Item = Button<M>>,
@@ -42,24 +24,16 @@ pub(crate) fn release_candidate<M: ControllerModel>(
     Ok(release_validated(current, &buttons))
 }
 
-pub(crate) fn neutral_candidate<M: ControllerModel>() -> InputState<M> {
-    InputState::neutral()
-}
-
 pub(crate) fn tap_plan<M: ControllerModel>(
     current: &InputState<M>,
     buttons: impl IntoIterator<Item = Button<M>>,
     duration: Duration,
-) -> Result<TapPlan<M>> {
+) -> Result<(InputState<M>, InputState<M>, Duration)> {
     let buttons = validated_buttons(buttons)?;
     let duration = validated_tap_duration(duration)?;
     let pressed = press_validated(current, &buttons);
     let released = release_validated(&pressed, &buttons);
-    Ok(TapPlan {
-        pressed,
-        released,
-        duration,
-    })
+    Ok((pressed, released, duration))
 }
 
 fn validated_buttons<M: ControllerModel>(
@@ -117,14 +91,9 @@ mod tests {
         error::ErrorKind,
         input::{ImuFrame, InputState, ProButton, Stick},
         model::Pro,
-        runtime::{
-            periodic::commit_candidate as commit_periodic_candidate, state::InputStateStore,
-        },
     };
 
-    use super::{
-        MAX_TAP_DURATION, neutral_candidate, press_candidate, release_candidate, tap_plan,
-    };
+    use super::{MAX_TAP_DURATION, press_candidate, release_candidate, tap_plan};
 
     #[test]
     fn press_and_release_change_only_the_typed_button_set() {
@@ -151,15 +120,6 @@ mod tests {
     }
 
     #[test]
-    fn neutral_candidate_resets_buttons_sticks_and_imu() {
-        let current = non_neutral_state().with_buttons([ProButton::A]);
-        let neutral = neutral_candidate::<Pro>();
-
-        assert_ne!(neutral, current);
-        assert_eq!(neutral, InputState::<Pro>::neutral());
-    }
-
-    #[test]
     fn empty_press_release_and_tap_are_invalid_input() {
         let current = non_neutral_state();
 
@@ -180,8 +140,7 @@ mod tests {
 
         for duration in [Duration::ZERO, MAX_TAP_DURATION] {
             let (pressed, released, validated_duration) = tap_plan(&current, [a], duration)
-                .expect("inclusive tap duration boundary is valid")
-                .into_parts();
+                .expect("inclusive tap duration boundary is valid");
             assert_eq!(pressed, current.clone().with_buttons([a, b]));
             assert_eq!(released, current);
             assert_eq!(validated_duration, duration);
@@ -190,17 +149,6 @@ mod tests {
         let error = tap_plan(&current, [a], MAX_TAP_DURATION + Duration::from_nanos(1))
             .expect_err("duration above 24 hours must fail");
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    }
-
-    #[test]
-    fn candidate_passes_to_the_periodic_commit_entry() {
-        let current = non_neutral_state();
-        let pressed = press_candidate(&current, [ProButton::A]).expect("non-empty press is valid");
-        let mut periodic_store = InputStateStore::new();
-
-        commit_periodic_candidate(pressed.clone(), &mut periodic_store);
-
-        assert_eq!(periodic_store.snapshot(), pressed);
     }
 
     fn non_neutral_state() -> InputState<Pro> {
