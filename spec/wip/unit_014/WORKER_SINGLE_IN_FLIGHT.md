@@ -16,6 +16,7 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 | GitHub Issue | worker command経路を単一in-flightへ簡素化する | `https://github.com/niart120/swbt-rs/issues/18` |
 | Issue comment | 公開APIの直列性、削除候補、維持すべきpending/shutdown契約、測定項目 | `https://github.com/niart120/swbt-rs/issues/18#issuecomment-5153305181` |
 | user decision | 後方互換性より削除を優先し、`Busy`をdeprecatedとして残さない。後続変更があるため、このunitでは`0.2.0`へ版を変更しない | 2026-08-02の対話 |
+| user follow-up | セットアップ済みの実機で再検証する | 2026-08-02の対話 |
 | initial spec | worker所有権、typed command、error、runtime timing | `spec/initial/architecture.md`、`api.md`、`testing.md` |
 
 ### 1.3 use case
@@ -37,6 +38,7 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 - requestごとのresponseを一度だけ配送し、caller側dropを成功扱いにする
 - `ErrorKind::Busy`、内部`Busy`、response buffer満杯errorをdeprecated期間なしで削除する
 - 単一command条件に合わせてruntime measurementを更新し、変更前後を比較する
+- 既存プロファイルを使い、Pro ControllerのPeriodic／Direct再接続を実機で回帰確認する
 - 公開API破壊を仕様、変更記録、PR本文に明記する
 
 ## 3. 対象外
@@ -45,7 +47,7 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 - priority shutdown、Drop shutdown、cleanup、joinの順序
 - pair/reconnect/tapの非同期進行モデル
 - worker threadの廃止またはasync runtimeの導入
-- Bumble backend、USB/HCI、Bluetooth air、Switch実機の性能変更
+- Bumble backend、USB/HCI、Bluetooth air、Switch実機の性能変更または性能測定
 - Cargo package versionの`0.2.0`への更新
 - Issue #18に含まれない公開API整理
 
@@ -82,6 +84,7 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 | todo | pair/reconnect/tapのpending中もHID output、disconnect、priority shutdownを処理し、待機callerがtyped結果または`WorkerFailed`を受け取る | regression | worker integration | queued waiterを前提にしない |
 | todo | 公開controller操作が同期完了し、公開・CLI・exampleのerror分類に`Busy`が残らない | behavior change | integration / package | deprecated variantを残さない |
 | todo | 単一command条件のruntime measurementでcommand latency、8 ms interval、pending接続中のreply、shutdownに明確な悪化がない | performance | release measurement | 現行mainの変更前測定を同一環境で先に保持する |
+| todo | 既存プロファイルのPro ControllerがPeriodic／Directの両modeで再接続し、HID応答、入力、正常終了を観測できる | regression | hardware | machine logとSwitch画面上の観測を分けて記録する |
 
 ## 7. 設計メモ
 
@@ -89,7 +92,7 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
   `Busy`削除を別のTDD itemとして検証する。
 - enqueueはblocking sendへ変えない。公開APIでは満杯へ到達せず、内部不整合時にcallerを停止させない。
 - channelの`Full`はcrate-privateな不変条件違反として`ErrorKind::Internal`へ投影する。
-- `CommandCompletion`は送信時に所有権を消費する。容量1のresponse channelは送信前には空であり、
+- `CommandCompletion`は送信時に所有権を消費する。responseは一件専用の非同期channelで返し、
   receiver切断だけを無視できるため、`ResponseBufferFull`は不要である。
 - step内でpendingとcompleteの両方が発生し得るが、一件のcommandに対する状態遷移である。
   複数件の結果を保持する`Vec`ではなく単一状態へ畳む。
@@ -130,13 +133,15 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 | `cargo package --locked` | not run | 公開API変更のpackage gate。versionは変更しない |
 | `git diff --check` | not run | whitespace |
 | `pwsh -NoProfile -File tools/measure_m2_runtime.ps1 -OutputDirectory target\\measurements\\m2-activity-wait\\unit014-before-20260802` | before success / after not run | release profile、42,002 records、clean commit `afb20b0`。response p99 1.4 µs、Periodic lateness p99 1.9693 ms、skip 0、idle shutdown p99 56.1 µs、16-command飽和shutdown p99 54.4 µs |
+| `cargo run --release --locked --all-features --example pro_profile_hardware -- ... --mode periodic ...` | not run | 既存プロファイルを使用し、秘密情報を記録しない |
+| `cargo run --release --locked --all-features --example pro_profile_hardware -- ... --mode direct ...` | not run | 既存プロファイルを使用し、秘密情報を記録しない |
 
 ## 10. 先送り事項
 
 - `ErrorKind::Busy`削除を含む次回公開版の`0.2.0` version更新とreleaseは、本unit完了後の後続変更を
   まとめるrelease作業で扱う。
 - Bumble、USB/HCI、Bluetooth air、Switch実機を含むlatencyは本unitのruntime measurementでは
-  測定しない。worker/channelのfake transport境界で悪化がないことを確認する。
+  測定しない。worker/channelのfake transport境界で悪化がないことを確認し、実機は機能回帰として扱う。
 
 ## 11. チェックリスト
 
