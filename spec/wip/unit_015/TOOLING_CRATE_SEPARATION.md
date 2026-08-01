@@ -88,7 +88,7 @@
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | Cargo metadataがroot library、private probe、private hardware runnerの3 packageをworkspace memberとして返し、package未指定ではroot packageを選ぶ | new | package | workspace境界の前提 |
+| refactor-skipped | Cargo metadataがroot library、private probe、private hardware runnerの3 packageをworkspace memberとして返し、package未指定ではroot packageを選ぶ | new | package | red: root packageだけだった。green: metadata検査scriptが3 package、root default member、toolの`publish = false`を確認。package境界だけの最小変更なので追加refactorなし |
 | todo | private `swbt-probe` が現行command、終了コード、profile安全出力、trace schema検査を公開`swbt` APIだけで維持する | regression | integration | rootの`probe` feature、binary、`ErrorKind::Trace`は除去する |
 | todo | featureなしのlibraryは`GamepadStatus`を維持してstable diagnosticsをemitせず、feature有効時はschema v1 eventを従来どおりemitする | regression | unit | `tracing`のfeature graphも検査する |
 | todo | `swbt-hardware-runner` が三つのscenarioと既存flag集合を単一entry pointで受理し、欠落・重複・不正な組み合わせを実機open前に終了2で拒否する | new | unit | parserとdispatchの契約 |
@@ -143,6 +143,7 @@ scenario subcommandを残す理由は、三つの証跡schema、pair／reconnect
 
 | command | result | notes |
 |---|---|---|
+| `.\tools\check-workspace.ps1` | success | redは`workspace packages differ: swbt-rs`。greenは`workspace contract passed` |
 | `cargo fmt --all --check` | not run | 実装後に実行 |
 | `cargo check --workspace --all-targets --all-features --locked` | not run | 3 packageの全target |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | workspace全体 |

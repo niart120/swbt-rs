@@ -1,3 +1,11 @@
+[workspace]
+members = [
+    "tools/swbt-hardware-runner",
+    "tools/swbt-probe",
+]
+default-members = ["."]
+resolver = "3"
+
 [package]
 name = "swbt-rs"
 version = "0.1.0"
