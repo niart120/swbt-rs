@@ -1,7 +1,7 @@
-use std::{fmt, io, marker::PhantomData, path::PathBuf};
+use std::{fmt, marker::PhantomData, path::PathBuf};
 
-use bumble::keys::{KeyStore, KeyStoreError, KeyStoreResult, PairingKeys};
-use serde_json::Value;
+use serde_json::{Value, json};
+use swbt_bumble_backend::{AddressKind, BluetoothAddress, BondStore, BondStoreError, ClassicBond};
 
 use crate::{
     model::ControllerModel,
@@ -9,23 +9,20 @@ use crate::{
 };
 
 pub(crate) struct ProfileKeyStoreFactory {
-    create: Box<dyn Fn([u8; 6]) -> ProfileKeyStore + Send>,
+    create: Box<dyn Fn() -> ProfileKeyStore + Send>,
 }
 
 impl ProfileKeyStoreFactory {
     pub(crate) fn for_model<M: ControllerModel>(path: PathBuf) -> Self {
         Self {
-            create: Box::new(move |local_address| {
-                ProfileKeyStore(Box::new(SwbtProfileKeyStore::<M>::new(
-                    path.clone(),
-                    local_address,
-                )))
+            create: Box::new(move || {
+                ProfileKeyStore(Box::new(SwbtProfileKeyStore::<M>::new(path.clone())))
             }),
         }
     }
 
-    pub(super) fn create(&self, local_address: [u8; 6]) -> ProfileKeyStore {
-        (self.create)(local_address)
+    pub(super) fn create(&self) -> ProfileKeyStore {
+        (self.create)()
     }
 }
 
@@ -38,96 +35,108 @@ impl fmt::Debug for ProfileKeyStoreFactory {
     }
 }
 
-pub(super) struct ProfileKeyStore(Box<dyn KeyStore>);
+pub(super) struct ProfileKeyStore(Box<dyn BondStore>);
 
-impl KeyStore for ProfileKeyStore {
-    fn delete(&mut self, name: &str) -> KeyStoreResult<()> {
-        self.0.delete(name)
+impl BondStore for ProfileKeyStore {
+    fn select_local_address(
+        &mut self,
+        local_address: BluetoothAddress,
+    ) -> Result<(), BondStoreError> {
+        self.0.select_local_address(local_address)
     }
 
-    fn update(&mut self, name: &str, keys: PairingKeys) -> KeyStoreResult<()> {
-        self.0.update(name, keys)
+    fn load(&self, peer: BluetoothAddress) -> Result<Option<ClassicBond>, BondStoreError> {
+        self.0.load(peer)
     }
 
-    fn get(&self, name: &str) -> KeyStoreResult<Option<PairingKeys>> {
-        self.0.get(name)
+    fn load_all(&self) -> Result<Vec<(BluetoothAddress, ClassicBond)>, BondStoreError> {
+        self.0.load_all()
     }
 
-    fn get_all(&self) -> KeyStoreResult<Vec<(String, PairingKeys)>> {
-        self.0.get_all()
+    fn upsert(&mut self, peer: BluetoothAddress, bond: ClassicBond) -> Result<(), BondStoreError> {
+        self.0.upsert(peer, bond)
     }
 }
 
 pub(super) struct SwbtProfileKeyStore<M: ControllerModel> {
     path: PathBuf,
-    namespace: String,
+    namespace: Option<String>,
     _model: PhantomData<fn() -> M>,
 }
 
 impl<M: ControllerModel> SwbtProfileKeyStore<M> {
-    pub(super) fn new(path: impl Into<PathBuf>, local_address: [u8; 6]) -> Self {
+    pub(super) fn new(path: impl Into<PathBuf>) -> Self {
         Self {
             path: path.into(),
-            namespace: format_local_address(local_address),
+            namespace: None,
             _model: PhantomData,
         }
     }
 
-    fn read_profile(&self) -> KeyStoreResult<(Vec<u8>, PairingProfile<M>)> {
-        let bytes = FileProfileStore
-            .read(&self.path)
-            .map_err(|source| sanitized_io(source.kind(), "pairing profile could not be read"))?;
-        let profile = PairingProfile::from_json(&bytes)
-            .map_err(|_| sanitized_invalid_data("pairing profile is invalid"))?;
+    fn namespace(&self, error: BondStoreError) -> Result<&str, BondStoreError> {
+        self.namespace.as_deref().ok_or(error)
+    }
+
+    fn read_profile(
+        &self,
+        error: BondStoreError,
+    ) -> Result<(Vec<u8>, PairingProfile<M>), BondStoreError> {
+        let bytes = FileProfileStore.read(&self.path).map_err(|_| error)?;
+        let profile = PairingProfile::from_json(&bytes).map_err(|_| error)?;
         Ok((bytes, profile))
     }
 
-    fn commit(&self, expected: &[u8], profile: &PairingProfile<M>) -> KeyStoreResult<()> {
+    fn commit(&self, expected: &[u8], profile: &PairingProfile<M>) -> Result<(), BondStoreError> {
         let replacement = profile
             .to_json_bytes()
-            .map_err(|_| sanitized_invalid_data("pairing profile could not be serialized"))?;
+            .map_err(|_| BondStoreError::UpsertFailed)?;
         FileProfileStore
             .update(&self.path, expected, &replacement)
-            .map_err(|source| sanitized_io(source.kind(), "pairing profile could not be updated"))
+            .map_err(|_| BondStoreError::UpsertFailed)
     }
 }
 
-impl<M: ControllerModel> KeyStore for SwbtProfileKeyStore<M> {
-    fn delete(&mut self, name: &str) -> KeyStoreResult<()> {
-        let (expected, mut profile) = self.read_profile()?;
-        let removed = profile
-            .remove_pairing_keys(&self.namespace, name)
-            .map_err(|_| sanitized_invalid_address())?;
-        if !removed {
-            return Err(KeyStoreError::NotFound("<redacted>".to_owned()));
-        }
-        self.commit(&expected, &profile)
+impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
+    fn select_local_address(
+        &mut self,
+        local_address: BluetoothAddress,
+    ) -> Result<(), BondStoreError> {
+        self.namespace = Some(format_address(local_address));
+        Ok(())
     }
 
-    fn update(&mut self, name: &str, keys: PairingKeys) -> KeyStoreResult<()> {
-        let replacement = encode_pairing_keys(&keys)?;
-        let (expected, mut profile) = self.read_profile()?;
+    fn load(&self, peer: BluetoothAddress) -> Result<Option<ClassicBond>, BondStoreError> {
+        let namespace = self.namespace(BondStoreError::LoadFailed)?;
+        let (_, profile) = self.read_profile(BondStoreError::LoadFailed)?;
         profile
-            .replace_pairing_keys(&self.namespace, name, replacement)
-            .map_err(|_| sanitized_invalid_address())?;
-        self.commit(&expected, &profile)
-    }
-
-    fn get(&self, name: &str) -> KeyStoreResult<Option<PairingKeys>> {
-        let (_, profile) = self.read_profile()?;
-        profile
-            .pairing_keys(&self.namespace, name)
-            .map(decode_pairing_keys)
+            .pairing_keys(namespace, &format_address(peer))
+            .map(decode_bond)
             .transpose()
+            .map_err(|_| BondStoreError::LoadFailed)
     }
 
-    fn get_all(&self) -> KeyStoreResult<Vec<(String, PairingKeys)>> {
-        let (_, profile) = self.read_profile()?;
+    fn load_all(&self) -> Result<Vec<(BluetoothAddress, ClassicBond)>, BondStoreError> {
+        let namespace = self.namespace(BondStoreError::ListFailed)?;
+        let (_, profile) = self.read_profile(BondStoreError::ListFailed)?;
         profile
-            .all_pairing_keys(&self.namespace)
+            .all_pairing_keys(namespace)
             .into_iter()
-            .map(|(peer, value)| decode_pairing_keys(value).map(|keys| (peer, keys)))
+            .map(|(peer, value)| {
+                let peer = BluetoothAddress::parse(&peer, AddressKind::Public)
+                    .map_err(|_| BondStoreError::ListFailed)?;
+                let bond = decode_bond(value).map_err(|_| BondStoreError::ListFailed)?;
+                Ok((peer, bond))
+            })
             .collect()
+    }
+
+    fn upsert(&mut self, peer: BluetoothAddress, bond: ClassicBond) -> Result<(), BondStoreError> {
+        let namespace = self.namespace(BondStoreError::UpsertFailed)?.to_owned();
+        let (expected, mut profile) = self.read_profile(BondStoreError::UpsertFailed)?;
+        profile
+            .replace_pairing_keys(&namespace, &format_address(peer), encode_bond(&bond))
+            .map_err(|_| BondStoreError::UpsertFailed)?;
+        self.commit(&expected, &profile)
     }
 }
 
@@ -142,38 +151,68 @@ impl<M: ControllerModel> fmt::Debug for SwbtProfileKeyStore<M> {
     }
 }
 
-fn encode_pairing_keys(keys: &PairingKeys) -> KeyStoreResult<Value> {
-    let json = keys
-        .to_json()
-        .map_err(|_| sanitized_invalid_data("pairing keys could not be serialized"))?;
-    serde_json::from_str(&json)
-        .map_err(|_| sanitized_invalid_data("pairing keys could not be serialized"))
+fn encode_bond(bond: &ClassicBond) -> Value {
+    json!({
+        "address_type": 0,
+        "link_key": {
+            "authenticated": bond.authenticated(),
+            "value": encode_hex(bond.link_key()),
+        },
+        "link_key_type": bond.link_key_type(),
+    })
 }
 
-fn decode_pairing_keys(value: Value) -> KeyStoreResult<PairingKeys> {
-    let json = serde_json::to_string(&value)
-        .map_err(|_| sanitized_invalid_data("stored pairing keys are invalid"))?;
-    PairingKeys::from_json(&json)
-        .map_err(|_| sanitized_invalid_data("stored pairing keys are invalid"))
+fn decode_bond(value: Value) -> Result<ClassicBond, ()> {
+    let object = value.as_object().ok_or(())?;
+    if object.get("address_type").and_then(Value::as_u64) != Some(0) {
+        return Err(());
+    }
+    let link_key_type = object
+        .get("link_key_type")
+        .and_then(Value::as_u64)
+        .and_then(|value| u8::try_from(value).ok())
+        .ok_or(())?;
+    let link_key = object
+        .get("link_key")
+        .and_then(Value::as_object)
+        .ok_or(())?;
+    let authenticated = link_key
+        .get("authenticated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let link_key = link_key.get("value").and_then(Value::as_str).ok_or(())?;
+    let link_key = decode_link_key(link_key)?;
+    Ok(ClassicBond::new(link_key, link_key_type, authenticated))
 }
 
-fn format_local_address(address: [u8; 6]) -> String {
+fn encode_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
+fn decode_link_key(value: &str) -> Result<[u8; 16], ()> {
+    if value.len() != 32 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(());
+    }
+    let mut decoded = [0_u8; 16];
+    for (output, pair) in decoded.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
+        let pair = std::str::from_utf8(pair).map_err(|_| ())?;
+        *output = u8::from_str_radix(pair, 16).map_err(|_| ())?;
+    }
+    Ok(decoded)
+}
+
+fn format_address(address: BluetoothAddress) -> String {
+    let bytes = address.as_le_bytes();
     format!(
         "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-        address[0], address[1], address[2], address[3], address[4], address[5]
+        bytes[5], bytes[4], bytes[3], bytes[2], bytes[1], bytes[0]
     )
-}
-
-fn sanitized_invalid_address() -> KeyStoreError {
-    KeyStoreError::InvalidAddress("<redacted>".to_owned())
-}
-
-fn sanitized_invalid_data(message: &'static str) -> KeyStoreError {
-    sanitized_io(io::ErrorKind::InvalidData, message)
-}
-
-fn sanitized_io(kind: io::ErrorKind, message: &'static str) -> KeyStoreError {
-    KeyStoreError::Io(io::Error::new(kind, message))
 }
 
 struct Redacted;
@@ -192,11 +231,10 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use bumble::{
-        AddressType,
-        keys::{Key, KeyStore, KeyStoreError, PairingKeys},
-    };
     use serde_json::{Value, json};
+    use swbt_bumble_backend::{
+        AddressKind, BluetoothAddress, BondStore, BondStoreError, ClassicBond,
+    };
 
     use crate::model;
 
@@ -213,24 +251,30 @@ mod tests {
         let temp = TempDirectory::new("read");
         let path = temp.path().join("pro.json");
         fs::write(&path, profile_bytes()).expect("write test profile");
-        let store = SwbtProfileKeyStore::<model::Pro>::new(
-            path.clone(),
-            [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
-        );
+        let mut store = SwbtProfileKeyStore::<model::Pro>::new(path.clone());
 
         assert_eq!(
-            store.get(ORIGINAL_PEER).expect("read current peer"),
-            Some(pairing_keys(0xA1))
+            store.load(peer(ORIGINAL_PEER)),
+            Err(BondStoreError::LoadFailed),
+            "the backend must select the initialized adapter namespace first"
+        );
+        store
+            .select_local_address(peer(LOCAL_NAMESPACE))
+            .expect("select initialized adapter namespace");
+
+        assert_eq!(
+            store.load(peer(ORIGINAL_PEER)).expect("read current peer"),
+            Some(bond(0xA1))
         );
         assert_eq!(
             store
-                .get("AA:BB:CC:DD:EE:FF")
+                .load(peer("AA:BB:CC:DD:EE:FF"))
                 .expect("ignore a peer from another namespace"),
             None
         );
         assert_eq!(
-            store.get_all().expect("read current namespace"),
-            [(ORIGINAL_PEER.to_owned(), pairing_keys(0xA1))]
+            store.load_all().expect("read current namespace"),
+            [(peer(ORIGINAL_PEER), bond(0xA1))]
         );
         let rendered = format!("{store:?}");
         assert!(rendered.contains("<redacted>"));
@@ -239,15 +283,14 @@ mod tests {
     }
 
     #[test]
-    fn update_preserves_extensions_and_replaces_the_current_peer_atomically() {
+    fn upsert_preserves_extensions_and_replaces_the_current_peer_atomically() {
         let temp = TempDirectory::new("update");
         let path = temp.path().join("pro.json");
         fs::write(&path, profile_bytes()).expect("write test profile");
-        let mut store =
-            SwbtProfileKeyStore::<model::Pro>::new(path.clone(), [0, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        let mut store = selected_store(path.clone());
 
         store
-            .update(ORIGINAL_PEER, pairing_keys(0xB2))
+            .upsert(peer(ORIGINAL_PEER), bond(0xB2))
             .expect("update the same peer");
         let same_peer: Value =
             serde_json::from_slice(&fs::read(&path).expect("read same-peer update"))
@@ -262,74 +305,66 @@ mod tests {
             json!({"retained": true})
         );
         assert_eq!(
-            store.get(ORIGINAL_PEER).expect("read updated peer"),
-            Some(pairing_keys(0xB2))
+            store.load(peer(ORIGINAL_PEER)).expect("read updated peer"),
+            Some(bond(0xB2))
         );
 
         store
-            .update(REPLACEMENT_PEER, pairing_keys(0xC3))
+            .upsert(peer(REPLACEMENT_PEER), bond(0xC3))
             .expect("replace the current peer");
         assert_eq!(
-            store.get_all().expect("read replacement peer"),
-            [(REPLACEMENT_PEER.to_owned(), pairing_keys(0xC3))]
+            store.load_all().expect("read replacement peer"),
+            [(peer(REPLACEMENT_PEER), bond(0xC3))]
         );
         assert_eq!(
-            store.get(ORIGINAL_PEER).expect("old peer was removed"),
+            store
+                .load(peer(ORIGINAL_PEER))
+                .expect("old peer was removed"),
             None
         );
     }
 
     #[test]
-    fn delete_is_explicit_and_failures_do_not_expose_names_paths_or_keys() {
-        let temp = TempDirectory::new("delete-secret-path");
+    fn invalid_profile_failures_are_typed_and_secret_free() {
+        let temp = TempDirectory::new("secret-path");
         let path = temp.path().join("secret-profile-name.json");
         fs::write(&path, profile_bytes()).expect("write test profile");
-        let mut store =
-            SwbtProfileKeyStore::<model::Pro>::new(path.clone(), [0, 0x11, 0x22, 0x33, 0x44, 0x55]);
-
-        store
-            .delete(ORIGINAL_PEER)
-            .expect("explicitly delete the current peer");
-        assert!(store.get_all().expect("read empty namespace").is_empty());
-        let after_delete: Value =
-            serde_json::from_slice(&fs::read(&path).expect("read deletion update"))
-                .expect("profile remains JSON after deletion");
-        assert_eq!(after_delete["future_top"], json!({"retained": true}));
-        assert_eq!(
-            after_delete["key_store"]["future_store"],
-            json!({"retained": true})
-        );
-
-        let missing = store
-            .delete("FF:EE:DD:CC:BB:AA")
-            .expect_err("missing peer must not be treated as deleted");
-        assert!(matches!(missing, KeyStoreError::NotFound(_)));
-        assert_secret_free(&missing, &path);
-
-        let invalid_name = store
-            .delete(SECRET_SENTINEL)
-            .expect_err("invalid peer name must fail deletion");
-        assert!(matches!(invalid_name, KeyStoreError::InvalidAddress(_)));
-        assert_secret_free(&invalid_name, &path);
+        let mut store = selected_store(path.clone());
 
         fs::write(&path, b"{\"broken\":\"profile\"}").expect("corrupt test profile");
-        let invalid = store
-            .get(ORIGINAL_PEER)
+        let load = store
+            .load(peer(ORIGINAL_PEER))
             .expect_err("invalid profile must fail key lookup");
-        assert_secret_free(&invalid, &path);
+        assert_eq!(load, BondStoreError::LoadFailed);
+        assert_secret_free(&load, &path);
+
+        let list = store
+            .load_all()
+            .expect_err("invalid profile must fail bond listing");
+        assert_eq!(list, BondStoreError::ListFailed);
+        assert_secret_free(&list, &path);
+
+        let upsert = store
+            .upsert(peer(ORIGINAL_PEER), bond(0xD4))
+            .expect_err("invalid profile must fail bond update");
+        assert_eq!(upsert, BondStoreError::UpsertFailed);
+        assert_secret_free(&upsert, &path);
     }
 
-    fn pairing_keys(byte: u8) -> PairingKeys {
-        PairingKeys {
-            address_type: Some(AddressType::PUBLIC_DEVICE),
-            link_key: Some(Key {
-                value: vec![byte; 16],
-                authenticated: true,
-                ..Key::default()
-            }),
-            link_key_type: Some(4),
-            ..PairingKeys::default()
-        }
+    fn selected_store(path: PathBuf) -> SwbtProfileKeyStore<model::Pro> {
+        let mut store = SwbtProfileKeyStore::new(path);
+        store
+            .select_local_address(peer(LOCAL_NAMESPACE))
+            .expect("select initialized adapter namespace");
+        store
+    }
+
+    fn peer(value: &str) -> BluetoothAddress {
+        BluetoothAddress::parse(value, AddressKind::Public).expect("valid test address")
+    }
+
+    fn bond(byte: u8) -> ClassicBond {
+        ClassicBond::new([byte; 16], 4, true)
     }
 
     fn profile_bytes() -> Vec<u8> {
@@ -357,9 +392,12 @@ mod tests {
                     },
                     "10:11:22:33:44:55": {
                         "AA:BB:CC:DD:EE:FF": {
+                            "address_type": 0,
                             "link_key": {
+                                "authenticated": true,
                                 "value": "D4D4D4D4D4D4D4D4D4D4D4D4D4D4D4D4"
-                            }
+                            },
+                            "link_key_type": 4
                         }
                     }
                 },
@@ -374,7 +412,7 @@ mod tests {
         .expect("serialize test profile")
     }
 
-    fn assert_secret_free(error: &KeyStoreError, path: &Path) {
+    fn assert_secret_free(error: &BondStoreError, path: &Path) {
         for rendered in [error.to_string(), format!("{error:?}")] {
             assert!(!rendered.contains(SECRET_SENTINEL));
             assert!(!rendered.contains(ORIGINAL_PEER));

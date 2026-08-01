@@ -96,9 +96,9 @@ bumble-transport = { git = "https://github.com/chaitanyarahalkar/bumble-rs", rev
 
 同じ repository の Bumble crate はすべて同じ revision にそろえる。`Cargo.lock` は repository に commit する。
 
-### 0.1.0 candidate の依存差分
+### 0.1.0 candidate のsource lineageと配布依存
 
-0.1.0 candidate は、上記の公式基準断面から public fork
+`swbt-bumble-backend` のsource lineageは、上記の公式基準断面から public fork
 [`niart120/bumble-rs`](https://github.com/niart120/bumble-rs) の exact revision
 [`cb55e2d98dc7b7b0227c43772c9ae184034dd9a1`](https://github.com/niart120/bumble-rs/commit/cb55e2d98dc7b7b0227c43772c9ae184034dd9a1)
 へ進めている。差分は次の3 commit。
@@ -112,11 +112,13 @@ bumble-transport = { git = "https://github.com/chaitanyarahalkar/bumble-rs", rev
 先頭2 commit は M3-M9 の CI、仮想 Bluetooth test、Windows 実機試験で使った依存差分である。3つ目は
 unit_011 の dependency unit test と、CSR8510 A10 での明示 local-address pair / reconnect 実機試験を通した。
 24 package の crates.io 用改名は配布境界として採用せず、この candidate revision から除外した。
-恒久境界は自己所有 fork の [Issue #1](https://github.com/niart120/bumble-rs/issues/1) で追跡する単一の
-`swbt-bumble-backend` とする。この candidate revision は公式基準断面そのものを書き換えない。
+必要なClassic HID実装と3 commitの修正はstandalone repository
+[`niart120/swbt-bumble-backend`](https://github.com/niart120/swbt-bumble-backend) へ抽出し、
+`swbt-bumble-backend@0.1.0` として公開した。`swbt-rs` はこのexact registry versionだけを依存に持ち、
+fork workspaceへのGit dependencyを残さない。このsource lineageは公式基準断面そのものを書き換えない。
 fork 元 `chaitanyarahalkar/bumble-rs` への issue / PR は作成していない。
 0.1.0 release commit は merge 前には確定せず、公開承認後に `spec/publishing.md` の手順で main SHA、
-Cargo.lock hash、Bumble revision を同時に記録する。
+Cargo.lock hash、backend version/checksum、Bumble source lineageを同時に記録する。
 
 revision 更新は専用 PR で行い、最低限次を実行する。
 

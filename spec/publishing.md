@@ -7,21 +7,29 @@
 この文書は release candidate の再現、停止条件、検査、rollback を一か所にまとめる。production tag、
 GitHub Release、`cargo publish`、publish workflow の実行には、その turn でのユーザの明示承認が必要。
 
+## 解消済みの依存条件
+
+- standalone public repository
+  [`niart120/swbt-bumble-backend`](https://github.com/niart120/swbt-bumble-backend) の
+  `main@306c7ed2a9c97a337126524374ae2b56e28822c5` から、
+  [`swbt-bumble-backend@0.1.0`](https://crates.io/crates/swbt-bumble-backend/0.1.0) を公開した。
+  crates.io owner は `niart120`、archive checksum は
+  `b4df874d56ef7dbeb62ba6f06eeac71b8ef699f8151722812a313b1099121e55` である。
+- `swbt-rs` は一時 path patch と Bumble Git dependency を残さず、registry 上の
+  `swbt-bumble-backend = "=0.1.0"` を解決する。
+- `cargo package --locked --allow-dirty` は120 files / 1.4 MiB（圧縮257.8 KiB）のarchiveを生成した。
+  展開archiveからの `cargo +1.87.0 test --all-targets --all-features --locked --offline --quiet` は
+  library 271 passed / 1 ignored、hardware 5 ignored、他target successだった。
+
 ## 現在の停止条件
 
 0.1.0 は次の全条件を解消するまで公開しない。
 
-1. 現在の Bumble 実装は自己所有 fork `niart120/bumble-rs` の Git dependency であり、crates.io から
-   解決できる `swbt-bumble-backend` は未実装・未公開である。24 packageを `swbt-bumble*` 名で
-   公開する案は採用しない。
-2. `cargo package --locked` は `bumble-controller@0.1.0` の registry 解決で停止し、生成 archive
-   からの clean-install smoke を実行できない。Git checkout上のbuild/testをregistry archiveだけを
-   使うgateの代替にしない。
-3. `Cargo.toml` の `publish = false` を維持している。
+1. `Cargo.toml` の `publish = false` を維持している。
+2. unit_012 T08 の実機回帰と、unit_012 headに対するremote checkが未完了である。
+3. backend切り替え後のlicense判定とWindows/Linux SBOMをrelease candidateで再生成していない。
 4. 2026-08-01 の GitHub API で Private Vulnerability Reporting は `enabled:false` であり、
    `SECURITY.md` に恒久的な非公開報告先を記載できていない。
-5. main へ入った直近の PR #12 は Windows、Linux、MSRV、dependency-policy を含む 9 job が成功した。
-   backend境界を更新したunit_012 headのremote checkは未実行である。
 
 fork 元 `chaitanyarahalkar/bumble-rs` への issue/PR はこの手順に含めない。自己所有 fork の
 [Issue #1](https://github.com/niart120/bumble-rs/issues/1) だけでbackend切り出しを追跡する。
@@ -32,13 +40,14 @@ release candidate では次を同じ記録へ残す。
 
 - `swbt-rs` の merge 後 commit SHA
 - `Cargo.lock` の SHA-256
-- Bumble fork revision `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1`
+- `swbt-bumble-backend` version、registry checksum、standalone repository commit
+- Bumble source lineage の fork revision `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1`
 - Cargo package version と Rust MSRV
 - Windows/Linux の依存一覧、license 判定、CycloneDX SBOM hash
 - 実機確認した OS、adapter、driver、console version と未検証条件
 
 現在の `Cargo.lock` SHA-256 は
-`8AA0A6FB2BDC3139BD0F4D6C8FB224802B8280F80E219A0C4D4436AD217F9838`。release commit は merge 前に
+`ABC04DDE2372AE989417920F2CC513494903B7A957A86B025D417E6B77147947`。release commit は merge 前に
 確定できないため、実際の release 承認後に main の対象 SHA とともに記録する。
 
 ## local gate
@@ -66,9 +75,8 @@ git diff --check
 含むことを確認する。`.agents/`、`.codex/`、`.github/`、`spec/`、`tools/`、実機 trace、raw profile、
 秘密鍵を含めない。
 
-registry blocker 解消後は生成した `.crate` を空の一時 directory へ展開し、default/all-feature build、
-test、examples を archive 内から実行する。repository checkout の未収録 file を参照していないことを
-確認する。
+生成した `.crate` を空の一時 directory へ展開し、default/all-feature build、test、examples を
+archive 内から実行する。repository checkout の未収録 file を参照していないことを確認する。
 
 ## remote gate
 
@@ -90,23 +98,17 @@ key material がないことを検査する。
 unsupported、明示 local address の実機確認が CSR8510 A10 に限られること、`Drop` の best-effort
 cleanup を release note に残す。
 
-## 公開承認後
+## swbt-rs 公開承認後
 
 停止条件をすべて解消し、当該 turn で公開操作の明示承認を得た場合だけ、次へ進む。
 
-1. 自己所有 fork Issue #1 の `swbt-bumble-backend` が、未公開fork packageやGit dependencyなしで
-   package/build/testでき、Apache-2.0の `LICENSE`、`NOTICE`、attribution、改変表示を含むことを確認する。
-2. backendの初回crates.io公開は、その操作を行うturnで別途明示承認を得る。公開後にversion、checksum、
-   ownerと新規projectからの取得を確認する。
-3. `swbt-rs` のGit dependencyを公開済みbackendのexact versionへ置き換え、`cargo package --locked` と
-   archive smokeを再実行する。
-4. `publish = false` の解除と配布 dependency を専用 release change として review する。
-5. GitHub Private Vulnerability Reporting を有効化し、`SECURITY.md` を非公開報告 URL へ更新する。
-6. main の candidate SHA、Cargo.lock hash、backend version、SBOM hash、全 check を記録する。
-7. crates.io Trusted Publishing または同等の短命 credential を設定した専用 workflow を review する。
+1. `publish = false` の解除と配布 dependency を専用 release change として review する。
+2. GitHub Private Vulnerability Reporting を有効化し、`SECURITY.md` を非公開報告 URL へ更新する。
+3. main の candidate SHA、Cargo.lock hash、backend version、SBOM hash、全 check を記録する。
+4. crates.io Trusted Publishing または同等の短命 credential を設定した専用 workflow を review する。
    現在は publish workflow を置いていない。
-8. 承認済み candidate だけを一度公開し、`cargo info swbt-rs@0.1.0` と新規 project から取得・build する。
-9. 公開した同じ commit に production tag と GitHub Release を対応付ける。
+5. 承認済み candidate だけを一度公開し、`cargo info swbt-rs@0.1.0` と新規 project から取得・build する。
+6. 公開した同じ commit に production tag と GitHub Release を対応付ける。
 
 ## rollback と中断
 

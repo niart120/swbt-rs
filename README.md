@@ -2,10 +2,10 @@
 
 `swbt-rs` は、NX 互換の仮想 Bluetooth HID 入力デバイスを扱う
 [`swbt-python`](https://github.com/niart120/swbt-python) を Rust へ移植するプロジェクトです。
-Bluetooth stack の実装基盤には
-[`bumble-rs`](https://github.com/chaitanyarahalkar/bumble-rs) と、reader lifecycle 修正を含む
-[自己所有 fork](https://github.com/niart120/bumble-rs)
-を使います。
+Bluetooth stack の実装基盤には、
+[`bumble-rs`](https://github.com/chaitanyarahalkar/bumble-rs) から必要な Classic HID 実装を抽出し、
+reader lifecycle 修正などを加えた
+[`swbt-bumble-backend`](https://crates.io/crates/swbt-bumble-backend) を使います。
 
 ## 現在の状態
 
@@ -15,11 +15,11 @@ library target `swbt` を提供し、
 model-valid input、crate 内部の Switch HID protocol と runtime、公開 controller builder、
 descriptor-only adapter discovery を実装しています。
 
-0.1.0 は未公開です。現在の Bumble 実装は自己所有 fork の Git dependency であり、repository source
-からだけ build できます。crates.io へ公開する前に、Classic HID に必要な実装を単一の
-`swbt-bumble-backend` crate へ整理し、clean `cargo package --locked` と archive smoke を完了させます。
-それまでは `publish = false` を維持します。利用者向けの変更は[変更履歴](CHANGELOG.md)、脆弱性報告時の
-注意は[セキュリティ方針](SECURITY.md)に記録しています。
+`swbt-rs` 0.1.0 は未公開です。`bumble` feature は crates.io の
+`swbt-bumble-backend = "=0.1.0"` を使い、clean `cargo package --locked` と展開archiveの
+all-feature testまで確認済みです。残るrelease gateが完了するまでは `publish = false` を維持します。
+利用者向けの変更は[変更履歴](CHANGELOG.md)、脆弱性報告時の注意は
+[セキュリティ方針](SECURITY.md)に記録しています。
 
 - pure protocol は `swbt-python` 0.6.0 の固定 commit
   `84d2723b127f70fc78e12f4496f5c40af0ccfb0a` から生成した 55 fixture を直接検査します。
@@ -35,9 +35,10 @@ descriptor-only adapter discovery を実装しています。
   前 session の入力状態と stale event を持ち越しません。
 - `build()` 直後の Configured controller には open runtime がないため、入力操作は
   `ErrorKind::TransportClosed` を返します。
-- default feature は空です。`bumble` feature を有効にした場合だけ、reader shutdown と join、ACL パケットが
-  host queue を離れた状態の判定、CSR command 用の Vendor Event 応答待ちと応答を待たない command 送信を追加した
-  自己所有 fork の commit `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1` と `rusb` を組み込みます。
+- default feature は空です。`bumble` feature を有効にした場合だけ、
+  `swbt-bumble-backend = "=0.1.0"` と `rusb` を組み込みます。backend は reader shutdown と join、
+  ACL パケットが host queue を離れた状態の判定、CSR command の Vendor Event 応答待ちと
+  応答を待たない command 送信を含みます。
 - `list_adapters()` は `bumble` feature で USB device/config/interface descriptor を読み、
   Bluetooth HCI class の candidate を返します。device open、driver detach、interface claim、
   HCI command は行いません。feature 無効時は `ErrorKind::UnsupportedCapability` を返します。
@@ -54,9 +55,9 @@ descriptor-only adapter discovery を実装しています。
   `try_connect()` は no-bond、timeout、Ready 前 disconnect を値として返し、profile、
   protocol、worker の失敗は error のまま返します。
 - model 固有 HID descriptor と SDP record、Classic pairing window、NoInputNoOutput SSP
-  policy、SDP/HID control/interrupt session は crate 内の Bumble `LocalLink` packet path
-  で検査しています。production USB runtime の poll/send/cleanup に同じ Classic session
-  を接続し、Windows 11 25H2、CSR8510 A10、Switch 2 system version 22.5.0
+  policy、SDP/HID control/interrupt session は backend の scripted Classic peer で検査しています。
+  production USB runtime の poll/send/cleanup に同じ公開 session 境界を接続し、
+  Windows 11 25H2、CSR8510 A10、Switch 2 system version 22.5.0
   （ユーザ報告）で実機 pairing、保存鍵からの reconnect、Periodic/Direct 入力を確認しています。
   他の OS、adapter、system version と長時間の信頼性は未検証です。
 - `bumble` feature の `create_profile()` は既存 target を置換せず、valid empty envelope を

@@ -157,6 +157,26 @@ pub(crate) struct TransportCapabilities {
 }
 
 impl TransportCapabilities {
+    #[cfg(feature = "bumble")]
+    pub(crate) fn from_validated_classic_controller(
+        local_address: [u8; 6],
+        local_version: ControllerVersionInfo,
+        usb: UsbTransportMetadata,
+    ) -> TransportResult<Self> {
+        if local_address == [0; 6] {
+            return Err(TransportError::new(
+                TransportErrorKind::InvalidControllerIdentity,
+            ));
+        }
+
+        Ok(Self {
+            local_address,
+            local_version: Some(local_version),
+            classic_capable: true,
+            usb,
+        })
+    }
+
     #[cfg_attr(
         not(test),
         allow(

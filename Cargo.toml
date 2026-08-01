@@ -30,31 +30,17 @@ default = []
 adapter-tests = ["bumble"]
 probe = ["bumble"]
 bumble = [
-    "dep:bumble",
-    "dep:bumble-controller",
-    "dep:bumble-hci",
-    "dep:bumble-hid",
-    "dep:bumble-host",
-    "dep:bumble-l2cap",
-    "dep:bumble-sdp",
-    "dep:bumble-transport",
+    "dep:swbt-bumble-backend",
     "dep:rusb",
 ]
 
 [dependencies]
 atomic-write-file = "0.3.0"
-bumble = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-controller = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-hci = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-hid = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-host = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-l2cap = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-sdp = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-transport = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
 fs2 = "0.4.3"
 rusb = { version = "0.9.4", features = ["vendored"], optional = true }
 serde_json = "1"
 tracing = "0.1"
+swbt-bumble-backend = { version = "=0.1.0", optional = true }
 
 [[bin]]
 name = "swbt-probe"
