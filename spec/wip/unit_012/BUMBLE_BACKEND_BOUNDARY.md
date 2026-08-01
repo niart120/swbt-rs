@@ -60,10 +60,10 @@ ACL flush 観測、Vendor Event 応答の実動作修正3 commitだけを含む�
 | green | T02: swbt-rs の暫定依存を元 package 名へ戻す | Cargo metadata | `Cargo.toml` と `Cargo.lock` が `bumble*`、`cb55e2d` だけを解決し、default/all-feature gateが成功する |
 | green | T03: 現在の registry blocker を再現する | package | clean `cargo package --locked --list` は成功し、`cargo package --locked` は `bumble-controller` 不在で停止する |
 | green | T04: 単一 backend の作業境界を自己所有 fork に記録する | cross-repo design | Issue #1 に対象範囲、対象外、ライセンス、clean archive、実機回帰条件がある |
-| pending | T05: 必要な Bumble source と API を inventory する | backend design | USB HCI、HCI、Classic host、L2CAP、SDP、HIDP、key storeの採否をsource/test単位で記録する |
+| green | T05: 必要な Bumble source と API を inventory する | backend design | USB HCI、HCI、Classic host、L2CAP、SDP、HIDP、key storeの採否をsource/test単位で記録する |
 | pending | T06: 単一 backend archive を作る | backend implementation | `swbt-bumble-backend` が未公開fork packageなしでpackage/build/testできる |
 | pending | T07: swbt-rs を registry backendへ切り替える | integration/package | default/all-feature gate、`cargo package --locked`、archive smokeが成功する |
-| pending | T08: 実機回帰を確認する | hardware | pairing、再接続、入力、IMU、power-cycle、reader cleanupの既存契約を再確認する |
+| pending | T08: 実機回帰を確認する | hardware | pairing、再接続、入力、IMU、明示local address、power-cycle、reader cleanupの既存契約を再確認する |
 | green | T09: 旧改名branchを後片付けする | repository cleanup | 実験revisionの参照を不採用証跡だけに残し、remote/local branchを削除してIssue #1へ記録する |
 
 T05-T08 は backend 実装を伴うため、この依存・文書整理だけで green にしない。全項目完了前に
@@ -81,6 +81,10 @@ unit_012 を `spec/complete` へ移動せず、0.1.0 を公開しない。
 詳細は
 [`evidence/abandoned-registry-package-experiment-20260801.md`](evidence/abandoned-registry-package-experiment-20260801.md)
 に残す。
+
+必要なsource/API、除外するprotocol、public API、test移行単位は
+[`evidence/bumble-backend-source-inventory-20260801.md`](evidence/bumble-backend-source-inventory-20260801.md)
+に固定した。
 
 ### 7.2 暫定境界
 
@@ -138,12 +142,13 @@ git diff --check
 | `cargo package --locked --list` | success |
 | `cargo package --locked` | blocked: crates.io に `bumble-controller@0.1.0` がない |
 | fork branch cleanup | success: `feat/swbt-registry-package-names` のremote/local refを削除し、`git ls-remote --heads origin main feat/swbt-registry-package-names` は `main@cb55e2d` だけを返した |
+| backend source/API inventory | success: USB/HCI/Classic host/L2CAP/SDP/HIDP/bondの採否、public API、test移行単位をfixed source pathへ対応付けた |
 | crates.io publish / production tag / GitHub Release | not run: 対象外かつ明示承認なし |
 | 実機回帰 | not run: Rust sourceとfork実装は変更せず、package metadataと作業境界だけを変更 |
 
 ## 10. 先送り事項
 
-- backend source/API inventory と実装: 自己所有 fork Issue #1 で追跡する。
+- backend 実装: source/API inventoryを起点に、自己所有 fork Issue #1 で追跡する。
 - registry archive と clean-install smoke: `swbt-bumble-backend` 公開後にT07で実行する。
 - 実機回帰: backend implementation後にT08で実行する。
 - GitHub Private Vulnerability Reporting: M9 の独立した公開停止条件として残す。
@@ -155,7 +160,8 @@ git diff --check
 - [x] 暫定依存をfork `main@cb55e2d`へ戻した
 - [x] package blockerをclean worktreeで再現した
 - [x] 単一backendのIssueと完了条件を記録した
-- [ ] backend inventoryと実装を完了した
+- [x] backend source/API inventoryを完了した
+- [ ] backend実装を完了した
 - [ ] registry archive smokeを完了した
 - [ ] 実機回帰を完了した
 - [x] 旧改名branchを削除した
