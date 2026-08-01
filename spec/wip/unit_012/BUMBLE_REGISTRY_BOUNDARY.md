@@ -52,9 +52,9 @@
 | status | item | layer | 完了条件 |
 |---|---|---|---|
 | green | T01: registry 配布閉包を固定する | dependency graph | 通常閉包 22、dev 依存込み 24、対象外 2 package を current metadata から再現する |
-| pending | T02: 対象 package 名と内部依存を一意に変換する | fork manifest | 24 package の名前、alias、exact version を検査し、旧 registry package 名への内部参照を残さない |
-| pending | T03: manifest だけの変更で fork workspace の挙動を保つ | fork gate | fmt、check、test、package file list が成功し、Rust source 差分がない |
-| pending | T04: swbt-rs が renamed fork revision を同一 import surface で利用する | integration | default/all-feature check、clippy、test、build、doc が成功する |
+| green | T02: 対象 package 名と内部依存を一意に変換する | fork manifest | rename 24 package、alias/exact version 付き内部依存 87 辺、対象外 2 package を確認。fork commit `2f5c853` |
+| green | T03: manifest だけの変更で fork workspace の挙動を保つ | fork gate | 旧 import 名を `[lib] name` で維持。MSRV check、workspace test、24 package file list、基底 package verify が成功。fork commit `5fb0f6d` |
+| green | T04: swbt-rs が renamed fork revision を同一 import surface で利用する | integration | default/all-feature check、clippy、test、build、doc が成功。fork 由来 22 package を単一 revision から解決 |
 | pending | T05: 公開順序と公開前検査を再現可能にする | release | 依存 DAG の順序、owner、name availability、package checksum、公開停止点を記録する |
 | blocked | T06: registry archive から clean install を検証する | package | 明示承認後に 24 package を公開し、`cargo package --locked` と archive smoke を成功させる |
 | pending | T07: M9 と公開手順を current evidence に更新する | docs/spec | unit_011 完了、current revision/lock hash/CI、残る停止条件を反映する |
@@ -64,7 +64,8 @@ T06 の `blocked` は設計不明ではなく外部状態と権限の境界を�
 
 ## 7. 対象ファイル
 
-- public fork branch の対象 24 `Cargo.toml` と workspace metadata
+- public fork branch の対象 24 package manifest、対象外 2 package から対象 package へ向く
+  dependency alias、workspace metadata
 - `Cargo.toml`、`Cargo.lock`
 - `spec/wip/unit_010/M9_PORTABILITY_RELEASE.md`
 - `spec/publishing.md`
@@ -91,6 +92,27 @@ git diff --check
 fork 側は対象 package ごとの `cargo package --list` と workspace gate を実行する。registry 公開前に
 完全な package verify が registry 解決で停止した場合は、その停止点を記録し成功に読み替えない。
 
+### 8.1 現在の検証結果
+
+| command / check | result |
+|---|---|
+| `cargo metadata` による fork 配布閉包検査 | success: runtime 22 package、dev 依存込み 24 package |
+| fork manifest alias 検査 | success: renamed 24 package、internal edge 87、対象外 `bumble-drivers` / `bumble-pandora` |
+| fork `cargo +1.87.0 check --workspace --all-targets --all-features --locked` | success |
+| fork `cargo test --workspace --all-features --locked` | success |
+| fork 24 package の `cargo package --locked --list` | success: 各 6–64 files |
+| fork `cargo package --locked -p swbt-bumble` | success: 18 files、圧縮 63.7 KiB、verify build success |
+| swbt-rs `cargo +1.87.0 check --all-targets --all-features --locked` | success |
+| swbt-rs `cargo clippy --all-targets --all-features --locked -- -D warnings` | success |
+| swbt-rs `cargo test --all-targets --locked --quiet` | success: library 268 passed / 1 ignored、他 target success |
+| swbt-rs `cargo test --all-targets --all-features --locked --quiet` | success: library 321 passed / 4 ignored、他 target success、hardware 5 ignored |
+| swbt-rs default/all-feature build | success |
+| `RUSTDOCFLAGS=-D warnings cargo doc --no-deps --all-features --locked` | success |
+| `cargo fmt --all --check` / `git diff --check` | success |
+
+public fork branch は `niart120/bumble-rs` の `feat/swbt-registry-package-names`、head は
+`5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07` である。upstream PR / issue は作成していない。
+
 ## 9. 先送り事項
 
 - crates.io 名は予約できない。公開直前に 24 名を再確認する。
@@ -101,8 +123,8 @@ fork 側は対象 package ごとの `cargo package --list` と workspace gate �
 
 - [x] 目的、対象範囲、対象外を確認した
 - [x] TDD Test List を作成した
-- [ ] fork の manifest 変換と検査を完了した
-- [ ] public fork branch を push し、revision を固定した
+- [x] fork の manifest 変換と検査を完了した
+- [x] public fork branch を push し、revision を固定した
 - [ ] swbt-rs の全 gate を完了した
 - [ ] registry package と archive smoke を完了した
 - [ ] M9 の current evidence を更新した

@@ -43,14 +43,14 @@ bumble = [
 
 [dependencies]
 atomic-write-file = "0.3.0"
-bumble = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-controller = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-hci = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-hid = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-host = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-l2cap = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-sdp = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
-bumble-transport = { version = "=0.1.0", git = "https://github.com/niart120/bumble-rs", rev = "cb55e2d98dc7b7b0227c43772c9ae184034dd9a1", optional = true }
+bumble = { version = "=0.1.0", package = "swbt-bumble", git = "https://github.com/niart120/bumble-rs", rev = "5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07", optional = true }
+bumble-controller = { version = "=0.1.0", package = "swbt-bumble-controller", git = "https://github.com/niart120/bumble-rs", rev = "5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07", optional = true }
+bumble-hci = { version = "=0.1.0", package = "swbt-bumble-hci", git = "https://github.com/niart120/bumble-rs", rev = "5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07", optional = true }
+bumble-hid = { version = "=0.1.0", package = "swbt-bumble-hid", git = "https://github.com/niart120/bumble-rs", rev = "5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07", optional = true }
+bumble-host = { version = "=0.1.0", package = "swbt-bumble-host", git = "https://github.com/niart120/bumble-rs", rev = "5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07", optional = true }
+bumble-l2cap = { version = "=0.1.0", package = "swbt-bumble-l2cap", git = "https://github.com/niart120/bumble-rs", rev = "5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07", optional = true }
+bumble-sdp = { version = "=0.1.0", package = "swbt-bumble-sdp", git = "https://github.com/niart120/bumble-rs", rev = "5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07", optional = true }
+bumble-transport = { version = "=0.1.0", package = "swbt-bumble-transport", git = "https://github.com/niart120/bumble-rs", rev = "5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07", optional = true }
 fs2 = "0.4.3"
 rusb = { version = "0.9.4", features = ["vendored"], optional = true }
 serde_json = "1"
