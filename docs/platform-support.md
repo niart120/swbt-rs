@@ -34,6 +34,21 @@ cargo run --locked --features probe --bin swbt-probe -- open --adapter usb:0a12:
 この command は HCI 初期化後に `close_without_neutral()` を完了してから終了します。controller を
 pairing しません。
 
+### CSR8510 A10 の揮発 local address
+
+`swbt-probe pair --local-address <XX:XX:XX:XX:XX:XX>`は、CSR8510 A10で確認するための限定入口です。
+個別かつローカル管理のaddressを受け付けます。別chipsetへの書換え、永続PSKEY書換え、複数dongleで
+同じaddressを同時に使う運用は対象外です。
+
+明示addressを持つprofileでは、通常のHCI初期化より前に現在addressとcontroller versionを読みます。
+既に一致する場合は書き換えません。不一致ならvolatile SETREQとwarm resetを送り、USB再列挙とread-backが
+成功した後だけ通常初期化、key-store設定、pairingへ進みます。通常初期化後にもexpected-address guardを
+行います。成功NDJSONとtraceに出すのは`identity_kind`だけで、address値は出しません。
+
+書換え開始後の失敗は`adapter_identity_recovery_required`です。この場合は次のwriteを行わず、dongleを
+物理的に抜き差ししてください。profileを削除してもdongleの揮発identityは元に戻りません。実機検証では
+書換えを伴うrunごとにpower cycleし、元のadapter addressへ戻ったことをread-onlyで確認します。
+
 ## Windows
 
 ### driver
@@ -99,7 +114,7 @@ administrator が専用 group と `MODE="0660"` を定義してください。ud
 
 ### kernel driver detach と reattach
 
-固定 Bumble revision `b8c7cd625bc2ac2f58a4beb4ade1264426969819` の
+固定 Bumble revision `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1` の
 `bumble-transport/src/usb.rs` は、USB handle に `set_auto_detach_kernel_driver(true)` を設定してから
 HCI interface を claim します。libusb の契約では、auto detach が有効な handle は claim 時に kernel
 driver を detach し、interface release 時に attach します。詳細は

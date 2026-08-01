@@ -176,7 +176,7 @@ dependencies = [
 [[package]]
 name = "bumble"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "serde",
  "serde_json",
@@ -185,7 +185,7 @@ dependencies = [
 [[package]]
 name = "bumble-a2dp"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble",
  "bumble-avdtp",
@@ -198,7 +198,7 @@ dependencies = [
 [[package]]
 name = "bumble-att"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble",
  "bumble-crypto",
@@ -207,17 +207,17 @@ dependencies = [
 [[package]]
 name = "bumble-audio"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 
 [[package]]
 name = "bumble-avc"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 
 [[package]]
 name = "bumble-avctp"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble-host",
  "bumble-l2cap",
@@ -226,7 +226,7 @@ dependencies = [
 [[package]]
 name = "bumble-avdtp"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble-host",
  "bumble-l2cap",
@@ -235,7 +235,7 @@ dependencies = [
 [[package]]
 name = "bumble-avrcp"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble",
  "bumble-avc",
@@ -246,7 +246,7 @@ dependencies = [
 [[package]]
 name = "bumble-codecs"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "lc3-codec",
 ]
@@ -254,7 +254,7 @@ dependencies = [
 [[package]]
 name = "bumble-controller"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble",
  "bumble-crypto",
@@ -264,7 +264,7 @@ dependencies = [
 [[package]]
 name = "bumble-crypto"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "aes",
  "p256",
@@ -274,7 +274,7 @@ dependencies = [
 [[package]]
 name = "bumble-gatt"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble",
  "bumble-att",
@@ -284,7 +284,7 @@ dependencies = [
 [[package]]
 name = "bumble-hci"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble",
 ]
@@ -292,7 +292,7 @@ dependencies = [
 [[package]]
 name = "bumble-hid"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble-l2cap",
 ]
@@ -300,7 +300,7 @@ dependencies = [
 [[package]]
 name = "bumble-host"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble",
  "bumble-att",
@@ -318,12 +318,12 @@ dependencies = [
 [[package]]
 name = "bumble-l2cap"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 
 [[package]]
 name = "bumble-profiles"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble",
  "bumble-crypto",
@@ -335,7 +335,7 @@ dependencies = [
 [[package]]
 name = "bumble-rfcomm"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble-l2cap",
 ]
@@ -343,12 +343,12 @@ dependencies = [
 [[package]]
 name = "bumble-rtp"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 
 [[package]]
 name = "bumble-sdp"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble",
  "bumble-l2cap",
@@ -357,7 +357,7 @@ dependencies = [
 [[package]]
 name = "bumble-smp"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble",
  "bumble-crypto",
@@ -366,7 +366,7 @@ dependencies = [
 [[package]]
 name = "bumble-transport"
 version = "0.1.0"
-source = "git+https://github.com/niart120/bumble-rs?rev=b8c7cd625bc2ac2f58a4beb4ade1264426969819#b8c7cd625bc2ac2f58a4beb4ade1264426969819"
+source = "git+https://github.com/niart120/bumble-rs?rev=cb55e2d98dc7b7b0227c43772c9ae184034dd9a1#cb55e2d98dc7b7b0227c43772c9ae184034dd9a1"
 dependencies = [
  "bumble",
  "bumble-a2dp",

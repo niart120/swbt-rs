@@ -46,6 +46,9 @@ use crate::{
     },
 };
 
+#[cfg(feature = "bumble")]
+use crate::controller::ControllerBuilder;
+
 use super::{
     create::CreateProfileRuntimeAttempt,
     runtime::{
@@ -57,7 +60,7 @@ use super::{
 #[cfg(feature = "bumble")]
 use super::runtime::RuntimeFactoryConfig;
 #[cfg(feature = "bumble")]
-use crate::profile::PairingProfile;
+use crate::profile::{LocalAddress, PairingProfile};
 
 const DEVICE_INFO_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
 const PAIR_TIMEOUT: Duration = Duration::from_secs(2);
@@ -93,8 +96,139 @@ fn runtime_factory_projects_only_persistent_profiles_to_the_key_store() {
         .finalize_with_profile(|_| panic!("ephemeral builder must not load a profile"))
         .expect("finalize ephemeral profile");
 
+    let local_address =
+        LocalAddress::parse("02:12:34:56:78:9A").expect("valid local address fixture");
+    let local_profile = PairingProfile::from_json(
+        serde_json::json!({
+            "format": "swbt.profile",
+            "schema_version": 2,
+            "controller_kind": "pro",
+            "identity": {
+                "kind": "exp-local-address",
+                "address": "02:12:34:56:78:9A"
+            },
+            "key_store": { "namespaces": {} }
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .expect("parse local-address profile");
+    let local = ProController::builder("usb:0")
+        .profile_path("profiles/runtime-local-key-store.json")
+        .validate()
+        .expect("validate local persistent builder")
+        .finalize_with_profile(|_| Ok(local_profile))
+        .expect("finalize local persistent profile");
+
     assert!(RuntimeFactoryConfig::from_controller(&persistent).has_profile_key_store());
     assert!(!RuntimeFactoryConfig::from_controller(&ephemeral).has_profile_key_store());
+    assert_eq!(
+        RuntimeFactoryConfig::from_controller(&persistent).identity(),
+        ProfileIdentity::AdapterDefault
+    );
+    assert_eq!(
+        RuntimeFactoryConfig::from_controller(&ephemeral).identity(),
+        ProfileIdentity::AdapterDefault
+    );
+    assert_eq!(
+        RuntimeFactoryConfig::from_controller(&local).identity(),
+        ProfileIdentity::LocalAddress(local_address)
+    );
+}
+
+#[cfg(feature = "bumble")]
+#[test]
+fn local_identity_projects_for_every_model_and_reporting_mode_without_debug_disclosure() {
+    let address = LocalAddress::parse("02:12:34:56:78:9A").expect("valid local address fixture");
+
+    assert_runtime_identity(ProController::builder("usb:0"), address);
+    assert_runtime_identity(DirectProController::builder("usb:0"), address);
+    assert_runtime_identity(JoyConL::builder("usb:0"), address);
+    assert_runtime_identity(DirectJoyConL::builder("usb:0"), address);
+    assert_runtime_identity(JoyConR::builder("usb:0"), address);
+    assert_runtime_identity(DirectJoyConR::builder("usb:0"), address);
+}
+
+#[cfg(feature = "bumble")]
+fn assert_runtime_identity<M, R>(builder: ControllerBuilder<M, R>, address: LocalAddress)
+where
+    M: ControllerModel,
+    R: ReportingMode,
+{
+    let namespace = "02:12:34:56:78:9A";
+    let secret_key = "d8".repeat(16);
+    let mut value = serde_json::json!({
+        "format": "swbt.profile",
+        "schema_version": 2,
+        "controller_kind": M::KIND.profile_name(),
+        "identity": {
+            "kind": "exp-local-address",
+            "address": namespace
+        },
+        "key_store": { "namespaces": {} }
+    });
+    value["key_store"]["namespaces"][namespace] = serde_json::json!({
+        "98:B6:E9:11:22:33": {
+            "link_key": {
+                "authenticated": true,
+                "value": secret_key
+            },
+            "link_key_type": 4
+        }
+    });
+    let profile = PairingProfile::<M>::from_json(value.to_string().as_bytes())
+        .expect("parse typed local-address profile");
+    let rendered = format!("{profile:?}");
+    assert!(!rendered.contains(namespace));
+    assert!(!rendered.contains(&secret_key));
+    let config = builder
+        .profile_path("profiles/runtime-local.json")
+        .validate()
+        .expect("validate typed builder")
+        .finalize_with_profile(|_| Ok(profile))
+        .expect("finalize typed local-address profile");
+
+    assert_eq!(
+        RuntimeFactoryConfig::from_controller(&config).identity(),
+        ProfileIdentity::LocalAddress(address)
+    );
+}
+
+#[cfg(feature = "bumble")]
+#[test]
+fn post_write_identity_uncertainty_maps_to_the_public_recovery_kind() {
+    let controller = ProController::builder("usb:0")
+        .build()
+        .expect("build configured Pro controller");
+    let clock = ManualClock::at(Duration::ZERO);
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+        Ok::<_, Error>(RuntimeComponents::new(
+            Box::new(IdentityRecoveryOpenTransport),
+            clock,
+            ChannelWorkerWaiter::new(activity_receiver),
+            UnusedPairDriver,
+        ))
+    };
+
+    let error = match open_controller_runtime(
+        &controller.config,
+        controller.status_publisher.clone(),
+        factory,
+    ) {
+        Ok(_) => panic!("post-write identity uncertainty must stop runtime open"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.kind(), ErrorKind::AdapterIdentityRecoveryRequired);
+    assert!(error.to_string().contains("power cycle"));
+    let transport = error
+        .source()
+        .and_then(|source| source.downcast_ref::<TransportError>())
+        .expect("public recovery error retains the typed transport category");
+    assert_eq!(
+        transport.kind(),
+        TransportErrorKind::AdapterIdentityRecoveryRequired
+    );
 }
 
 #[cfg(not(feature = "bumble"))]
@@ -1652,6 +1786,9 @@ struct BumbleOpenErrorTransport {
     source: Option<BumbleError>,
 }
 
+#[cfg(feature = "bumble")]
+struct IdentityRecoveryOpenTransport;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerminalPairTrace {
     PollFailure,
@@ -1853,6 +1990,39 @@ impl TransportPort for BumbleOpenErrorTransport {
         Err(TransportError::with_source(
             TransportErrorKind::OpenFailed,
             Arc::new(source),
+        ))
+    }
+
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        Err(TransportError::new(TransportErrorKind::Closed))
+    }
+
+    fn poll(&mut self, _timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+        Err(TransportError::new(TransportErrorKind::Closed))
+    }
+
+    fn send_interrupt(&mut self, _payload: &[u8]) -> TransportResult<SendAcceptance> {
+        Err(TransportError::new(TransportErrorKind::Closed))
+    }
+
+    fn drain_interrupt(&mut self, _timeout: Duration) -> TransportResult<()> {
+        Ok(())
+    }
+
+    fn disconnect(&mut self) -> TransportResult<()> {
+        Ok(())
+    }
+
+    fn close(&mut self) -> TransportResult<()> {
+        Ok(())
+    }
+}
+
+#[cfg(feature = "bumble")]
+impl TransportPort for IdentityRecoveryOpenTransport {
+    fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
+        Err(TransportError::new(
+            TransportErrorKind::AdapterIdentityRecoveryRequired,
         ))
     }
 

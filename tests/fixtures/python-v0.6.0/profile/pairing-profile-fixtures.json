@@ -71,10 +71,85 @@
         },
         "schema_version": 2
       }
+    },
+    {
+      "id": "local_address_with_classic_link_key",
+      "profile": {
+        "controller_kind": "pro",
+        "format": "swbt.profile",
+        "identity": {
+          "address": "02:12:34:56:78:9A",
+          "kind": "exp-local-address"
+        },
+        "key_store": {
+          "namespaces": {
+            "02:12:34:56:78:9A": {
+              "98:B6:E9:11:22:33": {
+                "link_key": {
+                  "authenticated": true,
+                  "value": "04040404040404040404040404040404"
+                },
+                "link_key_type": 4
+              }
+            }
+          }
+        },
+        "schema_version": 2
+      }
+    },
+    {
+      "id": "joycon_l_local_address_with_classic_link_key",
+      "profile": {
+        "controller_kind": "joycon_l",
+        "format": "swbt.profile",
+        "identity": {
+          "address": "02:12:34:56:78:9A",
+          "kind": "exp-local-address"
+        },
+        "key_store": {
+          "namespaces": {
+            "02:12:34:56:78:9A": {
+              "98:B6:E9:11:22:33": {
+                "link_key": {
+                  "authenticated": true,
+                  "value": "05050505050505050505050505050505"
+                },
+                "link_key_type": 4
+              }
+            }
+          }
+        },
+        "schema_version": 2
+      }
+    },
+    {
+      "id": "joycon_r_local_address_with_classic_link_key",
+      "profile": {
+        "controller_kind": "joycon_r",
+        "format": "swbt.profile",
+        "identity": {
+          "address": "02:12:34:56:78:9A",
+          "kind": "exp-local-address"
+        },
+        "key_store": {
+          "namespaces": {
+            "02:12:34:56:78:9A": {
+              "98:B6:E9:11:22:33": {
+                "link_key": {
+                  "authenticated": true,
+                  "value": "06060606060606060606060606060606"
+                },
+                "link_key_type": 4
+              }
+            }
+          }
+        },
+        "schema_version": 2
+      }
     }
   ],
   "format": "swbt.profile-fixtures",
-  "generation": "PairingProfile.create_new followed by _PairingProfileKeyStore.update with model-specific synthetic key material",
+  "generation": "PairingProfile.create_new with adapter-default and exp-local-address identities followed by _PairingProfileKeyStore.update with model-specific synthetic key material",
   "python_version": "3.13",
   "schema_version": 1,
   "source_commit": "84d2723b127f70fc78e12f4496f5c40af0ccfb0a",

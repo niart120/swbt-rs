@@ -11,8 +11,10 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "bumble")]
+use crate::LocalAddress;
 use crate::{
-    AdapterSelector, CreateProfileOptions, LocalAddress, ProfileIdentity,
+    AdapterSelector, CreateProfileOptions, ProfileIdentity,
     diagnostics::LifecycleState,
     error::{Error, ErrorKind},
     input::InputState,
@@ -62,10 +64,7 @@ impl ProfileCreateTargetPort for FakeCreateTarget {
 }
 
 #[test]
-fn builder_path_and_identity_failures_precede_target_inspection() {
-    let local_address =
-        LocalAddress::parse("02:12:34:56:78:9A").expect("valid local address fixture");
-
+fn builder_path_failures_precede_target_inspection() {
     let cases = [
         (
             ProController::builder("usb:0")
@@ -78,14 +77,6 @@ fn builder_path_and_identity_failures_precede_target_inspection() {
             ProController::builder("usb:0"),
             adapter_default_options(Duration::from_secs(60)),
             ErrorKind::ProfilePathRequired,
-        ),
-        (
-            ProController::builder("usb:0").profile_path("profiles/new.json"),
-            CreateProfileOptions {
-                identity: ProfileIdentity::LocalAddress(local_address),
-                pair_timeout: Duration::from_secs(60),
-            },
-            ErrorKind::UnsupportedCapability,
         ),
     ];
 
@@ -100,6 +91,28 @@ fn builder_path_and_identity_failures_precede_target_inspection() {
         assert_eq!(error.kind(), expected_kind);
         assert!(target.inspected.is_empty());
     }
+}
+
+#[test]
+#[cfg(feature = "bumble")]
+fn local_address_is_retained_in_an_absent_target_plan() {
+    let path = PathBuf::from("profiles/local-address.json");
+    let address = LocalAddress::parse("02:12:34:56:78:9a").expect("valid local address fixture");
+    let mut target = FakeCreateTarget::returning(Ok(ProfileCreateTargetState::Absent));
+
+    let plan = ProController::builder("usb:0")
+        .profile_path(path.clone())
+        .validate_create_profile_target(
+            CreateProfileOptions {
+                identity: ProfileIdentity::LocalAddress(address),
+                pair_timeout: Duration::from_secs(60),
+            },
+            &mut target,
+        )
+        .expect("local address must produce a preflight plan for a supported backend");
+
+    assert_eq!(plan.identity(), ProfileIdentity::LocalAddress(address));
+    assert_eq!(target.inspected, [path]);
 }
 
 #[test]
@@ -172,6 +185,7 @@ enum CreateEvent {
     Open {
         adapter: AdapterSelector,
         controller_kind: ControllerKind,
+        identity: ProfileIdentity,
         reporting_kind: ReportingKind,
         colors: ControllerColors,
         report_period: Duration,
@@ -322,6 +336,7 @@ impl CreateProfileRuntimeAttempt<Pro, Periodic> for FakeRuntimeAttempt {
         lock(&self.events).push(CreateEvent::Open {
             adapter: config.adapter.clone(),
             controller_kind: ControllerKind::Pro,
+            identity: profile.identity(),
             reporting_kind: ReportingKind::Periodic,
             colors: config.colors,
             report_period: config.report_period(),
@@ -471,6 +486,7 @@ fn create_profile_persists_and_reopens_before_open_then_returns_ready_controller
             CreateEvent::Open {
                 adapter: AdapterSelector::from("usb:fake"),
                 controller_kind: ControllerKind::Pro,
+                identity: ProfileIdentity::AdapterDefault,
                 reporting_kind: ReportingKind::Periodic,
                 colors,
                 report_period,
@@ -503,6 +519,59 @@ fn create_profile_persists_and_reopens_before_open_then_returns_ready_controller
     assert_eq!(probe.explicit_cleanup_count.load(Ordering::SeqCst), 0);
     assert_eq!(probe.fallback_cleanup_count.load(Ordering::SeqCst), 0);
     assert_eq!(probe.resource_drop_count.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+#[cfg(feature = "bumble")]
+fn local_address_profile_is_created_and_reopened_before_runtime_open() {
+    let path = PathBuf::from("profiles/local-pro.json");
+    let address = LocalAddress::parse("02:12:34:56:78:9a").expect("valid local address fixture");
+    let pair_timeout = Duration::from_secs(30);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let probe = RuntimeProbe::new();
+    let mut store = FakeProfileStore::empty(Arc::clone(&events));
+    let mut backend = FakeRuntimeBackend::succeeding(Arc::clone(&events), probe.clone());
+
+    let controller = ProController::builder("usb:local")
+        .profile_path(path.clone())
+        .create_profile_with(
+            CreateProfileOptions {
+                identity: ProfileIdentity::LocalAddress(address),
+                pair_timeout,
+            },
+            &mut store,
+            &mut backend,
+        )
+        .expect("supported local identity must reach the fake runtime");
+
+    assert_eq!(
+        lock(&events).as_slice(),
+        &[
+            CreateEvent::InspectTarget(path.clone()),
+            CreateEvent::CheckBackendCapability,
+            CreateEvent::CreateNew(path.clone()),
+            CreateEvent::ReadBack(path),
+            CreateEvent::Open {
+                adapter: AdapterSelector::from("usb:local"),
+                controller_kind: ControllerKind::Pro,
+                identity: ProfileIdentity::LocalAddress(address),
+                reporting_kind: ReportingKind::Periodic,
+                colors: ControllerColors::default(),
+                report_period: Duration::from_millis(8),
+            },
+            CreateEvent::PairStarted(pair_timeout),
+            CreateEvent::ProtocolReady,
+        ]
+    );
+    assert_valid_empty_local_profile(
+        store
+            .bytes
+            .as_deref()
+            .expect("create-new must persist the local-address envelope"),
+        address,
+    );
+    drop(controller);
+    assert!(!probe.is_active());
 }
 
 #[test]
@@ -584,6 +653,45 @@ fn create_new_race_preserves_competitor_and_stops_before_runtime_open() {
     assert_eq!(probe.explicit_cleanup_count.load(Ordering::SeqCst), 0);
     assert_eq!(probe.fallback_cleanup_count.load(Ordering::SeqCst), 0);
     assert_eq!(probe.resource_drop_count.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+#[cfg(feature = "bumble")]
+fn local_address_create_new_race_preserves_competitor_before_runtime_open() {
+    let path = PathBuf::from("profiles/raced-local-pro.json");
+    let competitor = b"competitor-owned local profile bytes".to_vec();
+    let address = LocalAddress::parse("02:12:34:56:78:9a").expect("valid local address fixture");
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let probe = RuntimeProbe::new();
+    let mut store = FakeProfileStore::racing(Arc::clone(&events), competitor.clone());
+    let mut backend = FakeRuntimeBackend::succeeding(Arc::clone(&events), probe.clone());
+
+    let result = ProController::builder("usb:local-race")
+        .profile_path(path.clone())
+        .create_profile_with(
+            CreateProfileOptions {
+                identity: ProfileIdentity::LocalAddress(address),
+                pair_timeout: Duration::from_secs(60),
+            },
+            &mut store,
+            &mut backend,
+        );
+    let error = match result {
+        Ok(_) => panic!("local create-new conflict must not return a controller"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.kind(), ErrorKind::ProfileAlreadyExists);
+    assert_eq!(store.bytes.as_deref(), Some(competitor.as_slice()));
+    assert_eq!(
+        lock(&events).as_slice(),
+        &[
+            CreateEvent::InspectTarget(path.clone()),
+            CreateEvent::CheckBackendCapability,
+            CreateEvent::CreateNew(path),
+        ]
+    );
+    assert!(!probe.is_active());
 }
 
 #[test]
@@ -672,6 +780,7 @@ fn assert_runtime_failure_cleanup(
         CreateEvent::Open {
             adapter: AdapterSelector::from("usb:failure"),
             controller_kind: ControllerKind::Pro,
+            identity: ProfileIdentity::AdapterDefault,
             reporting_kind: ReportingKind::Periodic,
             colors,
             report_period,
@@ -701,6 +810,21 @@ fn assert_valid_empty_profile(bytes: &[u8]) {
     let profile =
         PairingProfile::<Pro>::try_from(document).expect("created profile must remain Pro-typed");
     assert_eq!(profile.controller_kind(), ControllerKind::Pro);
+}
+
+#[cfg(feature = "bumble")]
+fn assert_valid_empty_local_profile(bytes: &[u8], address: LocalAddress) {
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).expect("created profile must remain valid JSON");
+    assert_eq!(value["format"], "swbt.profile");
+    assert_eq!(value["schema_version"], 2);
+    assert_eq!(value["controller_kind"], "pro");
+    assert_eq!(value["identity"]["kind"], "exp-local-address");
+    assert_eq!(value["identity"]["address"], "02:12:34:56:78:9A");
+    assert_eq!(value["key_store"]["namespaces"], serde_json::json!({}));
+    let profile = PairingProfile::<Pro>::from_json(bytes)
+        .expect("created local-address profile must remain Pro-typed");
+    assert_eq!(profile.identity(), ProfileIdentity::LocalAddress(address));
 }
 
 const fn adapter_default_options(pair_timeout: Duration) -> CreateProfileOptions {

@@ -10,8 +10,8 @@ use std::{
 use serde_json::{Value, json};
 use swbt::{
     ButtonKind, Controller, ControllerKind, CreateProfileOptions, DirectProController, ErrorKind,
-    ImuFrame, InputState, ProfileIdentity, ProfileIdentityKind, ProfileSummary, inspect_profile,
-    list_adapters,
+    ImuFrame, InputState, LocalAddress, ProfileIdentity, ProfileIdentityKind, ProfileSummary,
+    inspect_profile, list_adapters,
 };
 use swbt::{
     model::{self, ControllerModel},
@@ -36,7 +36,7 @@ const HELP: &str = "\
 Usage:
   swbt-probe adapters
   swbt-probe open --adapter <selector>
-  swbt-probe pair --controller <pro|joycon-l|joycon-r> --profile <path> --trace <path> [--button <button>]
+  swbt-probe pair --controller <pro|joycon-l|joycon-r> --profile <path> --trace <path> [--local-address <XX:XX:XX:XX:XX:XX>] [--button <button>]
   swbt-probe reconnect --controller <pro|joycon-l|joycon-r> --profile <path> --trace <path> [--reporting <periodic|direct>] [--button <button>] [--imu-seconds <1..3600>]
   swbt-probe profile inspect <path>
   swbt-probe profile verify <path>
@@ -99,6 +99,7 @@ struct ConnectionRequest {
     operation: ConnectionOperation,
     controller: ControllerSelection,
     reporting: ReportingSelection,
+    identity: ProfileIdentity,
     profile: PathBuf,
     trace: PathBuf,
     button: Option<ButtonKind>,
@@ -150,6 +151,7 @@ fn parse_connection(
     let mut profile = None;
     let mut trace = None;
     let mut reporting = None;
+    let mut identity = None;
     let mut button = None;
     let mut imu_duration = None;
     for option in arguments.chunks_exact(2) {
@@ -168,6 +170,14 @@ fn parse_connection(
                 option[1]
                     .to_str()
                     .and_then(parse_reporting_selection)
+                    .ok_or(())?,
+            )?,
+            Some("--local-address") => set_once(
+                &mut identity,
+                option[1]
+                    .to_str()
+                    .and_then(|value| LocalAddress::parse(value).ok())
+                    .map(ProfileIdentity::LocalAddress)
                     .ok_or(())?,
             )?,
             Some("--button") => set_once(
@@ -193,6 +203,13 @@ fn parse_connection(
             reporting.unwrap_or(ReportingSelection::Periodic)
         }
     };
+    let identity = match (operation, identity) {
+        (ConnectionOperation::Pair, identity) => {
+            identity.unwrap_or(ProfileIdentity::AdapterDefault)
+        }
+        (ConnectionOperation::Reconnect, None) => ProfileIdentity::AdapterDefault,
+        (ConnectionOperation::Reconnect, Some(_)) => return Err(()),
+    };
     let controller = controller.ok_or(())?;
     if imu_duration.is_some()
         && (operation != ConnectionOperation::Reconnect
@@ -205,6 +222,7 @@ fn parse_connection(
         operation,
         controller,
         reporting,
+        identity,
         profile: profile.ok_or(())?,
         trace: trace.ok_or(())?,
         button,
@@ -310,13 +328,26 @@ struct SafeAdapter {
     product_id: u16,
 }
 
-#[derive(Default)]
 struct ConnectionEvidence {
+    identity_kind: ProfileIdentityKind,
     imu: Option<ImuRunEvidence>,
     shutdown_latency_ns: Option<u64>,
     neutral_close: bool,
     profile_unchanged: Option<bool>,
     adapter_reopened: Option<bool>,
+}
+
+impl Default for ConnectionEvidence {
+    fn default() -> Self {
+        Self {
+            identity_kind: ProfileIdentityKind::AdapterDefault,
+            imu: None,
+            shutdown_latency_ns: None,
+            neutral_close: false,
+            profile_unchanged: None,
+            adapter_reopened: None,
+        }
+    }
 }
 
 struct ImuRunEvidence {
@@ -373,12 +404,13 @@ impl ProbeBackend for SystemBackend {
             let mut controller = Controller::<M, reporting::Periodic>::builder(DEFAULT_ADAPTER)
                 .profile_path(&request.profile)
                 .create_profile(CreateProfileOptions {
-                    identity: ProfileIdentity::AdapterDefault,
+                    identity: request.identity,
                     pair_timeout: CONNECTION_TIMEOUT,
                 })
                 .map_err(|error| error.kind())?;
             apply_button_and_close(&mut controller, request.button)?;
             Ok(ConnectionEvidence {
+                identity_kind: profile_identity_kind(request.identity),
                 neutral_close: true,
                 ..ConnectionEvidence::default()
             })
@@ -393,6 +425,9 @@ impl ProbeBackend for SystemBackend {
         let trace = TraceSession::install(&request.trace)?;
         trace::emit_environment::<M, R>();
         let operation = (|| {
+            let identity_kind = inspect_profile(&request.profile)
+                .map_err(|error| error.kind())?
+                .identity_kind();
             let profile_before = request
                 .imu_duration
                 .map(|_| read_profile_bytes(&request.profile))
@@ -409,6 +444,7 @@ impl ProbeBackend for SystemBackend {
             let shutdown_started = Instant::now();
             let imu = finish_connection(&mut controller, connection)?;
             let mut evidence = ConnectionEvidence {
+                identity_kind,
                 imu,
                 shutdown_latency_ns: Some(duration_ns(shutdown_started.elapsed())),
                 neutral_close: true,
@@ -643,6 +679,7 @@ fn connection_completed_record(request: &ConnectionRequest, evidence: Connection
         "operation": connection_operation_name(request.operation),
         "controller_kind": controller_kind(request.controller).profile_name(),
         "reporting_kind": reporting_name(request.reporting),
+        "identity_kind": identity_kind_name(evidence.identity_kind),
         "imu_run_seconds": imu.as_ref().map(|evidence| evidence.duration_seconds),
         "imu_apply_command_latency_ns": imu.as_ref().map(|evidence| evidence.apply_command_latency_ns),
         "imu_non_neutral_reports_accepted": imu.as_ref().map(|evidence| evidence.non_neutral_reports_accepted),
@@ -707,10 +744,18 @@ const fn identity_kind_name(kind: ProfileIdentityKind) -> &'static str {
     }
 }
 
+const fn profile_identity_kind(identity: ProfileIdentity) -> ProfileIdentityKind {
+    match identity {
+        ProfileIdentity::AdapterDefault => ProfileIdentityKind::AdapterDefault,
+        ProfileIdentity::LocalAddress(_) => ProfileIdentityKind::LocalAddress,
+    }
+}
+
 const fn error_kind_name(kind: ErrorKind) -> &'static str {
     match kind {
         ErrorKind::AdapterDiscovery => "adapter_discovery",
         ErrorKind::TransportOpen => "transport_open",
+        ErrorKind::AdapterIdentityRecoveryRequired => "adapter_identity_recovery_required",
         ErrorKind::Trace => "trace",
         ErrorKind::ProfilePathRequired => "profile_path_required",
         ErrorKind::ProfileNotFound => "profile_not_found",

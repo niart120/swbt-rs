@@ -166,14 +166,20 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     /// Opens the configured controller transport.
     ///
     /// With the `bumble` feature, this operation opens and initializes the
-    /// selected Bluetooth HCI adapter and starts the owned worker. Repeated
-    /// calls while that runtime is open succeed without opening another
-    /// adapter or starting another worker.
+    /// selected Bluetooth HCI adapter and starts the owned worker. A persistent
+    /// explicit-local-address profile first applies and reads back its volatile
+    /// CSR adapter identity, then verifies the same address after normal HCI
+    /// initialization. Repeated calls while that runtime is open succeed
+    /// without opening another adapter or starting another worker.
     ///
     /// # Errors
     ///
     /// Without the `bumble` feature, returns
     /// [`ErrorKind::UnsupportedCapability`] before transport side effects.
+    /// Returns [`ErrorKind::AdapterIdentityRecoveryRequired`] when an explicit
+    /// identity write started but the final adapter state could not be
+    /// verified; physically power-cycle the USB adapter and verify its
+    /// original identity before retrying.
     /// With the feature enabled, returns a typed transport or worker error when
     /// initialization or worker startup fails.
     pub fn open(&mut self) -> crate::Result<()> {
@@ -555,9 +561,11 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     /// identity or unavailable Bluetooth transport,
     /// [`crate::ErrorKind::ProfileAlreadyExists`] when the target already
     /// exists, [`crate::ErrorKind::TransportOpen`] when the adapter cannot be
-    /// opened and initialized, or a structured profile I/O, pairing,
-    /// connection, transport, protocol, cleanup, or worker error from the
-    /// corresponding stage.
+    /// opened and initialized,
+    /// [`crate::ErrorKind::AdapterIdentityRecoveryRequired`] when an explicit
+    /// identity write started but could not be verified, or a structured
+    /// profile I/O, pairing, connection, transport, protocol, cleanup, or
+    /// worker error from the corresponding stage.
     pub fn create_profile(self, options: CreateProfileOptions) -> crate::Result<Controller<M, R>> {
         <R as reporting::sealed::Sealed>::create_profile(self, options)
     }

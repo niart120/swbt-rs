@@ -33,9 +33,9 @@ archive smoke が完了するまで `publish = false` を維持します。利�
   前 session の入力状態と stale event を持ち越しません。
 - `build()` 直後の Configured controller には open runtime がないため、入力操作は
   `ErrorKind::TransportClosed` を返します。
-- default feature は空です。`bumble` feature を有効にした場合だけ、reader shutdown と
-  join、および ACL パケットがホスト側の待ち行列を離れた状態の判定を追加した一時 fork の commit
-  `b8c7cd625bc2ac2f58a4beb4ade1264426969819` と `rusb` を組み込みます。
+- default feature は空です。`bumble` feature を有効にした場合だけ、reader shutdown と join、ACL パケットが
+  host queue を離れた状態の判定、CSR command 用の Vendor Event 応答待ちと応答を待たない command 送信を追加した
+  一時 fork の commit `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1` と `rusb` を組み込みます。
 - `list_adapters()` は `bumble` feature で USB device/config/interface descriptor を読み、
   Bluetooth HCI class の candidate を返します。device open、driver detach、interface claim、
   HCI command は行いません。feature 無効時は `ErrorKind::UnsupportedCapability` を返します。
@@ -195,6 +195,8 @@ cargo run --locked --features probe --bin swbt-probe -- open --adapter usb:0
 cargo run --locked --features probe --bin swbt-probe -- profile inspect .\profile.json
 cargo run --locked --features probe --bin swbt-probe -- profile verify .\profile.json
 cargo run --locked --features probe --bin swbt-probe -- pair --controller pro --profile .\new-profile.json --trace .\pair-trace.ndjson
+$localAddress = Read-Host 'locally administered address (XX:XX:XX:XX:XX:XX)'
+cargo run --locked --features probe --bin swbt-probe -- pair --controller pro --profile .\new-local-profile.json --trace .\local-pair-trace.ndjson --local-address $localAddress
 cargo run --locked --features probe --bin swbt-probe -- reconnect --controller pro --profile .\profile.json --trace .\reconnect-trace.ndjson
 ```
 
@@ -205,6 +207,13 @@ adapter reopenを検査します。traceの`trace_elapsed_ns`はstatus投影後�
 時刻であり、無線送信完了時刻ではありません。実機runと測定境界は
 [M8 実機証跡](https://github.com/niart120/swbt-rs/blob/main/spec/complete/unit_009/evidence/pro-imu-diagnostics-windows-20260801/SUMMARY.md)
 に記録しています。
+
+`pair --local-address`はCSR8510 A10の揮発address書換え専用です。個別かつローカル管理のaddressだけを
+受け付け、指定なしは従来どおりadapter-defaultです。作成したprofileは指定addressをidentityとして
+保存するため、1個のdongle・1個のaddress・1個のprofileを一組として扱ってください。成功NDJSONは
+`identity_kind`を`local_address`または`adapter_default`として出しますが、address値は標準出力、
+標準エラー、traceへ出しません。`adapter_identity_recovery_required`で終了した場合は再試行せず、dongleを
+物理的に抜き差しして揮発書換えを解除してから次の操作へ進みます。
 
 ## 開発
 

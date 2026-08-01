@@ -158,6 +158,14 @@ impl<M: ControllerModel> ProfileConfig<M> {
             Self::Persistent { path, .. } => Some(path),
         }
     }
+
+    #[cfg(feature = "bumble")]
+    pub(super) const fn identity(&self) -> crate::ProfileIdentity {
+        match self {
+            Self::Ephemeral => crate::ProfileIdentity::AdapterDefault,
+            Self::Persistent { profile, .. } => profile.identity(),
+        }
+    }
 }
 
 impl<M: ControllerModel> ControllerConfig<M, reporting::Periodic> {

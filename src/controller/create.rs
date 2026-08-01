@@ -26,6 +26,7 @@ use super::{
 pub(super) struct CreateProfilePlan<M: ControllerModel, R: ReportingMode> {
     config: BuilderConfig<M, R>,
     path: std::path::PathBuf,
+    identity: ProfileIdentity,
     pair_timeout: Duration,
 }
 
@@ -38,6 +39,11 @@ impl<M: ControllerModel, R: ReportingMode> CreateProfilePlan<M, R> {
     #[cfg(test)]
     pub(super) const fn pair_timeout(&self) -> Duration {
         self.pair_timeout
+    }
+
+    #[cfg(all(test, feature = "bumble"))]
+    pub(super) const fn identity(&self) -> ProfileIdentity {
+        self.identity
     }
 
     fn require_supported_backend(
@@ -61,9 +67,10 @@ impl<M: ControllerModel, R: ReportingMode> BackendSupportedCreateProfilePlan<M, 
         let CreateProfilePlan {
             config,
             path,
+            identity,
             pair_timeout,
         } = self.plan;
-        let document = ProfileDocument::empty_adapter_default::<M>();
+        let document = ProfileDocument::empty::<M>(identity);
         let bytes = document.to_json_bytes()?;
         store.create_new(&path, &bytes).map_err(|source| {
             let (kind, message) = if source.kind() == std::io::ErrorKind::AlreadyExists {
@@ -323,12 +330,12 @@ pub(super) fn validate_target<M: ControllerModel, R: ReportingMode>(
         )
     })?;
 
-    match options.identity {
-        ProfileIdentity::AdapterDefault => {}
-        ProfileIdentity::LocalAddress(_) => {
+    if matches!(options.identity, ProfileIdentity::LocalAddress(_)) {
+        #[cfg(not(feature = "bumble"))]
+        {
             return Err(Error::new(
                 ErrorKind::UnsupportedCapability,
-                "explicit local address profiles are not supported",
+                "explicit local address profiles require the Bumble transport",
             ));
         }
     }
@@ -343,6 +350,7 @@ pub(super) fn validate_target<M: ControllerModel, R: ReportingMode>(
         ProfileCreateTargetState::Absent => Ok(CreateProfilePlan {
             path: path.to_owned(),
             config,
+            identity: options.identity,
             pair_timeout: options.pair_timeout,
         }),
         ProfileCreateTargetState::Existing => Err(Error::new(

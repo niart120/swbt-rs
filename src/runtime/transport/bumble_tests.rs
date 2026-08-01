@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::error::Error as _;
 use std::fs::{self, OpenOptions};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
@@ -20,11 +21,15 @@ use fs2::FileExt as _;
 
 use crate::adapter::AdapterSelector;
 use crate::model::Pro;
+use crate::profile::{LocalAddress, ProfileIdentity};
 
+#[cfg(feature = "adapter-tests")]
+use super::bumble::prepare_target_adapter_identity_for_test;
 use super::bumble::{
     BumbleSession, BumbleTransportPort, SplitTransportOpener, initialize_bumble_session_with,
-    initialize_bumble_session_with_profile,
+    initialize_bumble_session_with_profile, initialize_bumble_transport_with,
 };
+use super::csr::{build_csr_bd_addr_volatile_rewrite_plan, matches_csr_vendor_response};
 use super::profile_key_store::ProfileKeyStoreFactory;
 use super::{TransportConfig, TransportErrorKind, TransportEvent, TransportPort, activity_channel};
 
@@ -33,7 +38,62 @@ const HCI_ADDRESS: [u8; 6] = [0x7d, 0x9f, 0xf9, 0xdc, 0x1b, 0x00];
 const PROFILE_NAMESPACE: &str = "00:1B:DC:F9:9F:7D";
 const PROFILE_PEER: &str = "11:22:33:44:55:66";
 const PROFILE_SECRET_SENTINEL: &str = "PAIRING-KEY-PROFILE-SECRET";
+const TARGET_ADDRESS: [u8; 6] = [0x02, 0x12, 0x34, 0x56, 0x78, 0x9A];
 static NEXT_PROFILE_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(feature = "adapter-tests")]
+#[test]
+#[ignore = "rewrites the CSR8510 A10 identity and reports only a safe internal stage"]
+fn target_adapter_explicit_identity_preparation_reports_safe_stage() {
+    let selector = AdapterSelector::from("usb:0a12:0001");
+    match prepare_target_adapter_identity_for_test(&selector, TARGET_ADDRESS) {
+        Ok(preparation) => eprintln!("adapter_identity_preparation={preparation:?}"),
+        Err(error) => panic!("adapter identity preparation failed at {:?}", error.stage()),
+    }
+}
+
+#[cfg(feature = "adapter-tests")]
+#[test]
+#[ignore = "claims the CSR8510 A10 and compares its address without displaying it"]
+fn target_adapter_identity_matches_private_baseline() {
+    const PATH_ENV: &str = "SWBT_ADAPTER_IDENTITY_BASELINE";
+    const ACTION_ENV: &str = "SWBT_ADAPTER_IDENTITY_ACTION";
+
+    let baseline_path = std::env::var_os(PATH_ENV).expect("private baseline path is configured");
+    let action = std::env::var(ACTION_ENV).expect("identity action is configured");
+    let config = TransportConfig::for_model::<Pro>();
+    let mut transport = BumbleTransportPort::new(AdapterSelector::from("usb:0a12:0001"), config);
+    let current = transport
+        .open(activity_channel().0)
+        .expect("open target adapter")
+        .local_address();
+    transport.close().expect("close target adapter");
+
+    match action.as_str() {
+        "record" => {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(baseline_path)
+                .expect("create private adapter identity baseline");
+            file.write_all(&current)
+                .expect("write private adapter identity baseline");
+            file.sync_all()
+                .expect("sync private adapter identity baseline");
+        }
+        "verify" => {
+            let baseline = fs::read(baseline_path).expect("read private adapter identity baseline");
+            assert_eq!(
+                baseline.as_slice(),
+                current,
+                "adapter identity was not restored"
+            );
+        }
+        _ => panic!("identity action must be record or verify"),
+    }
+
+    eprintln!("adapter_identity_action={action} matched=true");
+}
 
 #[cfg(feature = "adapter-tests")]
 #[test]
@@ -51,15 +111,9 @@ fn target_adapter_reports_initialized_identity_version_and_classic_capability() 
         .local_version()
         .expect("target adapter reports HCI/LMP version metadata");
     eprintln!(
-        "local_address={:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X} \
+        "local_address_present=true \
          hci_version=0x{:02X} hci_subversion=0x{:04X} \
          lmp_version=0x{:02X} company_identifier=0x{:04X} lmp_subversion=0x{:04X}",
-        local_address[0],
-        local_address[1],
-        local_address[2],
-        local_address[3],
-        local_address[4],
-        local_address[5],
         version.hci_version(),
         version.hci_subversion(),
         version.lmp_version(),
@@ -148,6 +202,229 @@ fn bumble_initialization_uses_configured_device_and_exact_hci_order() {
     assert_eq!(usb.product_id(), 0x0001);
     assert_eq!(usb.bus_number(), 1);
     assert_eq!(usb.device_address(), 7);
+}
+
+#[test]
+fn adapter_default_wrapper_preserves_the_single_open_command_sequence() {
+    let config = TransportConfig::for_model::<Pro>();
+    let commands = Arc::new(Mutex::new(Vec::new()));
+    let (transport, _drops) = scripted_transport(
+        successful_initialization_responses(&config),
+        Arc::clone(&commands),
+        None,
+    );
+    let selectors = Arc::new(Mutex::new(Vec::new()));
+    let mut opener = ScriptedOpener::new(transport, Arc::clone(&selectors));
+
+    let session = initialize_bumble_transport_with(
+        &mut opener,
+        &AdapterSelector::from("usb:0A12:0001"),
+        &config,
+        ProfileIdentity::AdapterDefault,
+        activity_channel().0,
+        None,
+    )
+    .expect("adapter-default wrapper must preserve normal initialization");
+
+    assert_eq!(lock(&selectors).as_slice(), ["usb:0A12:0001"]);
+    assert_eq!(lock(&commands).as_slice(), expected_commands(&config));
+    assert_eq!(session.capabilities().local_address(), DISPLAY_ADDRESS);
+}
+
+#[test]
+fn explicit_identity_rewrite_guards_normal_open_and_keys_the_target_namespace() {
+    let config = TransportConfig::for_model::<Pro>();
+    let target = LocalAddress::try_from(TARGET_ADDRESS).expect("valid local address fixture");
+    let temp = ProfileTempDirectory::new("explicit-identity");
+    let path = temp.path().join("pro.json");
+    fs::write(&path, local_profile_bytes()).expect("write local-address profile");
+    let key_store = ProfileKeyStoreFactory::for_model::<Pro>(path.clone());
+
+    let before_commands = Arc::new(Mutex::new(Vec::new()));
+    let mut before_responses = identity_probe_responses(DISPLAY_ADDRESS);
+    before_responses.push(HciPacket::Event(Event::Vendor {
+        data: hex("c201000c0011470370000001000400080056009a7834001202"),
+    }));
+    let (before, _before_drops) =
+        scripted_transport(before_responses, Arc::clone(&before_commands), None);
+
+    let readback_commands = Arc::new(Mutex::new(Vec::new()));
+    let (readback, _readback_drops) = scripted_transport(
+        identity_probe_responses(TARGET_ADDRESS),
+        Arc::clone(&readback_commands),
+        None,
+    );
+
+    let normal_commands = Arc::new(Mutex::new(Vec::new()));
+    let acl_packets = Arc::new(Mutex::new(Vec::new()));
+    let (normal, source, _normal_drops) = controlled_transport(
+        successful_initialization_responses_for(&config, TARGET_ADDRESS),
+        Arc::clone(&normal_commands),
+        acl_packets,
+    );
+    let selectors = Arc::new(Mutex::new(Vec::new()));
+    let mut opener = ScriptedOpener::sequence([before, readback, normal], Arc::clone(&selectors));
+    let (activity, wakes) = activity_channel();
+
+    let mut session = initialize_bumble_transport_with(
+        &mut opener,
+        &AdapterSelector::from("usb:0A12:0001"),
+        &config,
+        ProfileIdentity::LocalAddress(target),
+        activity,
+        Some(&key_store),
+    )
+    .expect("explicit identity must rewrite, read back, and pass normal guard");
+
+    assert_eq!(lock(&selectors).len(), 3);
+    let rewrite = build_csr_bd_addr_volatile_rewrite_plan(TARGET_ADDRESS, 0x4711);
+    let before_commands = lock(&before_commands);
+    assert_eq!(before_commands[0], Command::ReadLocalVersionInformation);
+    assert_eq!(before_commands[1], Command::ReadBdAddr);
+    let Command::Generic {
+        op_code,
+        parameters,
+    } = &before_commands[2]
+    else {
+        panic!("identity write must use a generic vendor command");
+    };
+    assert_eq!(*op_code, rewrite.write().op_code());
+    assert_eq!(parameters, rewrite.write().parameters());
+    assert!(matches_csr_vendor_response(
+        rewrite.write(),
+        &hex("c201000c0011470370000001000400080056009a7834001202")
+    ));
+    let Command::Generic {
+        op_code,
+        parameters,
+    } = &before_commands[3]
+    else {
+        panic!("warm reset must use a generic vendor command");
+    };
+    assert_eq!(*op_code, rewrite.reset().op_code());
+    assert_eq!(parameters, rewrite.reset().parameters());
+    drop(before_commands);
+    assert_eq!(
+        lock(&readback_commands).as_slice(),
+        [Command::ReadLocalVersionInformation, Command::ReadBdAddr]
+    );
+    assert_eq!(
+        lock(&normal_commands).as_slice(),
+        expected_commands(&config)
+    );
+    assert_eq!(session.capabilities().local_address(), TARGET_ADDRESS);
+
+    while wakes.try_recv().is_ok() {}
+    let peer =
+        Address::parse(PROFILE_PEER, AddressType::PUBLIC_DEVICE).expect("valid test peer address");
+    source.push(Ok(Some(HciPacket::Event(Event::LinkKeyNotification {
+        bd_addr: peer,
+        link_key: [0xC7; 16],
+        key_type: 0x04,
+    }))));
+    wakes
+        .recv_timeout(Duration::from_secs(1))
+        .expect("link-key notification activity");
+    assert!(
+        session
+            .poll(Duration::ZERO)
+            .expect("persist target bond")
+            .is_empty()
+    );
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).expect("read target-keyed profile"))
+            .expect("saved local-address profile remains JSON");
+    assert_eq!(
+        saved["key_store"]["namespaces"]["02:12:34:56:78:9A"][PROFILE_PEER]["link_key"]["value"],
+        "c7".repeat(16)
+    );
+    assert!(
+        saved["key_store"]["namespaces"]
+            .get(PROFILE_NAMESPACE)
+            .is_none()
+    );
+    session.close().expect("close explicit identity session");
+}
+
+#[test]
+fn post_rewrite_guard_mismatch_is_recovery_required() {
+    let config = TransportConfig::for_model::<Pro>();
+    let target = LocalAddress::try_from(TARGET_ADDRESS).expect("valid local address fixture");
+    let mut before_responses = identity_probe_responses(DISPLAY_ADDRESS);
+    before_responses.push(HciPacket::Event(Event::Vendor {
+        data: hex("c201000c0011470370000001000400080056009a7834001202"),
+    }));
+    let (before, _before_drops) =
+        scripted_transport(before_responses, Arc::new(Mutex::new(Vec::new())), None);
+    let (readback, _readback_drops) = scripted_transport(
+        identity_probe_responses(TARGET_ADDRESS),
+        Arc::new(Mutex::new(Vec::new())),
+        None,
+    );
+    let normal_commands = Arc::new(Mutex::new(Vec::new()));
+    let (normal, _normal_drops) = scripted_transport(
+        successful_initialization_responses(&config),
+        Arc::clone(&normal_commands),
+        None,
+    );
+    let mut opener =
+        ScriptedOpener::sequence([before, readback, normal], Arc::new(Mutex::new(Vec::new())));
+
+    let error = match initialize_bumble_transport_with(
+        &mut opener,
+        &AdapterSelector::from("usb:0A12:0001"),
+        &config,
+        ProfileIdentity::LocalAddress(target),
+        activity_channel().0,
+        None,
+    ) {
+        Ok(_) => panic!("normal open mismatch after a rewrite must require recovery"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        error.kind(),
+        TransportErrorKind::AdapterIdentityRecoveryRequired
+    );
+    assert_eq!(lock(&normal_commands).len(), 8);
+}
+
+#[test]
+fn already_active_guard_mismatch_fails_before_identity_writes() {
+    let config = TransportConfig::for_model::<Pro>();
+    let target = LocalAddress::try_from(TARGET_ADDRESS).expect("valid local address fixture");
+    let identity_commands = Arc::new(Mutex::new(Vec::new()));
+    let (identity, _identity_drops) = scripted_transport(
+        identity_probe_responses(TARGET_ADDRESS),
+        Arc::clone(&identity_commands),
+        None,
+    );
+    let normal_commands = Arc::new(Mutex::new(Vec::new()));
+    let (normal, _normal_drops) = scripted_transport(
+        successful_initialization_responses(&config),
+        Arc::clone(&normal_commands),
+        None,
+    );
+    let mut opener = ScriptedOpener::sequence([identity, normal], Arc::new(Mutex::new(Vec::new())));
+
+    let error = match initialize_bumble_transport_with(
+        &mut opener,
+        &AdapterSelector::from("usb:0A12:0001"),
+        &config,
+        ProfileIdentity::LocalAddress(target),
+        activity_channel().0,
+        None,
+    ) {
+        Ok(_) => panic!("normal guard mismatch without a write must fail closed"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.kind(), TransportErrorKind::IdentityMismatch);
+    assert_eq!(
+        lock(&identity_commands).as_slice(),
+        [Command::ReadLocalVersionInformation, Command::ReadBdAddr]
+    );
+    assert_eq!(lock(&normal_commands).len(), 8);
 }
 
 #[test]
@@ -772,14 +1049,24 @@ fn bumble_close_cancels_reader_waits_for_completion_and_joins_once() {
 }
 
 struct ScriptedOpener {
-    transport: Option<SplitOpenedTransport>,
+    transports: VecDeque<SplitOpenedTransport>,
     selectors: Arc<Mutex<Vec<String>>>,
 }
 
 impl ScriptedOpener {
     fn new(transport: SplitOpenedTransport, selectors: Arc<Mutex<Vec<String>>>) -> Self {
         Self {
-            transport: Some(transport),
+            transports: VecDeque::from([transport]),
+            selectors,
+        }
+    }
+
+    fn sequence(
+        transports: impl IntoIterator<Item = SplitOpenedTransport>,
+        selectors: Arc<Mutex<Vec<String>>>,
+    ) -> Self {
+        Self {
+            transports: transports.into_iter().collect(),
             selectors,
         }
     }
@@ -788,8 +1075,8 @@ impl ScriptedOpener {
 impl SplitTransportOpener for ScriptedOpener {
     fn open_split(&mut self, selector: &str) -> BumbleResult<SplitOpenedTransport> {
         lock(&self.selectors).push(selector.to_owned());
-        self.transport
-            .take()
+        self.transports
+            .pop_front()
             .ok_or_else(|| BumbleError::Remote("scripted transport already consumed".into()))
     }
 }
@@ -803,6 +1090,16 @@ impl PacketSource for ScriptedSource {
     fn read_packet(&mut self) -> BumbleResult<Option<HciPacket>> {
         self.responses.pop_front().unwrap_or(Ok(None))
     }
+
+    fn shutdown_handle(&self) -> Option<Arc<dyn PacketSourceShutdown>> {
+        Some(Arc::new(NoopScriptedShutdown))
+    }
+}
+
+struct NoopScriptedShutdown;
+
+impl PacketSourceShutdown for NoopScriptedShutdown {
+    fn request_shutdown(&self) {}
 }
 
 impl Drop for ScriptedSource {
@@ -1047,6 +1344,22 @@ fn empty_profile_bytes() -> Vec<u8> {
     .expect("serialize empty test profile")
 }
 
+fn local_profile_bytes() -> Vec<u8> {
+    serde_json::to_vec_pretty(&serde_json::json!({
+        "format": "swbt.profile",
+        "schema_version": 2,
+        "controller_kind": "pro",
+        "identity": {
+            "kind": "exp-local-address",
+            "address": "02:12:34:56:78:9A"
+        },
+        "key_store": {
+            "namespaces": {}
+        }
+    }))
+    .expect("serialize local-address test profile")
+}
+
 struct ProfileTempDirectory {
     path: PathBuf,
 }
@@ -1120,12 +1433,21 @@ fn controlled_transport(
 }
 
 fn successful_initialization_responses(config: &TransportConfig) -> Vec<HciPacket> {
+    successful_initialization_responses_for(config, DISPLAY_ADDRESS)
+}
+
+fn successful_initialization_responses_for(
+    config: &TransportConfig,
+    display_address: [u8; 6],
+) -> Vec<HciPacket> {
     let mut responses = controller_initialization_responses();
+    let mut hci_address = display_address;
+    hci_address.reverse();
     responses.push(command_complete(
         Command::ReadBdAddr,
         ReturnParameters::ReadBdAddr {
             status: 0,
-            bd_addr: Address::from_bytes(HCI_ADDRESS, AddressType::PUBLIC_DEVICE),
+            bd_addr: Address::from_bytes(hci_address, AddressType::PUBLIC_DEVICE),
         },
     ));
     responses.extend(
@@ -1134,6 +1456,42 @@ fn successful_initialization_responses(config: &TransportConfig) -> Vec<HciPacke
             .map(|command| command_complete(command, ReturnParameters::Raw { data: vec![0] })),
     );
     responses
+}
+
+fn identity_probe_responses(display_address: [u8; 6]) -> Vec<HciPacket> {
+    let mut hci_address = display_address;
+    hci_address.reverse();
+    vec![
+        command_complete(
+            Command::ReadLocalVersionInformation,
+            ReturnParameters::ReadLocalVersionInformation {
+                status: 0,
+                hci_version: 0x09,
+                hci_subversion: 0x1234,
+                lmp_version: 0x09,
+                company_identifier: 0x000a,
+                lmp_subversion: 0x5678,
+            },
+        ),
+        command_complete(
+            Command::ReadBdAddr,
+            ReturnParameters::ReadBdAddr {
+                status: 0,
+                bd_addr: Address::from_bytes(hci_address, AddressType::PUBLIC_DEVICE),
+            },
+        ),
+    ]
+}
+
+fn hex(value: &str) -> Vec<u8> {
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let text = std::str::from_utf8(pair).expect("ASCII hex fixture");
+            u8::from_str_radix(text, 16).expect("valid hex fixture")
+        })
+        .collect()
 }
 
 fn controller_initialization_responses() -> Vec<HciPacket> {

@@ -99,18 +99,20 @@ bumble-transport = { git = "https://github.com/chaitanyarahalkar/bumble-rs", rev
 
 0.1.0 candidate は、上記の公式基準断面から public fork
 [`niart120/bumble-rs`](https://github.com/niart120/bumble-rs) の exact revision
-[`b8c7cd625bc2ac2f58a4beb4ade1264426969819`](https://github.com/niart120/bumble-rs/commit/b8c7cd625bc2ac2f58a4beb4ade1264426969819)
-へ進めている。差分は次の2 commit。
+[`cb55e2d98dc7b7b0227c43772c9ae184034dd9a1`](https://github.com/niart120/bumble-rs/commit/cb55e2d98dc7b7b0227c43772c9ae184034dd9a1)
+へ進めている。差分は次の3 commit。
 
 | commit | 目的 |
 |---|---|
 | `48f1bc3` | external transport reader の shutdown lifecycle を追加 |
 | `b8c7cd6` | ACL output が host queue を離れた状態を公開 |
+| `cb55e2d` | generic HCI command の Vendor Event 応答待ちと、応答を待たない command 送信を追加 |
 
-この fork revision は M3-M8 の CI、仮想 Bluetooth test、Windows 実機試験で使った依存断面であり、
-公式基準断面そのものを書き換えない。Bumble upstream への PR は作成していない。0.1.0 release commit は
-merge 前には確定せず、公開承認後に `spec/publishing.md` の手順で main SHA、Cargo.lock hash、Bumble
-revision を同時に記録する。
+先頭2 commit は M3-M9 の CI、仮想 Bluetooth test、Windows 実機試験で使った依存差分である。3つ目は
+unit_011 の dependency unit test と、CSR8510 A10 での明示 local-address pair / reconnect 実機試験を通した。
+この candidate revision は公式基準断面そのものを書き換えない。Bumble upstream への PR は作成していない。
+0.1.0 release commit は merge 前には確定せず、公開承認後に `spec/publishing.md` の手順で main SHA、
+Cargo.lock hash、Bumble revision を同時に記録する。
 
 revision 更新は専用 PR で行い、最低限次を実行する。
 
