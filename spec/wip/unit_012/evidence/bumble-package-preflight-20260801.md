@@ -83,6 +83,11 @@ layer 0 の `swbt-bumble` は `cargo publish --dry-run --locked -p swbt-bumble` 
 `swbt-bumble-codecs`、`swbt-bumble-crypto`、`swbt-bumble-l2cap`、`swbt-bumble-rtp` も同じ
 `cargo publish --dry-run --locked` が成功した。layer 0 は 8/8 package が公開前検査を通過した。
 
+layer 1–8 の 16 package は、一時 `[patch.crates-io]` で同 revision の未公開下位 package を local path
+へ解決した `cargo publish --dry-run --locked` が 16/16 成功した。対象 24 package はすべて publish
+metadata、archive、verify build、upload 前処理を検査済みである。layer 1–8 の結果は local patch 補助で
+あり、下位 package を crates.io から取得できることは証明しない。
+
 公開 turn では各 package について、公開直前の name availability、対象 `.crate` の checksum、
 `cargo publish --dry-run`、公開後の `cargo info` と owner 一覧を確認する。実際の publish は当該 turn の
 明示承認なしに行わない。
