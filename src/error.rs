@@ -45,8 +45,6 @@ pub enum ErrorKind {
     /// The USB adapter must be physically power-cycled and its original
     /// identity checked before retrying.
     AdapterIdentityRecoveryRequired,
-    /// The bounded worker command queue has no remaining capacity.
-    Busy,
     /// The controller worker terminated or could not complete the operation.
     WorkerFailed,
     /// The operation was rejected or interrupted because shutdown has begun.

@@ -49,22 +49,6 @@ use super::{
     not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "feature-disabled builds do not create command channels"
-    )
-)]
-const COMMAND_CAPACITY: usize = 16;
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not construct worker budgets"
-    )
-)]
-const COMMAND_BATCH: usize = 16;
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
         reason = "feature-disabled builds do not construct worker budgets"
     )
 )]
@@ -79,8 +63,8 @@ const POLL_BATCHES: usize = 4;
 const UNOWNED_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[cfg(test)]
-pub(super) const fn default_runtime_tuning() -> (usize, usize, usize) {
-    (COMMAND_CAPACITY, COMMAND_BATCH, POLL_BATCHES)
+pub(super) const fn default_runtime_tuning() -> usize {
+    POLL_BATCHES
 }
 
 #[cfg_attr(
@@ -383,13 +367,12 @@ where
             protocol,
             transport,
             &config.mode,
-            WorkerBudget::new(COMMAND_BATCH, POLL_BATCHES),
+            WorkerBudget::new(POLL_BATCHES),
             Box::new(|_| {}),
             self.status.clone(),
         );
-        let (commands, command_receiver) = crate::runtime::command::command_channel::<
-            RuntimeCommand<M, R>,
-        >(COMMAND_CAPACITY, activity.clone());
+        let (commands, command_receiver) =
+            crate::runtime::command::command_channel::<RuntimeCommand<M, R>>(activity.clone());
         let (shutdown, shutdown_receiver) = priority_shutdown_channel(activity);
         let thread =
             spawn_worker_thread(worker, clock, shutdown_receiver, command_receiver, waiter)

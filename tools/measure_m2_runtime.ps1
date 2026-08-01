@@ -411,7 +411,7 @@ foreach ($rawLine in [System.IO.File]::ReadLines($rawPath)) {
                 $commandCapacity -or
                 @($rawRecord.post_release_command_completion_observed_ns).Count -ne
                 $commandCapacity) {
-                throw "fairness sample $expectedIndex does not contain one full command batch"
+                throw "fairness sample $expectedIndex does not contain the configured command workload"
             }
             if (@($rawRecord.reply_attempt_ns).Count -ne
                 $fakeEventCapacity -or

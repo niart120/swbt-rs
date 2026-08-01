@@ -162,18 +162,13 @@ pub(crate) trait CommandSource<C> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WorkerBudget {
-    command_batch: usize,
     poll_batches: usize,
 }
 
 impl WorkerBudget {
-    pub(crate) const fn new(command_batch: usize, poll_batches: usize) -> Self {
-        assert!(command_batch > 0, "worker command batch must be positive");
+    pub(crate) const fn new(poll_batches: usize) -> Self {
         assert!(poll_batches > 0, "worker poll batch count must be positive");
-        Self {
-            command_batch,
-            poll_batches,
-        }
+        Self { poll_batches }
     }
 }
 
@@ -315,7 +310,7 @@ pub(crate) struct StepProgress {
     skipped_deadlines: u64,
     immediate: bool,
     next_deadline: Option<Duration>,
-    command_results: Vec<WorkerCommandProgress>,
+    command_result: Option<Result<(), WorkerCommandError>>,
     operation_errors: Vec<WorkerOperationError>,
 }
 
@@ -328,7 +323,7 @@ impl StepProgress {
             skipped_deadlines: 0,
             immediate: false,
             next_deadline: None,
-            command_results: Vec::new(),
+            command_result: None,
             operation_errors: Vec::new(),
         }
     }
@@ -343,8 +338,18 @@ impl StepProgress {
         ))
     }
 
-    pub(crate) fn take_command_results(&mut self) -> Vec<WorkerCommandProgress> {
-        std::mem::take(&mut self.command_results)
+    pub(crate) fn take_command_result(&mut self) -> Option<Result<(), WorkerCommandError>> {
+        self.command_result.take()
+    }
+
+    fn record_command_progress(&mut self, progress: WorkerCommandProgress) {
+        let WorkerCommandProgress::Complete(result) = progress else {
+            return;
+        };
+        assert!(
+            self.command_result.replace(result).is_none(),
+            "worker step produced multiple command results"
+        );
     }
 }
 
@@ -508,7 +513,7 @@ pub(crate) enum ReportingEvent {
 pub(crate) struct ReportingDue {
     actions: usize,
     immediate: bool,
-    completions: Vec<WorkerCommandProgress>,
+    completion: Option<WorkerCommandProgress>,
     errors: Vec<WorkerOperationError>,
 }
 
@@ -517,7 +522,7 @@ impl ReportingDue {
         Self {
             actions: 0,
             immediate: false,
-            completions: Vec::new(),
+            completion: None,
             errors: Vec::new(),
         }
     }
@@ -715,10 +720,7 @@ where
         }
 
         if self.connection_command_pending.is_none() && !R::has_pending(&self.reporting) {
-            for _ in 0..self.budget.command_batch {
-                let Some(command) = commands.try_next() else {
-                    break;
-                };
+            if let Some(command) = commands.try_next() {
                 progress.commands += 1;
                 let result = match command {
                     RuntimeCommand::Pair { timeout } => {
@@ -776,20 +778,16 @@ where
                     Ok(result) => (result, None),
                     Err(termination) => (termination.completion, Some(termination.error)),
                 };
-                let pending = matches!(result, WorkerCommandProgress::Pending);
-                progress.command_results.push(result);
+                progress.record_command_progress(result);
                 if let Some(request) = shutdown.take() {
                     return self.close(request, clock.now(), progress);
                 }
                 if let Some(error) = terminal {
                     return self.fail(error, progress);
                 }
-                if pending {
-                    break;
-                }
             }
         }
-        if progress.commands == self.budget.command_batch
+        if progress.commands == 1
             && self.connection_command_pending.is_none()
             && !R::has_pending(&self.reporting)
         {
@@ -881,11 +879,11 @@ where
             progress.due_actions += due.actions;
             progress.immediate |= due.immediate;
             let mut terminal = None;
-            for completion in due.completions {
+            if let Some(completion) = due.completion {
                 match nonterminal_command_progress(completion) {
-                    Ok(completion) => progress.command_results.push(completion),
+                    Ok(completion) => progress.record_command_progress(completion),
                     Err(termination) => {
-                        progress.command_results.push(termination.completion);
+                        progress.record_command_progress(termination.completion);
                         terminal.get_or_insert(termination.error);
                     }
                 }
@@ -1018,9 +1016,7 @@ where
         progress: &mut StepProgress,
     ) {
         if let Some(error) = completion {
-            progress
-                .command_results
-                .push(WorkerCommandProgress::Complete(Err(error)));
+            progress.record_command_progress(WorkerCommandProgress::Complete(Err(error)));
             progress.immediate = true;
         }
         if let Some(mut connection) = self.connection.take() {
@@ -1261,9 +1257,7 @@ where
         progress: &mut StepProgress,
     ) {
         if self.connection_command_pending.take().is_some() {
-            progress
-                .command_results
-                .push(WorkerCommandProgress::Complete(result));
+            progress.record_command_progress(WorkerCommandProgress::Complete(result));
             progress.immediate = true;
         }
     }
@@ -1511,13 +1505,13 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
             let now_ns = match u64::try_from(now.as_nanos()) {
                 Ok(now_ns) => now_ns,
                 Err(_) => {
-                    due.completions.push(WorkerCommandProgress::Complete(Err(
+                    due.completion = Some(WorkerCommandProgress::Complete(Err(
                         WorkerCommandError::ClockOverflow,
                     )));
                     return due;
                 }
             };
-            due.completions.push(WorkerCommandProgress::Complete(
+            due.completion = Some(WorkerCommandProgress::Complete(
                 pending
                     .tap
                     .finish(
@@ -1779,7 +1773,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Direct {
         let mut due = ReportingDue::none();
         due.actions = 1;
         due.immediate = true;
-        due.completions.push(WorkerCommandProgress::Complete(
+        due.completion = Some(WorkerCommandProgress::Complete(
             tap.finish(
                 now,
                 context.input,
@@ -2036,9 +2030,9 @@ mod tests {
             worker::{
                 ChannelWorkerWaiter, CommandSource, CommonCommand, DirectCommand, MonotonicClock,
                 PairingError, PeriodicCommand, PriorityShutdown, RuntimeCommand, ShutdownRequest,
-                StepProgress, WorkerBudget, WorkerCommandError, WorkerCommandProgress, WorkerCore,
-                WorkerCoreError, WorkerOperationError, WorkerStep, WorkerWaitError,
-                WorkerWaitRequest, WorkerWaiter, periodic_tap_times, wait_for_next_iteration,
+                StepProgress, WorkerBudget, WorkerCommandError, WorkerCore, WorkerCoreError,
+                WorkerOperationError, WorkerStep, WorkerWaitError, WorkerWaitRequest, WorkerWaiter,
+                periodic_tap_times, wait_for_next_iteration,
             },
         },
     };
@@ -2052,7 +2046,7 @@ mod tests {
     fn bounded_queue_feeds_one_worker_command_and_its_typed_response() {
         let mut harness = DirectHarness::ready();
         let (activity, wakes) = activity_channel();
-        let (client, mut commands) = command_channel(1, activity);
+        let (client, mut commands) = command_channel(activity);
         let response = client
             .try_enqueue(DirectCommand::Common(CommonCommand::Tap {
                 buttons: vec![ProButton::B],
@@ -2064,7 +2058,7 @@ mod tests {
             client.try_enqueue(DirectCommand::Common(CommonCommand::Press(vec![
                 ProButton::A,
             ]))),
-            Err(CommandEnqueueError::Busy)
+            Err(CommandEnqueueError::InvariantViolation)
         ));
         assert_eq!(wakes.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty));
         let mut shutdown = ShutdownLatch::default();
@@ -2078,13 +2072,7 @@ mod tests {
         };
         assert_eq!(progress.commands, 1);
         assert_eq!(progress.due_actions, 1);
-        assert!(matches!(
-            progress.command_results.as_slice(),
-            [
-                WorkerCommandProgress::Pending,
-                WorkerCommandProgress::Complete(Ok(()))
-            ]
-        ));
+        assert!(matches!(progress.command_result, Some(Ok(()))));
         commands
             .deliver_progress(&mut progress)
             .expect("deliver worker result to its response");
@@ -2098,21 +2086,16 @@ mod tests {
         let mut worker = WorkerCore::new_direct(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(2, 1),
+            WorkerBudget::new(1),
             observer(trace),
         );
         let (activity, _wakes) = activity_channel();
-        let (client, mut commands) = command_channel(2, activity);
+        let (client, mut commands) = command_channel(activity);
         let pair = client
             .try_enqueue(RuntimeCommand::<Pro, Direct>::Pair {
                 timeout: CONNECTION_TIMEOUT,
             })
             .expect("pair command fits");
-        let input = client
-            .try_enqueue(RuntimeCommand::Input(DirectCommand::Common(
-                CommonCommand::Press(vec![ProButton::A]),
-            )))
-            .expect("following input fits");
         let mut shutdown = ShutdownLatch::default();
 
         let WorkerStep::Continue(mut accepted) =
@@ -2121,10 +2104,12 @@ mod tests {
             panic!("accepted pair must keep the worker running");
         };
         assert_eq!(accepted.commands, 1);
-        assert!(matches!(
-            accepted.command_results.as_slice(),
-            [WorkerCommandProgress::Pending]
-        ));
+        assert!(accepted.command_result.is_none());
+        let input = client
+            .try_enqueue(RuntimeCommand::Input(DirectCommand::Common(
+                CommonCommand::Press(vec![ProButton::A]),
+            )))
+            .expect("following input fits after the worker receives pair");
         commands
             .deliver_progress(&mut accepted)
             .expect("retain the pair response");
@@ -2165,7 +2150,7 @@ mod tests {
         };
         assert_eq!(worker.lifecycle_state(), LifecycleState::Connecting);
         assert_eq!(handshake.commands, 0);
-        assert!(handshake.command_results.is_empty());
+        assert!(handshake.command_result.is_none());
         assert!(matches!(
             pair.try_recv(),
             Err(std::sync::mpsc::TryRecvError::Empty)
@@ -2178,10 +2163,7 @@ mod tests {
         };
         assert_eq!(worker.lifecycle_state(), LifecycleState::Ready);
         assert_eq!(ready.commands, 0);
-        assert!(matches!(
-            ready.command_results.as_slice(),
-            [WorkerCommandProgress::Complete(Ok(()))]
-        ));
+        assert!(matches!(ready.command_result, Some(Ok(()))));
         commands
             .deliver_progress(&mut ready)
             .expect("complete the retained pair response");
@@ -2211,11 +2193,11 @@ mod tests {
         let mut worker = WorkerCore::new_direct(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             observer(Arc::clone(&trace)),
         );
         let (activity, _wakes) = activity_channel();
-        let (client, mut commands) = command_channel(1, activity);
+        let (client, mut commands) = command_channel(activity);
         let response = client
             .try_enqueue(RuntimeCommand::<Pro, Direct>::Pair {
                 timeout: CONNECTION_TIMEOUT,
@@ -2232,10 +2214,10 @@ mod tests {
         assert_eq!(worker.lifecycle_state(), LifecycleState::Open);
         assert_eq!(lock(&trace).first(), Some(&Trace::StartPairing));
         assert!(matches!(
-            rejected.command_results.as_slice(),
-            [WorkerCommandProgress::Complete(Err(
+            rejected.command_result.as_ref(),
+            Some(Err(
                 WorkerCommandError::Pair(PairingError::Begin(WorkerCoreError::Transport(error)))
-            ))] if error.kind() == TransportErrorKind::SourceTerminated
+            )) if error.kind() == TransportErrorKind::SourceTerminated
         ));
         commands
             .deliver_progress(&mut rejected)
@@ -2255,11 +2237,11 @@ mod tests {
         let mut worker = WorkerCore::new_direct(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(2, 1),
+            WorkerBudget::new(1),
             observer(trace),
         );
         let (activity, _wakes) = activity_channel();
-        let (client, mut commands) = command_channel(1, activity);
+        let (client, mut commands) = command_channel(activity);
         let response = client
             .try_enqueue(RuntimeCommand::<Pro, Direct>::Pair {
                 timeout: CONNECTION_TIMEOUT,
@@ -2287,10 +2269,10 @@ mod tests {
             panic!("pair timeout is a recoverable command failure");
         };
         assert!(matches!(
-            timed_out.command_results.as_slice(),
-            [WorkerCommandProgress::Complete(Err(
-                WorkerCommandError::Pair(PairingError::Readiness(ReadinessError::TimedOut))
-            ))]
+            timed_out.command_result.as_ref(),
+            Some(Err(WorkerCommandError::Pair(PairingError::Readiness(
+                ReadinessError::TimedOut
+            ))))
         ));
         commands
             .deliver_progress(&mut timed_out)
@@ -2311,7 +2293,7 @@ mod tests {
         else {
             panic!("worker remains open after pair timeout");
         };
-        assert!(after_timeout.command_results.is_empty());
+        assert!(after_timeout.command_result.is_none());
         assert_eq!(worker.lifecycle_state(), LifecycleState::Open);
     }
 
@@ -2332,7 +2314,7 @@ mod tests {
                 trace: Arc::clone(&trace),
                 start_pairing_error: None,
             }),
-            WorkerBudget::new(2, 1),
+            WorkerBudget::new(1),
             observer(Arc::clone(&trace)),
         );
         let clock = FakeClock::at(Duration::ZERO);
@@ -2605,11 +2587,8 @@ mod tests {
         assert!(completion.performed());
         assert!(interrupted.is_none());
         assert_eq!(progress.commands, 1);
-        let [
-            WorkerCommandProgress::Complete(Err(WorkerCommandError::Direct(
-                DirectTapError::Transport(error),
-            ))),
-        ] = progress.command_results.as_slice()
+        let Some(Err(WorkerCommandError::Direct(DirectTapError::Transport(error)))) =
+            progress.command_result.as_ref()
         else {
             panic!("the processed command must retain its terminal completion");
         };
@@ -2642,7 +2621,7 @@ mod tests {
         let mut worker = WorkerCore::new_direct_with_status(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
             status,
         );
@@ -2675,7 +2654,7 @@ mod tests {
     }
 
     #[test]
-    fn bounded_command_batch_yields_to_hid_reply_and_due_report() {
+    fn one_command_per_step_yields_to_hid_reply_and_due_report() {
         let mut harness = PeriodicHarness::ready();
         let due = harness
             .worker
@@ -2723,12 +2702,12 @@ mod tests {
         let WorkerStep::Continue(progress) = step else {
             panic!("ordinary work must keep the worker running");
         };
-        assert_eq!(progress.commands, 2);
+        assert_eq!(progress.commands, 1);
         assert_eq!(progress.hci_events, 3);
         assert_eq!(progress.due_actions, 1);
         assert!(progress.immediate);
-        assert_eq!(commands.remaining(), 1);
-        assert_eq!(commands.polls(), 2);
+        assert_eq!(commands.remaining(), 2);
+        assert_eq!(commands.polls(), 1);
         assert_eq!(
             harness
                 .worker
@@ -2736,7 +2715,7 @@ mod tests {
                 .buttons()
                 .map(|button| button.kind())
                 .collect::<Vec<_>>(),
-            [ButtonKind::A, ButtonKind::B]
+            [ButtonKind::A]
         );
         assert_eq!(harness.worker.sender_timer(), timer_before.wrapping_add(1));
         assert!(
@@ -2749,7 +2728,6 @@ mod tests {
             *lock(&harness.trace),
             [
                 Trace::Command("press-a"),
-                Trace::Command("press-b"),
                 Trace::Poll(3),
                 Trace::Observe {
                     channel: HidChannel::Interrupt,
@@ -2758,7 +2736,7 @@ mod tests {
                 Trace::Send {
                     report_id: 0x21,
                     timer: timer_before,
-                    buttons: buttons([ButtonKind::A, ButtonKind::B]),
+                    buttons: buttons([ButtonKind::A]),
                     accepted: false,
                 },
                 Trace::Observe {
@@ -2772,7 +2750,7 @@ mod tests {
                 Trace::Send {
                     report_id: 0x30,
                     timer: timer_before,
-                    buttons: buttons([ButtonKind::A, ButtonKind::B]),
+                    buttons: buttons([ButtonKind::A]),
                     accepted: true,
                 },
             ]
@@ -2783,11 +2761,34 @@ mod tests {
             .worker
             .step(&harness.clock, &mut no_shutdown, &mut commands);
         let WorkerStep::Continue(progress) = step else {
-            panic!("the next batch must keep running");
+            panic!("the next command step must keep running");
         };
         assert_eq!(progress.commands, 1);
         assert_eq!(progress.hci_events, 1);
         assert!(progress.immediate);
+        assert_eq!(commands.remaining(), 1);
+        assert_eq!(
+            harness
+                .worker
+                .input_snapshot()
+                .buttons()
+                .map(|button| button.kind())
+                .collect::<Vec<_>>(),
+            [ButtonKind::A, ButtonKind::B]
+        );
+        assert!(
+            !lock(&harness.trace)
+                .iter()
+                .any(|event| matches!(event, Trace::Send { .. }))
+        );
+
+        let step = harness
+            .worker
+            .step(&harness.clock, &mut no_shutdown, &mut commands);
+        let WorkerStep::Continue(progress) = step else {
+            panic!("the final command step must keep running");
+        };
+        assert_eq!(progress.commands, 1);
         assert_eq!(commands.remaining(), 0);
         assert_eq!(
             harness
@@ -2797,11 +2798,6 @@ mod tests {
                 .map(|button| button.kind())
                 .collect::<Vec<_>>(),
             [ButtonKind::A, ButtonKind::B, ButtonKind::X]
-        );
-        assert!(
-            !lock(&harness.trace)
-                .iter()
-                .any(|event| matches!(event, Trace::Send { .. }))
         );
     }
 
@@ -2877,7 +2873,7 @@ mod tests {
         let mut worker = WorkerCore::new_direct(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
         );
         worker
@@ -2929,7 +2925,7 @@ mod tests {
             protocol(),
             Box::new(transport),
             REPORT_PERIOD,
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
         )
         .expect("valid Periodic worker");
@@ -3002,7 +2998,7 @@ mod tests {
         let mut worker = WorkerCore::new_direct(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
         );
         worker
@@ -3090,7 +3086,7 @@ mod tests {
         let mut worker = WorkerCore::new_direct(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
         );
         worker
@@ -3134,7 +3130,7 @@ mod tests {
         let mut worker = WorkerCore::new_direct(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
         );
         worker
@@ -3198,7 +3194,7 @@ mod tests {
         let mut worker = WorkerCore::new_direct(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
         );
         worker
@@ -3452,7 +3448,7 @@ mod tests {
         let mut worker = WorkerCore::new_direct(
             protocol(),
             Box::new(transport),
-            WorkerBudget::new(1, 1),
+            WorkerBudget::new(1),
             Box::new(|_| {}),
         );
         worker
@@ -3523,10 +3519,7 @@ mod tests {
             panic!("pending tap keeps the worker running");
         };
         assert_eq!(progress.commands, 1);
-        assert!(matches!(
-            progress.command_results.as_slice(),
-            [WorkerCommandProgress::Pending]
-        ));
+        assert!(progress.command_result.is_none());
         assert_eq!(commands.remaining(), 1);
         let release_at = harness
             .worker
@@ -3543,10 +3536,7 @@ mod tests {
         assert_eq!(progress.commands, 0);
         assert_eq!(progress.due_actions, 1);
         assert!(progress.immediate);
-        assert!(matches!(
-            progress.command_results.as_slice(),
-            [WorkerCommandProgress::Complete(Ok(()))]
-        ));
+        assert!(matches!(progress.command_result, Some(Ok(()))));
         assert_eq!(commands.remaining(), 1);
         assert_eq!(harness.worker.input_snapshot(), InputState::neutral());
 
@@ -3604,10 +3594,8 @@ mod tests {
             panic!("tap timing validation is a command error");
         };
         assert!(matches!(
-            progress.command_results.as_slice(),
-            [WorkerCommandProgress::Complete(Err(
-                WorkerCommandError::DeadlineOverflow
-            ))]
+            progress.command_result,
+            Some(Err(WorkerCommandError::DeadlineOverflow))
         ));
         assert_eq!(commands.remaining(), 0);
         assert!(!harness.worker.has_pending_reporting_command());
@@ -3652,10 +3640,7 @@ mod tests {
         let WorkerStep::Continue(progress) = step else {
             panic!("a rejected tap press remains pending until release");
         };
-        assert!(matches!(
-            progress.command_results.as_slice(),
-            [WorkerCommandProgress::Pending]
-        ));
+        assert!(progress.command_result.is_none());
         assert_eq!(commands.remaining(), 1);
         assert!(harness.worker.has_pending_reporting_command());
 
@@ -3677,14 +3662,10 @@ mod tests {
         assert_eq!(progress.commands, 0);
         assert_eq!(progress.due_actions, 1);
         assert!(progress.immediate);
-        let [
-            WorkerCommandProgress::Complete(Err(WorkerCommandError::Periodic(
-                PeriodicError::Transport {
-                    error: first_error,
-                    later_terminal: None,
-                },
-            ))),
-        ] = progress.command_results.as_slice()
+        let Some(Err(WorkerCommandError::Periodic(PeriodicError::Transport {
+            error: first_error,
+            later_terminal: None,
+        }))) = progress.command_result.as_ref()
         else {
             panic!("the command completion must retain its first transport error");
         };
@@ -3742,14 +3723,10 @@ mod tests {
         };
         assert_eq!(error.kind(), TransportErrorKind::SourceTerminated);
         assert!(!error.to_string().contains("sensitive"));
-        let [
-            WorkerCommandProgress::Complete(Err(WorkerCommandError::Periodic(
-                PeriodicError::Transport {
-                    error: completion_error,
-                    later_terminal: None,
-                },
-            ))),
-        ] = progress.command_results.as_slice()
+        let Some(Err(WorkerCommandError::Periodic(PeriodicError::Transport {
+            error: completion_error,
+            later_terminal: None,
+        }))) = progress.command_result.as_ref()
         else {
             panic!("terminal tap press must retain its command completion");
         };
@@ -3800,7 +3777,7 @@ mod tests {
                 protocol(),
                 Box::new(transport),
                 REPORT_PERIOD,
-                WorkerBudget::new(2, 1),
+                WorkerBudget::new(1),
                 observer,
             )
             .expect("valid Periodic worker");
@@ -3829,7 +3806,7 @@ mod tests {
             let mut worker = WorkerCore::new_direct(
                 protocol(),
                 Box::new(transport),
-                WorkerBudget::new(2, 1),
+                WorkerBudget::new(1),
                 observer,
             );
             prime_ready(&mut worker, &control, &clock, &trace);

@@ -771,7 +771,6 @@ const fn error_kind_name(kind: ErrorKind) -> &'static str {
         ErrorKind::InvalidInput => "invalid_input",
         ErrorKind::UnsupportedInput => "unsupported_input",
         ErrorKind::UnsupportedCapability => "unsupported_capability",
-        ErrorKind::Busy => "busy",
         ErrorKind::WorkerFailed => "worker_failed",
         ErrorKind::Shutdown => "shutdown",
         ErrorKind::Internal => "internal",

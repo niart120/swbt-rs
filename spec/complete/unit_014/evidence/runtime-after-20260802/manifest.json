@@ -1,0 +1,46 @@
+{
+  "schema": "swbt.m2.activity-wait.manifest.v2",
+  "started_at_utc": "2026-08-01T22:50:51.0624397Z",
+  "finished_at_utc": "2026-08-01T22:53:50.7951595Z",
+  "source": {
+    "head_sha": "c00147506c6d4384fd9025633b9c50561c7f613f",
+    "branch": "refactor/unit-014-single-in-flight",
+    "worktree_dirty_at_start": false,
+    "head_sha_end": "c00147506c6d4384fd9025633b9c50561c7f613f",
+    "branch_end": "refactor/unit-014-single-in-flight",
+    "changed_during_run": false,
+    "evidence_class": "retained"
+  },
+  "runner": {
+    "profile": "release-test",
+    "feature_set": "no-default-features",
+    "mode": "full",
+    "output": "target/measurements/m2-activity-wait/unit014-after-20260802",
+    "build_command": "cargo test --release --lib --no-default-features --locked --no-run --message-format=json",
+    "test_arguments": "controller::runtime_measurement::activity_wait_decision --exact --ignored --nocapture --test-threads=1",
+    "overall_watchdog_ms": 900000,
+    "powershell": "Core 7.6.3",
+    "samples": {
+      "idle_ms": 10000,
+      "jitter": 10000,
+      "command": 10000,
+      "transport": 10000,
+      "shutdown_each": 1000,
+      "fairness_ticks": 10000
+    },
+    "raw_records": {
+      "expected": 42002,
+      "actual": 42002
+    }
+  },
+  "files": [
+    {
+      "path": "activity-wait.ndjson",
+      "sha256": "8d090da9f1cd463eb456f32a603935dfe239a8ed54d3d5b66f977b82dda52bc4"
+    },
+    {
+      "path": "activity-wait-summary.json",
+      "sha256": "700d2ab6eadcf216ecfd1182fb0697bd0a02e172df229e4b2adad8110c6c6003"
+    }
+  ]
+}

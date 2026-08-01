@@ -21,7 +21,10 @@ use crate::{
 )]
 pub(crate) fn map_enqueue_error(error: CommandEnqueueError) -> Error {
     match error {
-        CommandEnqueueError::Busy => Error::new(ErrorKind::Busy, "worker command queue is full"),
+        CommandEnqueueError::InvariantViolation => Error::new(
+            ErrorKind::Internal,
+            "worker command slot was unexpectedly occupied",
+        ),
         CommandEnqueueError::Disconnected => Error::new(
             ErrorKind::WorkerFailed,
             "controller worker is no longer accepting commands",
@@ -282,12 +285,10 @@ pub(crate) fn map_cleanup_error(error: CleanupFailure) -> Error {
 
 fn map_delivery_error(error: CommandDeliveryError) -> Error {
     match error {
-        CommandDeliveryError::MissingResponse | CommandDeliveryError::ResponseBufferFull => {
-            Error::new(
-                ErrorKind::WorkerFailed,
-                "controller worker could not deliver a command result",
-            )
-        }
+        CommandDeliveryError::MissingResponse => Error::new(
+            ErrorKind::WorkerFailed,
+            "controller worker could not deliver a command result",
+        ),
     }
 }
 
@@ -499,10 +500,10 @@ mod tests {
     }
 
     #[test]
-    fn closed_outcome_orders_delivery_before_join_without_cleanup() {
+    fn closed_outcome_orders_missing_response_before_join_without_cleanup() {
         let outcome = WorkerThreadOutcome::Closed {
             result: Err(ExplicitCloseError::Join(WorkerJoinError::Panicked)),
-            delivery_error: Some(CommandDeliveryError::ResponseBufferFull),
+            delivery_error: Some(CommandDeliveryError::MissingResponse),
         };
 
         let error = map_worker_outcome(outcome).expect_err("delivery and join failed");

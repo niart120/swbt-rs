@@ -1,6 +1,5 @@
-use std::{
-    collections::VecDeque,
-    sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel},
+use std::sync::mpsc::{
+    Receiver, Sender, SyncSender, TryRecvError, TrySendError, channel, sync_channel,
 };
 
 use super::{
@@ -12,7 +11,7 @@ pub(crate) type CommandResult = Result<(), WorkerCommandError>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CommandEnqueueError {
-    Busy,
+    InvariantViolation,
     Disconnected,
 }
 
@@ -24,7 +23,6 @@ pub(crate) enum CommandResponseError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CommandDeliveryError {
     MissingResponse,
-    ResponseBufferFull,
 }
 
 struct CommandRequest<C> {
@@ -33,15 +31,13 @@ struct CommandRequest<C> {
 }
 
 struct CommandCompletion {
-    sender: SyncSender<CommandResult>,
+    sender: Sender<CommandResult>,
 }
 
 impl CommandCompletion {
     fn respond(self, result: CommandResult) -> Result<(), CommandDeliveryError> {
-        match self.sender.try_send(result) {
-            Ok(()) | Err(TrySendError::Disconnected(_)) => Ok(()),
-            Err(TrySendError::Full(_)) => Err(CommandDeliveryError::ResponseBufferFull),
-        }
+        let _ = self.sender.send(result);
+        Ok(())
     }
 }
 
@@ -52,7 +48,7 @@ pub(crate) struct CommandClient<C> {
 
 impl<C> CommandClient<C> {
     pub(crate) fn try_enqueue(&self, command: C) -> Result<CommandResponse, CommandEnqueueError> {
-        let (response_sender, response) = sync_channel(1);
+        let (response_sender, response) = channel();
         let request = CommandRequest {
             command,
             completion: CommandCompletion {
@@ -64,7 +60,7 @@ impl<C> CommandClient<C> {
                 self.activity.notify();
                 Ok(CommandResponse { receiver: response })
             }
-            Err(TrySendError::Full(_)) => Err(CommandEnqueueError::Busy),
+            Err(TrySendError::Full(_)) => Err(CommandEnqueueError::InvariantViolation),
             Err(TrySendError::Disconnected(_)) => Err(CommandEnqueueError::Disconnected),
         }
     }
@@ -72,7 +68,7 @@ impl<C> CommandClient<C> {
 
 pub(crate) struct CommandReceiver<C> {
     receiver: Receiver<CommandRequest<C>>,
-    in_flight: VecDeque<CommandCompletion>,
+    in_flight: Option<CommandCompletion>,
 }
 
 impl<C> CommandReceiver<C> {
@@ -80,7 +76,10 @@ impl<C> CommandReceiver<C> {
         &mut self,
         progress: &mut StepProgress,
     ) -> Result<(), CommandDeliveryError> {
-        self.deliver(progress.take_command_results())
+        if let Some(result) = progress.take_command_result() {
+            self.deliver_completion(result)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn deliver_completion(
@@ -97,12 +96,12 @@ impl<C> CommandReceiver<C> {
         for result in results {
             match result {
                 WorkerCommandProgress::Pending => {
-                    if self.in_flight.front().is_none() {
+                    if self.in_flight.is_none() {
                         return Err(CommandDeliveryError::MissingResponse);
                     }
                 }
                 WorkerCommandProgress::Complete(result) => {
-                    let Some(completion) = self.in_flight.pop_front() else {
+                    let Some(completion) = self.in_flight.take() else {
                         return Err(CommandDeliveryError::MissingResponse);
                     };
                     completion.respond(result)?;
@@ -115,9 +114,12 @@ impl<C> CommandReceiver<C> {
 
 impl<C> CommandSource<C> for CommandReceiver<C> {
     fn try_next(&mut self) -> Option<C> {
+        if self.in_flight.is_some() {
+            return None;
+        }
         match self.receiver.try_recv() {
             Ok(request) => {
-                self.in_flight.push_back(request.completion);
+                self.in_flight = Some(request.completion);
                 Some(request.command)
             }
             Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
@@ -143,16 +145,14 @@ impl CommandResponse {
 }
 
 pub(crate) fn command_channel<C>(
-    capacity: usize,
     activity: ActivityNotifier,
 ) -> (CommandClient<C>, CommandReceiver<C>) {
-    assert!(capacity > 0, "worker command capacity must be positive");
-    let (sender, receiver) = sync_channel(capacity);
+    let (sender, receiver) = sync_channel(1);
     (
         CommandClient { sender, activity },
         CommandReceiver {
             receiver,
-            in_flight: VecDeque::new(),
+            in_flight: None,
         },
     )
 }
@@ -176,9 +176,9 @@ mod tests {
     }
 
     #[test]
-    fn full_queue_is_busy_and_only_successful_enqueue_wakes() {
+    fn full_queue_is_an_internal_invariant_violation_and_does_not_wake() {
         let (activity, wakes) = activity_channel();
-        let (client, mut worker) = command_channel(1, activity);
+        let (client, mut worker) = command_channel(activity);
 
         let first = client
             .try_enqueue(TestCommand::First)
@@ -186,7 +186,7 @@ mod tests {
         wakes.try_recv().expect("accepted command wakes worker");
         assert!(matches!(
             client.try_enqueue(TestCommand::Second),
-            Err(CommandEnqueueError::Busy)
+            Err(CommandEnqueueError::InvariantViolation)
         ));
         assert_eq!(wakes.try_recv(), Err(TryRecvError::Empty));
         assert_eq!(worker.try_next(), Some(TestCommand::First));
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn receiver_disconnect_is_not_reported_as_busy_or_woken() {
         let (activity, wakes) = activity_channel();
-        let (client, worker) = command_channel(1, activity);
+        let (client, worker) = command_channel(activity);
         let _queued = client
             .try_enqueue(TestCommand::First)
             .expect("prefill command queue");
@@ -224,11 +224,15 @@ mod tests {
     #[test]
     fn pending_command_keeps_its_response_until_typed_completion() {
         let (activity, _wakes) = activity_channel();
-        let (client, mut worker) = command_channel(1, activity);
+        let (client, mut worker) = command_channel(activity);
         let response = client
             .try_enqueue(TestCommand::First)
             .expect("enqueue pending command");
         assert_eq!(worker.try_next(), Some(TestCommand::First));
+        let queued = client
+            .try_enqueue(TestCommand::Second)
+            .expect("one queued command fits behind the in-flight command");
+        assert_eq!(worker.try_next(), None);
 
         worker
             .deliver([WorkerCommandProgress::Pending])
@@ -243,11 +247,16 @@ mod tests {
             response.try_recv(),
             Ok(Err(WorkerCommandError::Shutdown))
         ));
+        assert_eq!(worker.try_next(), Some(TestCommand::Second));
+        worker
+            .deliver([WorkerCommandProgress::Complete(Ok(()))])
+            .expect("queued command starts after the first completion");
+        assert!(matches!(queued.try_recv(), Ok(Ok(()))));
 
         let abandoned = client
-            .try_enqueue(TestCommand::Second)
+            .try_enqueue(TestCommand::First)
             .expect("enqueue abandoned response");
-        assert_eq!(worker.try_next(), Some(TestCommand::Second));
+        assert_eq!(worker.try_next(), Some(TestCommand::First));
         drop(abandoned);
         worker
             .deliver([WorkerCommandProgress::Complete(Ok(()))])
@@ -267,32 +276,10 @@ mod tests {
     }
 
     #[test]
-    fn fifo_commands_keep_their_own_one_shot_responses() {
-        let (activity, wakes) = activity_channel();
-        let (client, mut worker) = command_channel(2, activity);
-        let first = client
-            .try_enqueue(TestCommand::First)
-            .expect("enqueue first");
-        let second = client
-            .try_enqueue(TestCommand::Second)
-            .expect("enqueue second");
-        wakes.try_recv().expect("coalesced command wake");
-        assert_eq!(wakes.try_recv(), Err(TryRecvError::Empty));
+    fn completion_without_an_in_flight_response_is_rejected() {
+        let (activity, _wakes) = activity_channel();
+        let (_client, mut worker) = command_channel::<TestCommand>(activity);
 
-        assert_eq!(worker.try_next(), Some(TestCommand::First));
-        assert_eq!(worker.try_next(), Some(TestCommand::Second));
-        worker
-            .deliver([
-                WorkerCommandProgress::Complete(Ok(())),
-                WorkerCommandProgress::Complete(Err(WorkerCommandError::Shutdown)),
-            ])
-            .expect("deliver FIFO completions");
-
-        assert!(matches!(first.try_recv(), Ok(Ok(()))));
-        assert!(matches!(
-            second.try_recv(),
-            Ok(Err(WorkerCommandError::Shutdown))
-        ));
         assert_eq!(
             worker.deliver([WorkerCommandProgress::Complete(Ok(()))]),
             Err(CommandDeliveryError::MissingResponse)

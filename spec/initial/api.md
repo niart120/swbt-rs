@@ -643,7 +643,6 @@ pub enum ErrorKind {
     InvalidInput,
     UnsupportedInput,
     UnsupportedCapability,
-    Busy,
     WorkerFailed,
     Shutdown,
     Internal,
