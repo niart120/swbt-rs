@@ -131,8 +131,9 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 | `cargo +1.87 check --all-targets --all-features --locked` | success | MSRV 1.87 |
 | `cargo build --all-features --locked` / `cargo build --locked` | success | all-feature / default production build |
 | `cargo test --doc --all-features --locked` | success | 1 passed |
-| `cargo package --locked` | not run | 公開API変更のpackage gate。versionは変更しない |
-| `git diff --check` | not run | whitespace |
+| `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps --locked` | success | public rustdoc warning 0 |
+| `cargo package --locked` | success | 120 files、1.4 MiB、251.7 KiB compressed。`swbt-rs 0.1.0`を検証し、publishは未実行 |
+| `git diff --check` | success | whitespace errorなし |
 | `pwsh -NoProfile -File tools/measure_m2_runtime.ps1 -OutputDirectory target\\measurements\\m2-activity-wait\\unit014-before-20260802` | success | release profile、42,002 records、clean commit `afb20b0`。response p99 1.4 µs、Periodic lateness p99 1.9693 ms、skip 0、idle shutdown p99 56.1 µs、16-command飽和shutdown p99 54.4 µs |
 | `pwsh -NoProfile -File tools/measure_m2_runtime.ps1 -OutputDirectory target\\measurements\\m2-activity-wait\\unit014-after-20260802` | success | release profile、42,002 records、clean commit `c001475`。response p99 1.4 µs、Periodic lateness p99 1.8136 ms、skip 0、idle shutdown p99 52.8 µs、単一queued shutdown p99 53.1 µs、fairness skip / burst 0 |
 | `cargo run --release --locked --all-features --example pro_periodic_hardware -- ... --run 15` | success | fresh Pairは5.292秒でReady。reply 16件、入力、neutral、close、profile検証、adapter reopen成功 |
