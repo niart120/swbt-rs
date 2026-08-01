@@ -61,12 +61,17 @@ ACL flush 観測、Vendor Event 応答の実動作修正3 commitだけを含む�
 | green | T03: 現在の registry blocker を再現する | package | clean `cargo package --locked --list` は成功し、`cargo package --locked` は `bumble-controller` 不在で停止する |
 | green | T04: 単一 backend の作業境界を自己所有 fork に記録する | cross-repo design | Issue #1 に対象範囲、対象外、ライセンス、clean archive、実機回帰条件がある |
 | green | T05: 必要な Bumble source と API を inventory する | backend design | USB HCI、HCI、Classic host、L2CAP、SDP、HIDP、key storeの採否をsource/test単位で記録する |
-| pending | T06: 単一 backend archive を作る | backend implementation | `swbt-bumble-backend` が未公開fork packageなしでpackage/build/testできる |
+| pending | T06a: backend crate の配布骨格を作る | package / license | 自己所有forkの独立packageがfork/path/Git通常依存なしでpackageでき、LICENSE、NOTICE、README、改変表示を含む |
+| pending | T06b: core value と HCI codec を内部化する | backend codec | address、UUID、Classic key、必要なHCI command/event/ACLだけを内部moduleとtestへ移す |
+| pending | T06c: Classic L2CAP、SDP、HIDPを内部化する | backend protocol | LE credit channelを含めず、Classic signaling、SDP continuation、HIDP codecが移植testを通る |
+| pending | T06d: Classic host と bond state を抽出する | backend host | pairing/reconnect、ACL credit、L2CAP channel、link-key永続化がtest-only peerで動く |
+| pending | T06e: USB HCI と external reader を抽出する | backend transport | command/event/ACL、reader cancellation/join、adapter metadataがscripted/USB testを通る |
+| pending | T06f: backend session と最終archiveを完成する | backend integration / package | 公開APIがBumble内部型を隠し、pair→SDP→HID、close、clean archive build/testが成功する |
 | pending | T07: swbt-rs を registry backendへ切り替える | integration/package | default/all-feature gate、`cargo package --locked`、archive smokeが成功する |
 | pending | T08: 実機回帰を確認する | hardware | pairing、再接続、入力、IMU、明示local address、power-cycle、reader cleanupの既存契約を再確認する |
 | green | T09: 旧改名branchを後片付けする | repository cleanup | 実験revisionの参照を不採用証跡だけに残し、remote/local branchを削除してIssue #1へ記録する |
 
-T05-T08 は backend 実装を伴うため、この依存・文書整理だけで green にしない。全項目完了前に
+T06a-T08 は backend 実装を伴うため、この依存・文書整理だけで green にしない。全項目完了前に
 unit_012 を `spec/complete` へ移動せず、0.1.0 を公開しない。
 
 ## 7. 設計判断
