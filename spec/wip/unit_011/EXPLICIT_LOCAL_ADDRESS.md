@@ -101,11 +101,13 @@ characterization で使った未割当 universal dummy address は製品経路�
 - adapter open 後、HCI Reset を送らず local version と current BD_ADDR を読む
 - company identifier が `10` でなければ write 前に `UnsupportedCapability` を返す
 - current address が target と一致すれば write / warm reset / reopen を行わない
-- 不一致なら volatile SETREQ の成功 response を待ち、CSR warm reset を送って session を閉じる
+- 不一致なら volatile SETREQ の成功 response を待ち、CSR warm reset の同期転送と session close を試行する
+- warm reset の同期転送結果と最初の session close 結果は、reset に伴う USB 切断で失敗し得るため保留し、再列挙と
+  read-back で決着させる
 - selector を使って期限まで再 open を繰り返し、HCI Reset なしで BD_ADDR を read-back する
 - read-back が target と一致した場合だけ normal Bumble session の初期化へ進む
 - write を送る前の open/read/capability failure は通常の分類済み error とする
-- write を送った後の send、response、reset、close、再列挙、read-back、不一致は
+- SETREQ の send / response、再列挙、read-back、read-back session close、不一致は
   `ErrorKind::AdapterIdentityRecoveryRequired` とする。利用者は dongle を抜き差しして元 identity を確認するまで再試行しない
 
 ### 5.4 expected-address guard と runtime
@@ -155,7 +157,7 @@ characterization で使った未割当 universal dummy address は製品経路�
 | refactor-done | T05 create/reconnect の normal power-on expected-address guard、actual namespace、adapter-default 無変更を fake / Bumble session で検査する | new/regression | runtime/transport | pairing可視化前に拒否 |
 | refactor-skipped | T06 Python schema v2 local-address fixture と、3 model・Periodic/Direct の identity projection を検査する | compatibility | integration/virtual | address/key非表示 |
 | refactor-done | T07 probe の local-address 引数、identity-kind output、usage/error/redaction と公開 docs を確定する | new/docs | CLI/public | raw addressを出力しない |
-| pending | T08 CSR8510 A10 で Pro Periodic pair/reconnect、Direct reconnect、neutral cleanup、power-cycle recovery を期限付きで記録する | hardware | Windows/Switch | machine/UI分離 |
+| refactor-done | T08 CSR8510 A10 で Pro Periodic pair/reconnect、Direct reconnect、neutral cleanup、power-cycle recovery を期限付きで記録する | hardware | Windows/Switch | machine/UI分離 |
 | pending | T09 completion gate、rustdoc/API review、dependency revision/source baseline、self-review を確定する | gate | package/docs | publish/tagなし |
 
 各 item は red、green、必要な refactor を完了してから、その item だけを Conventional Commit で commit する。
@@ -172,6 +174,7 @@ Bumble fork 側 T02 は fork repository の専用 branch に独立 commit を作
 | refactor-done | T05 | red: runtime factory identity、準備付きBumble open、`IdentityMismatch`、`AdapterIdentityRecoveryRequired`を参照するtestsは、wrapperの`E0432`とmethod/error variantの`E0599`で失敗した。green: persisted profile identityをcreate/reconnect共通のruntime factoryからBumble portへ渡し、explicit identityだけがHCI Resetなしのversion/address read、CSR volatile SETREQ、warm reset、100 ms間隔・10 s期限の再列挙、read-backを経て通常初期化へ進む経路を実装した。通常初期化のaddress guardはkey-store設定、identity write、scan enable、worker生成より前に置いた。scripted Bumble testでadapter-defaultが1 openと既存command列を維持すること、rewrite成功が3 openとtarget namespaceへのlink key保存に至ること、write後guard不一致が公開`AdapterIdentityRecoveryRequired`、writeなし不一致が`IdentityMismatch`かつidentity writeなしになることを検査した。Bumble targetedは16 passed / 1 ignored、identity targetedは6 passed、default full testとall-features full test（library 318 passed / 2 ignoredを含む）、default/all-target/all-feature clippy `-D warnings`、format、diff checkが成功した。refactor: response timeoutをversion/address/vendor commandへ一貫して渡し、productionで使われたmodule-level dead-code例外を除去し、初期化traceからraw local address fieldを除去した |
 | refactor-skipped | T06 | red: Python fixtureの期待caseを3件から6件へ先に拡張し、既存fixtureがadapter-default 3件だけだったためcase-set検査3件が失敗した。green: source commit `84d2723b127f70fc78e12f4496f5c40af0ccfb0a`のPython v0.6.0実装と一致する`exp-local-address` profileをPro / Joy-Con L / Joy-Con Rへ追加し、全6件のtyped JSON round-trip、未知field保持、local addressとlink keyのDebug非表示を検査した。Periodic / Directを組み合わせた6種のruntime configも同じtyped `ProfileIdentity::LocalAddress`を保持した。`cargo test --all-features --test profile_compat`は3 passed / 1 ignored、identity projection targeted testは1 passed。refactor: 製品コードはT05のmodel-independent projectionで既にgreenとなり、T06は互換fixtureとcharacterization testだけで完結したため追加の構造変更を行わなかった |
 | refactor-done | T07 | red: explicit identityを持つprobe request testは`ConnectionRequest.identity`未定義の`E0609`/`E0560`で失敗し、write後recovery categoryも汎用`operation_failed`だった。green: `pair`だけが任意の`--local-address <XX:XX:XX:XX:XX:XX>`を受け、未指定時はadapter-default、reconnectでの指定・不正値・重複指定はusage errorとした。pairは指定identityをcreate-profileへ渡し、reconnectはvalidated profile summaryからidentity kindを取得する。成功NDJSONはaddress-freeな`identity_kind`、write後不確定は`adapter_identity_recovery_required`を出す。integration testは既存profileでhardware open前まで進み、stderr/traceへのraw address非表示を検査した。probe unit 11 passed、probe CLI 8 passed、all-features full test（library 319 passed / 2 ignoredを含む）、all-feature build、all-target/all-feature clippy `-D warnings`、format、diff checkが成功した。README、platform support、troubleshootingにCSR8510 A10限定、profile/address/dongleの一対一管理、再試行禁止とphysical power cycleを記載した。refactor: production successで必ず確定するidentity kindをoptional evidenceから必須fieldへ狭めた |
+| refactor-done | T08 | red 1: 最初のfresh Pro pairはSETREQ後約1秒で`adapter_identity_recovery_required`となり、fake testでreset後の初回session close failureを`RecoveryRequired / Close`として再現した。green 1: 初回close結果を再列挙・read-backで決着するよう変更し、identity 7 testsが成功したが、2回目の実機pairも同じ公開errorで停止した。ignored `adapter-tests`診断で内部stageを秘密値なしに限定し、`WarmReset`を特定した。red 2: warm reset同期transfer failure後にtarget read-backできるtestは`RecoveryRequired / WarmReset`で失敗した。green 2: 同期transferと初回closeのold-handle結果を保留し、bounded再列挙・CSR metadata・exact target read-back・read-back session closeを必須にしてidentity 8 testsを成功させた。再列挙timeoutと旧address read-backが引き続きrecovery-requiredになることも固定した。実機identity-only runは`Rewritten`、fresh Periodic pairはbond/namespace各1・A反映・neutral close、保存鍵Periodic/Direct reconnectはprofile bytes不変・A反映・neutral closeで成功した。各write後にphysical power cycleとprivate adapter-default baseline一致を確認し、最終的にbaseline、profile、比較copy、3 traceを`target/`から削除した。`adapter-tests`を含むclippy `-D warnings`、format、diff checkも成功した。refactor: 実機診断を製品の公開error/traceへ混ぜず、ignored test helperへ分離し、保持evidenceをclosed machine resultとUI観測だけに限定した |
 
 ## 7. 対象ファイル
 
@@ -228,15 +231,15 @@ Bumble fork は変更 package の unit test、`cargo fmt --check`、対象 packa
 
 - [ ] T01–T09 が `refactor-done` または理由付き `refactor-skipped`
 - [ ] test item ごとの commit がある
-- [ ] local-address create-profile が `UnsupportedCapability` ではなく実装済み
-- [ ] local-address existing profile の reconnect が実装済み
-- [ ] expected-address guard が pairing / advertising 前に働く
-- [ ] write 後 failure が typed recovery error になる
-- [ ] physical power cycle と元 identity 復帰を実機確認した
-- [ ] profile namespace が expected local address と一致する
-- [ ] address / key / selector / path / raw packet が公開 error と trace に出ない
-- [ ] duplicate address guidance と対応範囲が公開 docs にある
-- [ ] Bumble fork branch / commit / 差分 / rollback を記録した
+- [x] local-address create-profile が `UnsupportedCapability` ではなく実装済み
+- [x] local-address existing profile の reconnect が実装済み
+- [x] expected-address guard が pairing / advertising 前に働く
+- [x] write 後 failure が typed recovery error になる
+- [x] physical power cycle と元 identity 復帰を実機確認した
+- [x] profile namespace が expected local address と一致する
+- [x] address / key / selector / path / raw packet が公開 error と trace に出ない
+- [x] duplicate address guidance と対応範囲が公開 docs にある
+- [x] Bumble fork branch / commit / 差分 / rollback を記録した
 - [ ] default / all-features gate が成功した
 - [ ] `agentic-self-review` の指摘を採否記録した
 - [ ] `spec/complete/unit_011/` へ移動した

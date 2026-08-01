@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::error::Error as _;
 use std::fs::{self, OpenOptions};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
@@ -22,6 +23,8 @@ use crate::adapter::AdapterSelector;
 use crate::model::Pro;
 use crate::profile::{LocalAddress, ProfileIdentity};
 
+#[cfg(feature = "adapter-tests")]
+use super::bumble::prepare_target_adapter_identity_for_test;
 use super::bumble::{
     BumbleSession, BumbleTransportPort, SplitTransportOpener, initialize_bumble_session_with,
     initialize_bumble_session_with_profile, initialize_bumble_transport_with,
@@ -40,6 +43,60 @@ static NEXT_PROFILE_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(feature = "adapter-tests")]
 #[test]
+#[ignore = "rewrites the CSR8510 A10 identity and reports only a safe internal stage"]
+fn target_adapter_explicit_identity_preparation_reports_safe_stage() {
+    let selector = AdapterSelector::from("usb:0a12:0001");
+    match prepare_target_adapter_identity_for_test(&selector, TARGET_ADDRESS) {
+        Ok(preparation) => eprintln!("adapter_identity_preparation={preparation:?}"),
+        Err(error) => panic!("adapter identity preparation failed at {:?}", error.stage()),
+    }
+}
+
+#[cfg(feature = "adapter-tests")]
+#[test]
+#[ignore = "claims the CSR8510 A10 and compares its address without displaying it"]
+fn target_adapter_identity_matches_private_baseline() {
+    const PATH_ENV: &str = "SWBT_ADAPTER_IDENTITY_BASELINE";
+    const ACTION_ENV: &str = "SWBT_ADAPTER_IDENTITY_ACTION";
+
+    let baseline_path = std::env::var_os(PATH_ENV).expect("private baseline path is configured");
+    let action = std::env::var(ACTION_ENV).expect("identity action is configured");
+    let config = TransportConfig::for_model::<Pro>();
+    let mut transport = BumbleTransportPort::new(AdapterSelector::from("usb:0a12:0001"), config);
+    let current = transport
+        .open(activity_channel().0)
+        .expect("open target adapter")
+        .local_address();
+    transport.close().expect("close target adapter");
+
+    match action.as_str() {
+        "record" => {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(baseline_path)
+                .expect("create private adapter identity baseline");
+            file.write_all(&current)
+                .expect("write private adapter identity baseline");
+            file.sync_all()
+                .expect("sync private adapter identity baseline");
+        }
+        "verify" => {
+            let baseline = fs::read(baseline_path).expect("read private adapter identity baseline");
+            assert_eq!(
+                baseline.as_slice(),
+                current,
+                "adapter identity was not restored"
+            );
+        }
+        _ => panic!("identity action must be record or verify"),
+    }
+
+    eprintln!("adapter_identity_action={action} matched=true");
+}
+
+#[cfg(feature = "adapter-tests")]
+#[test]
 #[ignore = "claims and initializes the CSR8510 A10 target adapter"]
 fn target_adapter_reports_initialized_identity_version_and_classic_capability() {
     let config = TransportConfig::for_model::<Pro>();
@@ -54,15 +111,9 @@ fn target_adapter_reports_initialized_identity_version_and_classic_capability() 
         .local_version()
         .expect("target adapter reports HCI/LMP version metadata");
     eprintln!(
-        "local_address={:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X} \
+        "local_address_present=true \
          hci_version=0x{:02X} hci_subversion=0x{:04X} \
          lmp_version=0x{:02X} company_identifier=0x{:04X} lmp_subversion=0x{:04X}",
-        local_address[0],
-        local_address[1],
-        local_address[2],
-        local_address[3],
-        local_address[4],
-        local_address[5],
         version.hci_version(),
         version.hci_subversion(),
         version.lmp_version(),

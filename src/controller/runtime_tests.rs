@@ -20,7 +20,7 @@ use crate::{
     ConnectOptions, ConnectionPath, ConnectionStatus, CreateProfileOptions, DirectJoyConL,
     DirectJoyConR, DirectProController, Error, ErrorKind, JoyConL, JoyConLButton, JoyConR,
     JoyConRButton, ProButton, ProController, ProfileIdentity,
-    controller::{Controller, ControllerBuilder},
+    controller::Controller,
     diagnostics::LifecycleState,
     input::{InputState, Stick},
     model::ControllerModel,
@@ -45,6 +45,9 @@ use crate::{
         worker_thread::WorkerSpawnError,
     },
 };
+
+#[cfg(feature = "bumble")]
+use crate::controller::ControllerBuilder;
 
 use super::{
     create::CreateProfileRuntimeAttempt,

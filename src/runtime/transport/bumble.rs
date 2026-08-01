@@ -48,6 +48,24 @@ impl SplitTransportOpener for SystemSplitTransportOpener {
     }
 }
 
+#[cfg(all(test, feature = "adapter-tests"))]
+pub(super) fn prepare_target_adapter_identity_for_test(
+    selector: &AdapterSelector,
+    target: [u8; 6],
+) -> Result<AdapterIdentityPreparation, IdentityPreparationError> {
+    let mut opener = SystemSplitTransportOpener;
+    let mut backend = BumbleIdentityBackend::new(&mut opener, selector);
+    prepare_adapter_identity(
+        &mut backend,
+        target,
+        IdentityPreparationOptions {
+            response_timeout: HCI_COMMAND_TIMEOUT,
+            reenumeration_timeout: IDENTITY_REENUMERATION_TIMEOUT,
+            reenumeration_poll_interval: IDENTITY_REENUMERATION_POLL_INTERVAL,
+        },
+    )
+}
+
 /// A synchronously initialized Bumble host/device pair with an owned reader.
 ///
 /// The controller transport owns this value from HCI initialization through

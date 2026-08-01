@@ -64,7 +64,6 @@ pub(super) enum IdentityPreparationStage {
     Initialize,
     ReadCurrent,
     Write,
-    WarmReset,
     Close,
     Reenumeration,
     Readback,
@@ -202,14 +201,12 @@ pub(super) fn prepare_adapter_identity<B: AdapterIdentityBackend>(
         let _ = session.close();
         return Err(error);
     }
-    if let Err(source) = session.send_command_without_response(rewrite.reset()) {
-        let error = recovery_with_source(IdentityPreparationStage::WarmReset, source);
-        let _ = session.close();
-        return Err(error);
-    }
-    session
-        .close()
-        .map_err(|source| recovery_with_source(IdentityPreparationStage::Close, source))?;
+    // CSR warm reset normally removes the USB device before the synchronous
+    // control transfer or reader shutdown can report success. Settle both
+    // results by reopening and reading the identity instead of treating either
+    // old-handle result as final.
+    let _ = session.send_command_without_response(rewrite.reset());
+    let _ = session.close();
 
     let mut readback = open_reenumerated_session(backend, options)?;
     let readback_company = match readback.initialize(options.response_timeout) {
@@ -353,6 +350,66 @@ mod tests {
     }
 
     #[test]
+    fn reset_disconnect_close_failure_is_settled_by_reenumeration_readback() {
+        let before = ScriptedSession::new("before", 10, ORIGINAL).fail_on("close");
+        let (mut backend, events) = ScriptedBackend::new([
+            OpenStep::Session(before),
+            OpenStep::session("after", 10, TARGET),
+        ]);
+
+        let result = prepare_adapter_identity(&mut backend, TARGET, options())
+            .expect("readback settles the expected reset disconnect");
+
+        assert_eq!(result, AdapterIdentityPreparation::Rewritten);
+        assert_eq!(
+            event_snapshot(&events),
+            [
+                "before:open",
+                "before:initialize",
+                "before:read_address",
+                "before:write",
+                "before:warm_reset",
+                "before:close",
+                "sleep",
+                "after:open",
+                "after:initialize",
+                "after:read_address",
+                "after:close",
+            ]
+        );
+    }
+
+    #[test]
+    fn warm_reset_transfer_failure_is_settled_by_reenumeration_readback() {
+        let before = ScriptedSession::new("before", 10, ORIGINAL).fail_on("warm_reset");
+        let (mut backend, events) = ScriptedBackend::new([
+            OpenStep::Session(before),
+            OpenStep::session("after", 10, TARGET),
+        ]);
+
+        let result = prepare_adapter_identity(&mut backend, TARGET, options())
+            .expect("readback settles a transfer interrupted by warm-reset re-enumeration");
+
+        assert_eq!(result, AdapterIdentityPreparation::Rewritten);
+        assert_eq!(
+            event_snapshot(&events),
+            [
+                "before:open",
+                "before:initialize",
+                "before:read_address",
+                "before:write",
+                "before:warm_reset",
+                "before:close",
+                "sleep",
+                "after:open",
+                "after:initialize",
+                "after:read_address",
+                "after:close",
+            ]
+        );
+    }
+
+    #[test]
     fn non_csr_controller_is_unsupported_before_any_write() {
         let (mut backend, events) =
             ScriptedBackend::new([OpenStep::session("other", 76, ORIGINAL)]);
@@ -420,9 +477,10 @@ mod tests {
     }
 
     #[test]
-    fn reenumeration_timeout_and_readback_mismatch_require_recovery() {
+    fn reenumeration_and_readback_failures_require_recovery() {
+        let before = ScriptedSession::new("before", 10, ORIGINAL).fail_on("warm_reset");
         let (mut timeout_backend, timeout_events) = ScriptedBackend::new([
-            OpenStep::session("before", 10, ORIGINAL),
+            OpenStep::Session(before),
             OpenStep::failure("reenumeration_open_failed"),
         ]);
         let timeout_error = prepare_adapter_identity(
@@ -444,8 +502,9 @@ mod tests {
         );
         assert!(event_snapshot(&timeout_events).contains(&"sleep"));
 
+        let before = ScriptedSession::new("before", 10, ORIGINAL).fail_on("warm_reset");
         let (mut mismatch_backend, mismatch_events) = ScriptedBackend::new([
-            OpenStep::session("before", 10, ORIGINAL),
+            OpenStep::Session(before),
             OpenStep::session("after", 10, ORIGINAL),
         ]);
         let mismatch_error = prepare_adapter_identity(&mut mismatch_backend, TARGET, options())
@@ -457,6 +516,21 @@ mod tests {
         assert_eq!(mismatch_error.stage(), IdentityPreparationStage::Readback);
         assert!(event_snapshot(&mismatch_events).contains(&"after:close"));
         assert_error_is_redacted(&mismatch_error);
+
+        let readback = ScriptedSession::new("after", 10, TARGET).fail_on("close");
+        let (mut close_backend, close_events) = ScriptedBackend::new([
+            OpenStep::session("before", 10, ORIGINAL),
+            OpenStep::Session(readback),
+        ]);
+        let close_error = prepare_adapter_identity(&mut close_backend, TARGET, options())
+            .expect_err("readback session close failure remains uncertain");
+        assert_eq!(
+            close_error.kind(),
+            IdentityPreparationErrorKind::RecoveryRequired
+        );
+        assert_eq!(close_error.stage(), IdentityPreparationStage::Close);
+        assert!(event_snapshot(&close_events).contains(&"after:close"));
+        assert_error_is_redacted(&close_error);
     }
 
     fn options() -> IdentityPreparationOptions {
