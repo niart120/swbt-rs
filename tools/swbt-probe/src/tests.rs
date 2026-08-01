@@ -1,8 +1,8 @@
 use super::{
     ButtonKind, Command, ConnectionOperation, ConnectionRequest, ControllerKind, ControllerModel,
-    ControllerSelection, ErrorKind, ImuRunEvidence, ProbeBackend, ProbeController, ReportingMode,
-    ReportingSelection, SafeAdapter, connection_completed_record, error_kind_name, execute,
-    horizontal_yaw_frame, open_and_close,
+    ControllerSelection, ErrorKind, ImuRunEvidence, ProbeBackend, ProbeController, ProbeErrorKind,
+    ProbeResult, ReportingMode, ReportingSelection, SafeAdapter, connection_completed_record,
+    error_kind_name, execute, horizontal_yaw_frame, open_and_close,
 };
 use swbt::{Button, ImuFrame, LocalAddress, ProfileIdentity, ReportingKind};
 
@@ -168,9 +168,12 @@ fn explicit_local_identity_reaches_pair_backend_and_emits_only_its_kind() {
 
 #[test]
 fn identity_failures_keep_specific_secret_free_probe_categories() {
-    assert_eq!(error_kind_name(ErrorKind::TransportOpen), "transport_open");
     assert_eq!(
-        error_kind_name(ErrorKind::AdapterIdentityRecoveryRequired),
+        error_kind_name(ErrorKind::TransportOpen.into()),
+        "transport_open"
+    );
+    assert_eq!(
+        error_kind_name(ErrorKind::AdapterIdentityRecoveryRequired.into()),
         "adapter_identity_recovery_required"
     );
 }
@@ -188,7 +191,10 @@ fn fake_dynamic_button_rejects_model_mismatch_without_typed_fallback() {
         &mut backend,
     );
 
-    assert_eq!(result, Err(ErrorKind::UnsupportedInput));
+    assert_eq!(
+        result,
+        Err(ProbeErrorKind::Swbt(ErrorKind::UnsupportedInput))
+    );
     assert_eq!(
         backend.unsupported_buttons,
         [(ControllerKind::JoyConL, ButtonKind::A)]
@@ -284,11 +290,11 @@ struct FakeBackend {
 }
 
 impl ProbeBackend for FakeBackend {
-    fn list_adapters(&mut self) -> Result<Vec<SafeAdapter>, ErrorKind> {
+    fn list_adapters(&mut self) -> ProbeResult<Vec<SafeAdapter>> {
         Ok(std::mem::take(&mut self.adapters))
     }
 
-    fn open_adapter(&mut self, selector: &str) -> Result<(), ErrorKind> {
+    fn open_adapter(&mut self, selector: &str) -> ProbeResult<()> {
         self.opened_selectors.push(selector.to_owned());
         Ok(())
     }
@@ -296,7 +302,7 @@ impl ProbeBackend for FakeBackend {
     fn pair<M: ControllerModel>(
         &mut self,
         request: &ConnectionRequest,
-    ) -> Result<super::ConnectionEvidence, ErrorKind> {
+    ) -> ProbeResult<super::ConnectionEvidence> {
         self.pair_identities.push(request.identity);
         self.record_connection::<M, swbt::reporting::Periodic>(
             ConnectionOperation::Pair,
@@ -311,7 +317,7 @@ impl ProbeBackend for FakeBackend {
     fn reconnect<M: ControllerModel, R: super::ProbeReporting<M>>(
         &mut self,
         request: &ConnectionRequest,
-    ) -> Result<super::ConnectionEvidence, ErrorKind> {
+    ) -> ProbeResult<super::ConnectionEvidence> {
         self.record_connection::<M, R>(ConnectionOperation::Reconnect, request.button)?;
         Ok(super::ConnectionEvidence::default())
     }

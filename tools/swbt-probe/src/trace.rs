@@ -10,7 +10,7 @@ use std::{
 };
 
 use serde_json::{Map, Number, Value};
-use swbt::{ErrorKind, model::ControllerModel, reporting::ReportingMode};
+use swbt::{model::ControllerModel, reporting::ReportingMode};
 use tracing::{
     Event, Metadata, Subscriber,
     field::{Field, Visit},
@@ -26,19 +26,22 @@ pub(super) struct TraceSession {
     state: Arc<TraceState>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TraceError;
+
 impl TraceSession {
-    pub(super) fn install(path: &Path) -> Result<Self, ErrorKind> {
+    pub(super) fn install(path: &Path) -> Result<Self, TraceError> {
         let (session, subscriber) = Self::create(path)?;
-        tracing::subscriber::set_global_default(subscriber).map_err(|_| ErrorKind::Trace)?;
+        tracing::subscriber::set_global_default(subscriber).map_err(|_| TraceError)?;
         Ok(session)
     }
 
-    fn create(path: &Path) -> Result<(Self, NdjsonSubscriber), ErrorKind> {
+    fn create(path: &Path) -> Result<(Self, NdjsonSubscriber), TraceError> {
         let file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(path)
-            .map_err(|_| ErrorKind::Trace)?;
+            .map_err(|_| TraceError)?;
         let state = Arc::new(TraceState {
             output: Mutex::new(BufWriter::new(file)),
             failed: AtomicBool::new(false),
@@ -52,18 +55,18 @@ impl TraceSession {
         ))
     }
 
-    pub(super) fn finish(self) -> Result<(), ErrorKind> {
+    pub(super) fn finish(self) -> Result<(), TraceError> {
         let flushed = self
             .state
             .output
             .lock()
-            .map_err(|_| ErrorKind::Trace)?
+            .map_err(|_| TraceError)?
             .flush()
             .is_ok();
         if flushed && !self.state.failed.load(Ordering::Acquire) {
             Ok(())
         } else {
-            Err(ErrorKind::Trace)
+            Err(TraceError)
         }
     }
 }
@@ -370,7 +373,7 @@ mod tests {
             );
         });
 
-        assert_eq!(session.finish(), Err(swbt::ErrorKind::Trace));
+        assert_eq!(session.finish(), Err(super::TraceError));
         let trace = fs::read_to_string(&path).expect("read rejected trace");
         assert!(trace.is_empty());
         assert!(!trace.contains("T08_SECRET_PROFILE"));

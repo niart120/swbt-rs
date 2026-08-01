@@ -10,8 +10,6 @@ pub enum ErrorKind {
     AdapterDiscovery,
     /// Opening the selected Bluetooth transport failed or its selector is invalid.
     TransportOpen,
-    /// A diagnostics trace could not be created or written.
-    Trace,
     /// Creating a profile requires a destination path.
     ProfilePathRequired,
     /// The requested profile does not exist.

@@ -264,6 +264,11 @@ version = "0.0.0"
 [[package]]
 name = "swbt-probe"
 version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "swbt-rs",
+ "tracing",
+]
 
 [[package]]
 name = "swbt-rs"
