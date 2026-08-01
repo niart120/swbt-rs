@@ -9,15 +9,15 @@ reader lifecycle 修正などを加えた
 
 ## 現在の状態
 
-このリポジトリは M8 の IMU、安定 diagnostics event、`swbt-probe` と、独立 milestone の明示 local
-Bluetooth address まで実装済みです。Cargo package は
-library target `swbt` を提供し、
+このリポジトリは M9 の portability / release readiness と、独立 milestone の明示 local Bluetooth
+address まで実装済みです。Cargo package は library target `swbt` を提供し、
 model-valid input、crate 内部の Switch HID protocol と runtime、公開 controller builder、
 descriptor-only adapter discovery を実装しています。
 
 `swbt-rs` 0.1.0 は未公開です。`bumble` feature は crates.io の
-`swbt-bumble-backend = "=0.1.1"` を使い、clean `cargo package --locked` と展開archiveの
-all-feature testまで確認済みです。残るrelease gateが完了するまでは `publish = false` を維持します。
+`swbt-bumble-backend = "=0.1.1"` を使い、clean `cargo package --locked`、展開archiveのMSRV offline
+all/default test、license/SBOM、Windows限定構成のrollback rehearsalまで確認済みです。crates.io公開は
+exact main SHAとremote checkを固定した別の承認turnまで行わず、`publish = false` を維持します。
 利用者向けの変更は[変更履歴](CHANGELOG.md)、脆弱性報告時の注意は
 [セキュリティ方針](SECURITY.md)に記録しています。
 

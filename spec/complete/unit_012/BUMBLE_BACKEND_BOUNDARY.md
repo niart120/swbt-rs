@@ -11,7 +11,7 @@ fork workspace 24 package の crates.io 公開案は採用しない。必要な�
 ## 2. 起点
 
 - `spec/initial/roadmap.md` M9 の `cargo package`、clean install、release dependency 固定
-- `spec/wip/unit_010/M9_PORTABILITY_RELEASE.md` T08 の registry dependency blocker
+- `spec/complete/unit_010/M9_PORTABILITY_RELEASE.md` T08 の registry dependency blocker
 - `spec/publishing.md` の 0.1.0 公開停止条件
 - 自己所有 fork の [Issue #1](https://github.com/niart120/bumble-rs/issues/1)
 - 24 package 改名案の公開範囲、保守責任、Apache-2.0 配布物検査
@@ -116,7 +116,7 @@ Classic host と USB transport の切り出し作業量を小さいと仮定し�
 - `docs/platform-support.md`
 - `spec/initial/source-baseline.md`
 - `spec/publishing.md`
-- `spec/wip/unit_010/M9_PORTABILITY_RELEASE.md`
+- `spec/complete/unit_010/M9_PORTABILITY_RELEASE.md`
 - `spec/complete/unit_012/`
 - 自己所有 fork `niart120/bumble-rs` の Issue #1 と branch
 

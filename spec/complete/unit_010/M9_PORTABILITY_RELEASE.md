@@ -161,8 +161,8 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | `spec/initial/source-baseline.md` | modify | 0.1.0 candidate の fork revision と差分 |
 | `spec/publishing.md` | new | 0.1.0 release runbook と停止条件 |
 | `tools/normalize-cyclonedx.ps1` | new | 生成SBOMのroot local path正規化とreference検査 |
-| `spec/wip/unit_010/evidence/` | new | package list、license/SBOM、source audit、gate の非秘密 evidence |
-| `spec/wip/unit_010/M9_PORTABILITY_RELEASE.md` | new | 本作業仕様 |
+| `spec/complete/unit_010/evidence/` | new | package list、license/SBOM、source audit、gate の非秘密 evidence |
+| `spec/complete/unit_010/M9_PORTABILITY_RELEASE.md` | new | 完了した本作業仕様 |
 
 ## 9. 検証
 
@@ -209,6 +209,9 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | T13 `cargo clippy --all-targets --all-features --locked -- -D warnings` | success | warning なし |
 | T13 `cargo test --all-features --locked` | success | library 273 passed / 1 ignored、probe 11 passed、hardware 5 ignored、他target/doc test成功 |
 | T13 Windows workload soak / backend rollback rehearsal | success | 2×60秒IMU、Rust→Python 0.6.0、A、neutral、adapter再利用、profile非破壊を確認 |
+| T13後 clean `cargo package --locked` | success | 120 files、禁止path 0、圧縮259.1 KiB、verification build成功、SHA-256 `BBDF261350C4A384457961B055DD4D7FEA473C24FB67CF1DA0B839908ECCD401` |
+| T13後 展開archive MSRV offline gate | success | all/default testとall/no-default build成功。all-feature library 273 passed / 1 ignored、hardware 5 ignored |
+| T13後 Windows/Linux SBOM refresh | success | 33/34 components、license欠落0、未解決ref 0、local source 0 |
 
 ## 10. 先送り事項
 

@@ -17,16 +17,16 @@ GitHub Release、`cargo publish`、publish workflow の実行には、その tur
   `1cc2c8d7d9c8cecfd203cd039fb3c3f8a9c39b072230f977b1e12e526b1bc667` である。
 - `swbt-rs` は一時 path patch と Bumble Git dependency を残さず、registry 上の
   `swbt-bumble-backend = "=0.1.1"` を解決する。
-- `cargo package --locked --allow-dirty` は120 files / 1.4 MiB（圧縮258.0 KiB）のarchiveを生成した。
-  展開archiveからの `cargo +1.87.0 test --all-targets --all-features --locked --offline --quiet` は
-  library 271 passed / 1 ignored、hardware 5 ignored、他target successだった。
-- [registry backend dependency / package audit](wip/unit_010/evidence/dependency-package-audit-20260802.md)で
+- T13後のclean `cargo package --locked` は120 files / 1.5 MiB（圧縮259.1 KiB）のarchiveを生成した。
+  展開archiveからのMSRV offline all-feature testはlibrary 273 passed / 1 ignored、hardware 5 ignored、
+  他target successで、default testとall/no-default buildも成功した。
+- [registry backend dependency / package audit](complete/unit_010/evidence/dependency-package-audit-20260802.md)で
   Git source 0、cargo-denyのadvisory/license/source policy、Windows 33 / Linux 34 componentの
   CycloneDX 1.5 SBOM、license欠落0、local pathと秘密情報の不在を確認した。
 - `niart120/swbt-rs`のGitHub Private Vulnerability Reportingを有効化し、`SECURITY.md`から
   `https://github.com/niart120/swbt-rs/security/advisories/new`へ案内した。2026-08-02のGitHub APIは
   `enabled:true`を返した。
-- [workload soak / backend rollback evidence](wip/unit_010/evidence/operational-cutover-windows-20260802.md)
+- [workload soak / backend rollback evidence](complete/unit_010/evidence/operational-cutover-windows-20260802.md)
   では、連続2回の60秒IMU run、RustからPython 0.6.0への同一profile copyによる切戻し、A入力、
   neutral終了、両backend終了後のadapter再利用、profileのバイト不変を確認した。
 
@@ -56,6 +56,11 @@ release candidate では次を同じ記録へ残す。
 現在の `Cargo.lock` SHA-256 は
 `40109791FB91C479AF355F4B1A07F59A3E7F3680F35C8E5CF0E311A3D021629F`。release commit は merge 前に
 確定できないため、実際の release 承認後に main の対象 SHA とともに記録する。
+
+T13後のclean archive SHA-256は
+`BBDF261350C4A384457961B055DD4D7FEA473C24FB67CF1DA0B839908ECCD401`。Windows/Linux SBOM SHA-256は
+それぞれ`17153B1EE077E5536EB6F2B7F3ACE945EF00F165C777043AA4112907D20B1960`、
+`A5424DE0A812D54D41F82DC23AEAB9A2E0DDC09489954CFFA7A170D168C18A1D`である。
 
 ## local gate
 
