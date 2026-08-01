@@ -289,21 +289,6 @@ impl ProfileDocument {
         Ok(())
     }
 
-    fn remove_pairing_keys(&mut self, namespace: &str, peer: &str) -> crate::Result<bool> {
-        if !is_bluetooth_address(namespace) || !is_bluetooth_address(peer) {
-            return Err(invalid_profile(
-                "profile key-store delete address is invalid",
-            ));
-        }
-        let Some(namespaces) = self.namespaces_mut()? else {
-            return Ok(false);
-        };
-        let Some(peers) = namespaces.get_mut(namespace).and_then(Value::as_object_mut) else {
-            return Ok(false);
-        };
-        Ok(peers.remove(peer).is_some())
-    }
-
     fn namespaces(&self) -> Option<&Map<String, Value>> {
         self.value
             .as_object()
@@ -586,14 +571,6 @@ impl<M: ControllerModel> PairingProfile<M> {
     ) -> crate::Result<()> {
         self.document
             .replace_pairing_keys(namespace, peer, replacement)
-    }
-
-    pub(crate) fn remove_pairing_keys(
-        &mut self,
-        namespace: &str,
-        peer: &str,
-    ) -> crate::Result<bool> {
-        self.document.remove_pairing_keys(namespace, peer)
     }
 }
 

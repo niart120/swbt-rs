@@ -13,9 +13,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(feature = "bumble")]
-use bumble_transport::Error as BumbleError;
-
 use crate::{
     ConnectOptions, ConnectionPath, ConnectionStatus, CreateProfileOptions, DirectJoyConL,
     DirectJoyConR, DirectProController, Error, ErrorKind, JoyConL, JoyConLButton, JoyConR,
@@ -1066,15 +1063,15 @@ fn non_classic_capabilities_fail_before_worker_spawn_and_clean_up_transport() {
 
 #[cfg(feature = "bumble")]
 #[test]
-fn bumble_usb_open_failures_map_to_sanitized_public_transport_errors() {
+fn backend_open_failures_map_to_sanitized_public_transport_errors() {
     let cases = [
         (
             "not-found",
-            BumbleError::InvalidSpec("secret USB selector was not found".into()),
+            BackendOpenFailure::NotFound("secret USB selector was not found"),
         ),
-        ("permission", BumbleError::Usb(rusb::Error::Access)),
-        ("driver", BumbleError::Usb(rusb::Error::NotSupported)),
-        ("claim", BumbleError::Usb(rusb::Error::Busy)),
+        ("permission", BackendOpenFailure::Permission),
+        ("driver", BackendOpenFailure::Driver),
+        ("claim", BackendOpenFailure::Claim),
     ];
 
     for (stage, backend_error) in cases {
@@ -1109,19 +1106,19 @@ fn bumble_usb_open_failures_map_to_sanitized_public_transport_errors() {
             .and_then(|source| source.downcast_ref::<TransportError>())
             .expect("public error retains the typed transport source");
         assert_eq!(transport.kind(), TransportErrorKind::OpenFailed, "{stage}");
-        let bumble = transport
+        let backend = transport
             .source()
-            .and_then(|source| source.downcast_ref::<BumbleError>())
-            .expect("transport error retains the typed Bumble source");
+            .and_then(|source| source.downcast_ref::<BackendOpenFailure>())
+            .expect("transport error retains the typed backend source");
         assert!(
             matches!(
-                (stage, bumble),
-                ("not-found", BumbleError::InvalidSpec(_))
-                    | ("permission", BumbleError::Usb(rusb::Error::Access))
-                    | ("driver", BumbleError::Usb(rusb::Error::NotSupported))
-                    | ("claim", BumbleError::Usb(rusb::Error::Busy))
+                (stage, backend),
+                ("not-found", BackendOpenFailure::NotFound(_))
+                    | ("permission", BackendOpenFailure::Permission)
+                    | ("driver", BackendOpenFailure::Driver)
+                    | ("claim", BackendOpenFailure::Claim)
             ),
-            "unexpected source for {stage}: {bumble}"
+            "unexpected source for {stage}: {backend}"
         );
         assert!(!error.to_string().contains("secret"), "{stage}");
         assert!(!format!("{error:?}").contains("secret"), "{stage}");
@@ -1783,8 +1780,32 @@ struct DropTrackingTransport {
 
 #[cfg(feature = "bumble")]
 struct BumbleOpenErrorTransport {
-    source: Option<BumbleError>,
+    source: Option<BackendOpenFailure>,
 }
+
+#[cfg(feature = "bumble")]
+#[derive(Debug)]
+enum BackendOpenFailure {
+    NotFound(&'static str),
+    Permission,
+    Driver,
+    Claim,
+}
+
+#[cfg(feature = "bumble")]
+impl std::fmt::Display for BackendOpenFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound(message) => formatter.write_str(message),
+            Self::Permission => formatter.write_str("backend permission denied"),
+            Self::Driver => formatter.write_str("backend driver unavailable"),
+            Self::Claim => formatter.write_str("backend adapter claim failed"),
+        }
+    }
+}
+
+#[cfg(feature = "bumble")]
+impl std::error::Error for BackendOpenFailure {}
 
 #[cfg(feature = "bumble")]
 struct IdentityRecoveryOpenTransport;

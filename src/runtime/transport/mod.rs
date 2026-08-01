@@ -3,21 +3,9 @@ mod bumble;
 #[cfg(all(test, feature = "bumble"))]
 mod bumble_tests;
 mod capabilities;
-#[cfg(feature = "bumble")]
-mod classic;
 mod config;
-#[cfg(any(test, feature = "bumble"))]
-mod csr;
-#[cfg(feature = "bumble")]
-mod hidp;
-#[cfg(any(test, feature = "bumble"))]
-mod identity;
 #[cfg(feature = "bumble")]
 mod profile_key_store;
-#[cfg(feature = "bumble")]
-mod sdp;
-#[cfg(all(test, feature = "bumble"))]
-mod virtual_tests;
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -27,9 +15,11 @@ use std::time::Duration;
 
 #[cfg(feature = "bumble")]
 pub(crate) use bumble::BumbleTransportPort;
+#[cfg(test)]
+pub(crate) use capabilities::ClassicAclBufferInfo;
 pub(crate) use capabilities::TransportCapabilities;
 #[cfg(any(feature = "bumble", test))]
-pub(crate) use capabilities::{ClassicAclBufferInfo, ControllerVersionInfo, UsbTransportMetadata};
+pub(crate) use capabilities::{ControllerVersionInfo, UsbTransportMetadata};
 pub(crate) use config::TransportConfig;
 #[cfg(feature = "bumble")]
 pub(crate) use profile_key_store::ProfileKeyStoreFactory;

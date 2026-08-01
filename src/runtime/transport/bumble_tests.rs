@@ -1,1351 +1,412 @@
-use std::collections::{BTreeMap, VecDeque};
-use std::error::Error as _;
-use std::fs::{self, OpenOptions};
-use std::io::Write as _;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
-
-use bumble_hci::{
-    AclDataPacket, Address, AddressType, Command, Event, HciPacket, ReturnParameters,
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::Duration,
 };
-use bumble_host::{HOST_EVENT_MASK, HOST_LE_EVENT_MASK};
-use bumble_l2cap::{ControlFrame, L2CAP_SIGNALING_CID, L2capPdu};
-use bumble_transport::{
-    Error as BumbleError, PacketSink, PacketSource, PacketSourceShutdown, Result as BumbleResult,
-    SplitOpenedTransport,
+
+use serde_json::json;
+use swbt_bumble_backend as backend;
+
+use crate::{
+    adapter::AdapterSelector,
+    model::Pro,
+    profile::{LocalAddress, ProfileIdentity},
 };
-use fs2::FileExt as _;
 
-use crate::adapter::AdapterSelector;
-use crate::model::Pro;
-use crate::profile::{LocalAddress, ProfileIdentity};
-
-#[cfg(feature = "adapter-tests")]
-use super::bumble::prepare_target_adapter_identity_for_test;
 use super::bumble::{
-    BumbleSession, BumbleTransportPort, SplitTransportOpener, initialize_bumble_session_with,
-    initialize_bumble_session_with_profile, initialize_bumble_transport_with,
+    BackendOpener, BackendSessionPort, BumbleTransportPort, map_backend_error_kind,
+    map_backend_event,
 };
-use super::csr::{build_csr_bd_addr_volatile_rewrite_plan, matches_csr_vendor_response};
 use super::profile_key_store::ProfileKeyStoreFactory;
-use super::{TransportConfig, TransportErrorKind, TransportEvent, TransportPort, activity_channel};
+use super::{
+    HidChannel, SendAcceptance, TransportCapabilities, TransportConfig, TransportErrorKind,
+    TransportEvent, TransportPort, TransportResult, activity_channel,
+};
 
-const DISPLAY_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
-const HCI_ADDRESS: [u8; 6] = [0x7d, 0x9f, 0xf9, 0xdc, 0x1b, 0x00];
-const PROFILE_NAMESPACE: &str = "00:1B:DC:F9:9F:7D";
+const LOCAL_NAMESPACE: &str = "00:1B:DC:F9:9F:7D";
 const PROFILE_PEER: &str = "11:22:33:44:55:66";
-const PROFILE_SECRET_SENTINEL: &str = "PAIRING-KEY-PROFILE-SECRET";
-const TARGET_ADDRESS: [u8; 6] = [0x02, 0x12, 0x34, 0x56, 0x78, 0x9A];
-static NEXT_PROFILE_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(feature = "adapter-tests")]
 #[test]
-#[ignore = "rewrites the CSR8510 A10 identity and reports only a safe internal stage"]
-fn target_adapter_explicit_identity_preparation_reports_safe_stage() {
-    let selector = AdapterSelector::from("usb:0a12:0001");
-    match prepare_target_adapter_identity_for_test(&selector, TARGET_ADDRESS) {
-        Ok(preparation) => eprintln!("adapter_identity_preparation={preparation:?}"),
-        Err(error) => panic!("adapter identity preparation failed at {:?}", error.stage()),
+fn backend_error_kinds_preserve_the_transport_contract() {
+    let cases = [
+        (
+            backend::ErrorKind::InvalidConfiguration,
+            TransportErrorKind::OpenFailed,
+        ),
+        (
+            backend::ErrorKind::OpenFailed,
+            TransportErrorKind::OpenFailed,
+        ),
+        (
+            backend::ErrorKind::InvalidControllerIdentity,
+            TransportErrorKind::InvalidControllerIdentity,
+        ),
+        (
+            backend::ErrorKind::IdentityMismatch,
+            TransportErrorKind::IdentityMismatch,
+        ),
+        (
+            backend::ErrorKind::AdapterIdentityRecoveryRequired,
+            TransportErrorKind::AdapterIdentityRecoveryRequired,
+        ),
+        (
+            backend::ErrorKind::UnsupportedController,
+            TransportErrorKind::UnsupportedController,
+        ),
+        (
+            backend::ErrorKind::InvalidBondStore,
+            TransportErrorKind::InvalidKeyStore,
+        ),
+        (backend::ErrorKind::NoBond, TransportErrorKind::NoBond),
+        (backend::ErrorKind::Closed, TransportErrorKind::Closed),
+        (
+            backend::ErrorKind::SendRejected,
+            TransportErrorKind::SendRejected,
+        ),
+        (
+            backend::ErrorKind::DrainTimedOut,
+            TransportErrorKind::DrainTimedOut,
+        ),
+        (
+            backend::ErrorKind::EventQueueOverflow,
+            TransportErrorKind::EventQueueOverflow,
+        ),
+        (
+            backend::ErrorKind::SourceTerminated,
+            TransportErrorKind::SourceTerminated,
+        ),
+        (
+            backend::ErrorKind::CloseFailed,
+            TransportErrorKind::CloseFailed,
+        ),
+        (
+            backend::ErrorKind::ProtocolViolation,
+            TransportErrorKind::SourceTerminated,
+        ),
+    ];
+
+    for (backend, expected) in cases {
+        assert_eq!(map_backend_error_kind(backend), expected);
     }
 }
 
-#[cfg(feature = "adapter-tests")]
 #[test]
-#[ignore = "claims the CSR8510 A10 and compares its address without displaying it"]
-fn target_adapter_identity_matches_private_baseline() {
-    const PATH_ENV: &str = "SWBT_ADAPTER_IDENTITY_BASELINE";
-    const ACTION_ENV: &str = "SWBT_ADAPTER_IDENTITY_ACTION";
+fn backend_events_preserve_the_transport_contract() {
+    let peer = backend_address(PROFILE_PEER);
+    let cases = [
+        (
+            backend::Event::Connected { peer },
+            TransportEvent::Connected,
+        ),
+        (
+            backend::Event::ChannelOpened {
+                channel: backend::Channel::Control,
+            },
+            TransportEvent::HidChannelOpened {
+                channel: HidChannel::Control,
+            },
+        ),
+        (
+            backend::Event::ChannelOpened {
+                channel: backend::Channel::Interrupt,
+            },
+            TransportEvent::HidChannelOpened {
+                channel: HidChannel::Interrupt,
+            },
+        ),
+        (
+            backend::Event::HidOutput {
+                channel: backend::Channel::Interrupt,
+                payload: Box::new([0xA2, 0x01]),
+            },
+            TransportEvent::HidOutput {
+                channel: HidChannel::Interrupt,
+                payload: Box::new([0xA2, 0x01]),
+            },
+        ),
+        (
+            backend::Event::Disconnected { reason: Some(0x13) },
+            TransportEvent::Disconnected { reason: Some(0x13) },
+        ),
+    ];
 
-    let baseline_path = std::env::var_os(PATH_ENV).expect("private baseline path is configured");
-    let action = std::env::var(ACTION_ENV).expect("identity action is configured");
-    let config = TransportConfig::for_model::<Pro>();
-    let mut transport = BumbleTransportPort::new(AdapterSelector::from("usb:0a12:0001"), config);
-    let current = transport
-        .open(activity_channel().0)
-        .expect("open target adapter")
-        .local_address();
-    transport.close().expect("close target adapter");
-
-    match action.as_str() {
-        "record" => {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(baseline_path)
-                .expect("create private adapter identity baseline");
-            file.write_all(&current)
-                .expect("write private adapter identity baseline");
-            file.sync_all()
-                .expect("sync private adapter identity baseline");
-        }
-        "verify" => {
-            let baseline = fs::read(baseline_path).expect("read private adapter identity baseline");
-            assert_eq!(
-                baseline.as_slice(),
-                current,
-                "adapter identity was not restored"
-            );
-        }
-        _ => panic!("identity action must be record or verify"),
+    for (backend, expected) in cases {
+        assert_eq!(
+            map_backend_event(backend).expect("map backend event"),
+            expected
+        );
     }
-
-    eprintln!("adapter_identity_action={action} matched=true");
 }
 
-#[cfg(feature = "adapter-tests")]
 #[test]
-#[ignore = "claims and initializes the CSR8510 A10 target adapter"]
-fn target_adapter_reports_initialized_identity_version_and_classic_capability() {
+fn open_projects_config_identity_and_profile_store_into_the_backend() {
+    let temp = TempDirectory::new("open-profile");
+    let profile_path = temp.path().join("pro.json");
+    fs::write(&profile_path, profile_bytes()).expect("write test profile");
+    let state = Arc::new(Mutex::new(FakeState::default()));
+    let explicit = LocalAddress::parse("02:12:34:56:78:9A").expect("valid local address");
     let config = TransportConfig::for_model::<Pro>();
-    let mut transport = BumbleTransportPort::new(AdapterSelector::from("usb:0a12:0001"), config);
+    let expected_config = config.clone();
+    let mut transport = BumbleTransportPort::with_opener_for_test(
+        AdapterSelector::from("usb:0a12:0001"),
+        config,
+        ProfileIdentity::LocalAddress(explicit),
+        Some(ProfileKeyStoreFactory::for_model::<Pro>(profile_path)),
+        Box::new(FakeOpener {
+            state: Arc::clone(&state),
+            expected_config,
+        }),
+    );
 
     let capabilities = transport
         .open(activity_channel().0)
-        .expect("open and initialize target adapter");
+        .expect("open fake backend session");
+    let repeated = transport
+        .open(activity_channel().0)
+        .expect("reuse fake backend session");
 
-    let local_address = capabilities.local_address();
-    let version = capabilities
-        .local_version()
-        .expect("target adapter reports HCI/LMP version metadata");
-    eprintln!(
-        "local_address_present=true \
-         hci_version=0x{:02X} hci_subversion=0x{:04X} \
-         lmp_version=0x{:02X} company_identifier=0x{:04X} lmp_subversion=0x{:04X}",
-        version.hci_version(),
-        version.hci_subversion(),
-        version.lmp_version(),
-        version.company_identifier(),
-        version.lmp_subversion(),
-    );
-
-    assert_ne!(local_address, [0; 6]);
-    assert!(capabilities.classic_capable());
-    assert_eq!(capabilities.usb().vendor_id(), 0x0a12);
-    assert_eq!(capabilities.usb().product_id(), 0x0001);
-    transport
-        .close()
-        .expect("stop reader and release target adapter");
-}
-
-#[test]
-fn unopened_bumble_transport_cleanup_is_idempotent() {
-    let config = TransportConfig::for_model::<Pro>();
-    let mut transport = BumbleTransportPort::new(AdapterSelector::from("invalid"), config);
-
-    transport
-        .drain_interrupt(Duration::ZERO)
-        .expect("unopened transport has no interrupt output to drain");
-    transport
-        .disconnect()
-        .expect("unopened transport has no controller link to disconnect");
-    transport
-        .close()
-        .expect("unopened transport has no reader to close");
-    transport
-        .close()
-        .expect("repeated close remains idempotent");
-}
-
-#[test]
-fn bumble_initialization_uses_configured_device_and_exact_hci_order() {
-    let config = TransportConfig::for_model::<Pro>();
-    let commands = Arc::new(Mutex::new(Vec::new()));
-    let (transport, _drops) = scripted_transport(
-        successful_initialization_responses(&config),
-        Arc::clone(&commands),
-        None,
-    );
-    let selectors = Arc::new(Mutex::new(Vec::new()));
-    let mut opener = ScriptedOpener::new(transport, Arc::clone(&selectors));
-
-    let session = initialize_bumble_session_with(
-        &mut opener,
-        &AdapterSelector::from("usb:0A12:0001"),
-        &config,
-        activity_channel().0,
-    )
-    .expect("scripted Bumble initialization");
-
-    assert_eq!(lock(&selectors).as_slice(), ["usb:0A12:0001"]);
-    let expected = expected_commands(&config);
-    assert_eq!(lock(&commands).as_slice(), expected.as_slice());
-    let device = session.device_configuration();
-    assert_eq!(device.name, config.local_name());
-    assert_eq!(device.class_of_device, config.class_of_device());
-    assert_eq!(device.advertising_data, config.complete_local_name_ad());
-    assert_eq!(device.classic_enabled, config.classic_enabled());
-    assert_eq!(device.classic_accept_any, config.classic_accept_any());
-    assert_eq!(device.connectable, config.connectable());
-    assert_eq!(device.discoverable, config.discoverable());
-    assert_eq!(device.classic_sc_enabled, config.classic_sc_enabled());
-    assert_eq!(device.classic_ssp_enabled, config.classic_ssp_enabled());
-    assert_eq!(device.le_enabled, config.le_enabled());
+    assert_eq!(capabilities, TransportCapabilities::test_default());
+    assert_eq!(repeated, capabilities);
+    let state = state.lock().expect("read fake state");
+    assert_eq!(state.open_count, 1);
+    assert!(state.selector_matches);
+    assert!(state.config_matches);
     assert_eq!(
-        device.le_simultaneous_enabled,
-        config.le_simultaneous_enabled()
+        state.explicit_identity_le,
+        Some([0x9A, 0x78, 0x56, 0x34, 0x12, 0x02])
     );
-
-    let capabilities = session.capabilities();
-    assert_eq!(capabilities.local_address(), DISPLAY_ADDRESS);
-    assert!(capabilities.classic_capable());
-    let version = capabilities.local_version().expect("version metadata");
-    assert_eq!(version.hci_version(), 0x09);
-    assert_eq!(version.hci_subversion(), 0x1234);
-    assert_eq!(version.lmp_version(), 0x09);
-    assert_eq!(version.company_identifier(), 0x000a);
-    assert_eq!(version.lmp_subversion(), 0x5678);
-    let usb = capabilities.usb();
-    assert_eq!(usb.vendor_id(), 0x0a12);
-    assert_eq!(usb.product_id(), 0x0001);
-    assert_eq!(usb.bus_number(), 1);
-    assert_eq!(usb.device_address(), 7);
+    assert_eq!(
+        state.loaded_bond,
+        Some(backend::ClassicBond::new([0xA1; 16], 4, true))
+    );
 }
 
 #[test]
-fn adapter_default_wrapper_preserves_the_single_open_command_sequence() {
-    let config = TransportConfig::for_model::<Pro>();
-    let commands = Arc::new(Mutex::new(Vec::new()));
-    let (transport, _drops) = scripted_transport(
-        successful_initialization_responses(&config),
-        Arc::clone(&commands),
-        None,
-    );
-    let selectors = Arc::new(Mutex::new(Vec::new()));
-    let mut opener = ScriptedOpener::new(transport, Arc::clone(&selectors));
-
-    let session = initialize_bumble_transport_with(
-        &mut opener,
-        &AdapterSelector::from("usb:0A12:0001"),
-        &config,
+fn session_operations_delegate_once_and_close_is_idempotent() {
+    let state = Arc::new(Mutex::new(FakeState::default()));
+    let mut transport = BumbleTransportPort::with_opener_for_test(
+        AdapterSelector::from("usb:0"),
+        TransportConfig::for_model::<Pro>(),
         ProfileIdentity::AdapterDefault,
-        activity_channel().0,
         None,
-    )
-    .expect("adapter-default wrapper must preserve normal initialization");
-
-    assert_eq!(lock(&selectors).as_slice(), ["usb:0A12:0001"]);
-    assert_eq!(lock(&commands).as_slice(), expected_commands(&config));
-    assert_eq!(session.capabilities().local_address(), DISPLAY_ADDRESS);
-}
-
-#[test]
-fn explicit_identity_rewrite_guards_normal_open_and_keys_the_target_namespace() {
-    let config = TransportConfig::for_model::<Pro>();
-    let target = LocalAddress::try_from(TARGET_ADDRESS).expect("valid local address fixture");
-    let temp = ProfileTempDirectory::new("explicit-identity");
-    let path = temp.path().join("pro.json");
-    fs::write(&path, local_profile_bytes()).expect("write local-address profile");
-    let key_store = ProfileKeyStoreFactory::for_model::<Pro>(path.clone());
-
-    let before_commands = Arc::new(Mutex::new(Vec::new()));
-    let mut before_responses = identity_probe_responses(DISPLAY_ADDRESS);
-    before_responses.push(HciPacket::Event(Event::Vendor {
-        data: hex("c201000c0011470370000001000400080056009a7834001202"),
-    }));
-    let (before, _before_drops) =
-        scripted_transport(before_responses, Arc::clone(&before_commands), None);
-
-    let readback_commands = Arc::new(Mutex::new(Vec::new()));
-    let (readback, _readback_drops) = scripted_transport(
-        identity_probe_responses(TARGET_ADDRESS),
-        Arc::clone(&readback_commands),
-        None,
-    );
-
-    let normal_commands = Arc::new(Mutex::new(Vec::new()));
-    let acl_packets = Arc::new(Mutex::new(Vec::new()));
-    let (normal, source, _normal_drops) = controlled_transport(
-        successful_initialization_responses_for(&config, TARGET_ADDRESS),
-        Arc::clone(&normal_commands),
-        acl_packets,
-    );
-    let selectors = Arc::new(Mutex::new(Vec::new()));
-    let mut opener = ScriptedOpener::sequence([before, readback, normal], Arc::clone(&selectors));
-    let (activity, wakes) = activity_channel();
-
-    let mut session = initialize_bumble_transport_with(
-        &mut opener,
-        &AdapterSelector::from("usb:0A12:0001"),
-        &config,
-        ProfileIdentity::LocalAddress(target),
-        activity,
-        Some(&key_store),
-    )
-    .expect("explicit identity must rewrite, read back, and pass normal guard");
-
-    assert_eq!(lock(&selectors).len(), 3);
-    let rewrite = build_csr_bd_addr_volatile_rewrite_plan(TARGET_ADDRESS, 0x4711);
-    let before_commands = lock(&before_commands);
-    assert_eq!(before_commands[0], Command::ReadLocalVersionInformation);
-    assert_eq!(before_commands[1], Command::ReadBdAddr);
-    let Command::Generic {
-        op_code,
-        parameters,
-    } = &before_commands[2]
-    else {
-        panic!("identity write must use a generic vendor command");
-    };
-    assert_eq!(*op_code, rewrite.write().op_code());
-    assert_eq!(parameters, rewrite.write().parameters());
-    assert!(matches_csr_vendor_response(
-        rewrite.write(),
-        &hex("c201000c0011470370000001000400080056009a7834001202")
-    ));
-    let Command::Generic {
-        op_code,
-        parameters,
-    } = &before_commands[3]
-    else {
-        panic!("warm reset must use a generic vendor command");
-    };
-    assert_eq!(*op_code, rewrite.reset().op_code());
-    assert_eq!(parameters, rewrite.reset().parameters());
-    drop(before_commands);
-    assert_eq!(
-        lock(&readback_commands).as_slice(),
-        [Command::ReadLocalVersionInformation, Command::ReadBdAddr]
-    );
-    assert_eq!(
-        lock(&normal_commands).as_slice(),
-        expected_commands(&config)
-    );
-    assert_eq!(session.capabilities().local_address(), TARGET_ADDRESS);
-
-    while wakes.try_recv().is_ok() {}
-    let peer =
-        Address::parse(PROFILE_PEER, AddressType::PUBLIC_DEVICE).expect("valid test peer address");
-    source.push(Ok(Some(HciPacket::Event(Event::LinkKeyNotification {
-        bd_addr: peer,
-        link_key: [0xC7; 16],
-        key_type: 0x04,
-    }))));
-    wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("link-key notification activity");
-    assert!(
-        session
-            .poll(Duration::ZERO)
-            .expect("persist target bond")
-            .is_empty()
-    );
-    let saved: serde_json::Value =
-        serde_json::from_slice(&fs::read(&path).expect("read target-keyed profile"))
-            .expect("saved local-address profile remains JSON");
-    assert_eq!(
-        saved["key_store"]["namespaces"]["02:12:34:56:78:9A"][PROFILE_PEER]["link_key"]["value"],
-        "c7".repeat(16)
-    );
-    assert!(
-        saved["key_store"]["namespaces"]
-            .get(PROFILE_NAMESPACE)
-            .is_none()
-    );
-    session.close().expect("close explicit identity session");
-}
-
-#[test]
-fn post_rewrite_guard_mismatch_is_recovery_required() {
-    let config = TransportConfig::for_model::<Pro>();
-    let target = LocalAddress::try_from(TARGET_ADDRESS).expect("valid local address fixture");
-    let mut before_responses = identity_probe_responses(DISPLAY_ADDRESS);
-    before_responses.push(HciPacket::Event(Event::Vendor {
-        data: hex("c201000c0011470370000001000400080056009a7834001202"),
-    }));
-    let (before, _before_drops) =
-        scripted_transport(before_responses, Arc::new(Mutex::new(Vec::new())), None);
-    let (readback, _readback_drops) = scripted_transport(
-        identity_probe_responses(TARGET_ADDRESS),
-        Arc::new(Mutex::new(Vec::new())),
-        None,
-    );
-    let normal_commands = Arc::new(Mutex::new(Vec::new()));
-    let (normal, _normal_drops) = scripted_transport(
-        successful_initialization_responses(&config),
-        Arc::clone(&normal_commands),
-        None,
-    );
-    let mut opener =
-        ScriptedOpener::sequence([before, readback, normal], Arc::new(Mutex::new(Vec::new())));
-
-    let error = match initialize_bumble_transport_with(
-        &mut opener,
-        &AdapterSelector::from("usb:0A12:0001"),
-        &config,
-        ProfileIdentity::LocalAddress(target),
-        activity_channel().0,
-        None,
-    ) {
-        Ok(_) => panic!("normal open mismatch after a rewrite must require recovery"),
-        Err(error) => error,
-    };
-
-    assert_eq!(
-        error.kind(),
-        TransportErrorKind::AdapterIdentityRecoveryRequired
-    );
-    assert_eq!(lock(&normal_commands).len(), 8);
-}
-
-#[test]
-fn already_active_guard_mismatch_fails_before_identity_writes() {
-    let config = TransportConfig::for_model::<Pro>();
-    let target = LocalAddress::try_from(TARGET_ADDRESS).expect("valid local address fixture");
-    let identity_commands = Arc::new(Mutex::new(Vec::new()));
-    let (identity, _identity_drops) = scripted_transport(
-        identity_probe_responses(TARGET_ADDRESS),
-        Arc::clone(&identity_commands),
-        None,
-    );
-    let normal_commands = Arc::new(Mutex::new(Vec::new()));
-    let (normal, _normal_drops) = scripted_transport(
-        successful_initialization_responses(&config),
-        Arc::clone(&normal_commands),
-        None,
-    );
-    let mut opener = ScriptedOpener::sequence([identity, normal], Arc::new(Mutex::new(Vec::new())));
-
-    let error = match initialize_bumble_transport_with(
-        &mut opener,
-        &AdapterSelector::from("usb:0A12:0001"),
-        &config,
-        ProfileIdentity::LocalAddress(target),
-        activity_channel().0,
-        None,
-    ) {
-        Ok(_) => panic!("normal guard mismatch without a write must fail closed"),
-        Err(error) => error,
-    };
-
-    assert_eq!(error.kind(), TransportErrorKind::IdentityMismatch);
-    assert_eq!(
-        lock(&identity_commands).as_slice(),
-        [Command::ReadLocalVersionInformation, Command::ReadBdAddr]
-    );
-    assert_eq!(lock(&normal_commands).len(), 8);
-}
-
-#[test]
-fn production_profile_key_store_persists_classic_link_key_notification() {
-    let temp = ProfileTempDirectory::new("persist");
-    let path = temp.path().join("pro.json");
-    fs::write(&path, empty_profile_bytes()).expect("write empty profile");
-    let factory = ProfileKeyStoreFactory::for_model::<Pro>(path.clone());
-    let ControlledSession {
-        mut session,
-        source,
-        wakes,
-        drops: _drops,
-        commands: _commands,
-        acl_packets: _acl_packets,
-    } = controlled_session_with_key_store(Some(&factory));
-    wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("initialization activity");
-    let peer =
-        Address::parse(PROFILE_PEER, AddressType::PUBLIC_DEVICE).expect("valid test peer address");
-
-    source.push(Ok(Some(HciPacket::Event(Event::LinkKeyNotification {
-        bd_addr: peer,
-        link_key: [0xA5; 16],
-        key_type: 0x04,
-    }))));
-    wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("link-key notification activity");
-
-    assert!(
-        session
-            .poll(Duration::ZERO)
-            .expect("persist link key through production profile store")
-            .is_empty()
-    );
-    let saved: serde_json::Value =
-        serde_json::from_slice(&fs::read(&path).expect("read persisted profile"))
-            .expect("persisted profile remains JSON");
-    let stored = &saved["key_store"]["namespaces"][PROFILE_NAMESPACE][PROFILE_PEER];
-    assert_eq!(stored["link_key"]["value"], "a5".repeat(16));
-    assert_eq!(stored["link_key_type"], 0x04);
-    session.close().expect("close scripted session");
-}
-
-#[test]
-fn production_profile_key_store_failure_is_a_secret_free_typed_terminal() {
-    let temp = ProfileTempDirectory::new("failure-secret-path");
-    let path = temp.path().join("secret-profile-name.json");
-    fs::write(&path, empty_profile_bytes()).expect("write empty profile");
-    let factory = ProfileKeyStoreFactory::for_model::<Pro>(path.clone());
-    let ControlledSession {
-        mut session,
-        source,
-        wakes,
-        drops: _drops,
-        commands: _commands,
-        acl_packets: _acl_packets,
-    } = controlled_session_with_key_store(Some(&factory));
-    wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("initialization activity");
-    let mut secret_profile: serde_json::Value =
-        serde_json::from_slice(&empty_profile_bytes()).expect("empty profile is JSON");
-    secret_profile["future_secret"] = PROFILE_SECRET_SENTINEL.into();
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&secret_profile).expect("serialize secret-bearing profile"),
-    )
-    .expect("write valid secret-bearing profile");
-    let update_lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&path)
-        .expect("open profile lock");
-    update_lock
-        .try_lock_exclusive()
-        .expect("hold profile update lock");
-    let peer =
-        Address::parse(PROFILE_PEER, AddressType::PUBLIC_DEVICE).expect("valid test peer address");
-    source.push(Ok(Some(HciPacket::Event(Event::LinkKeyNotification {
-        bd_addr: peer,
-        link_key: [0xB6; 16],
-        key_type: 0x04,
-    }))));
-    wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("failed link-key notification activity");
-
-    let first = session
-        .poll(Duration::ZERO)
-        .expect_err("profile persistence failure must terminate the transport");
-    assert_eq!(first.kind(), TransportErrorKind::InvalidKeyStore);
-    for rendered in [first.to_string(), format!("{first:?}")] {
-        assert!(!rendered.contains(PROFILE_SECRET_SENTINEL));
-        assert!(!rendered.contains(PROFILE_PEER));
-        assert!(!rendered.contains(&path.to_string_lossy().into_owned()));
-        assert!(!rendered.contains("secret-profile-name"));
-    }
-    let repeated = session
-        .poll(Duration::ZERO)
-        .expect_err("profile persistence terminal must remain sticky");
-    assert_eq!(repeated.kind(), TransportErrorKind::InvalidKeyStore);
-    drop(update_lock);
-    let unchanged: serde_json::Value =
-        serde_json::from_slice(&fs::read(&path).expect("read unchanged profile"))
-            .expect("locked profile remains valid");
-    assert_eq!(unchanged["future_secret"], PROFILE_SECRET_SENTINEL);
-    assert_eq!(unchanged["key_store"]["namespaces"], serde_json::json!({}));
-    session.close().expect("close failed scripted session");
-}
-
-#[test]
-fn bumble_initialization_rejects_incomplete_identity_response() {
-    let config = TransportConfig::for_model::<Pro>();
-    for identity_response in [
-        HciPacket::Event(Event::CommandStatus {
-            status: 0,
-            num_hci_command_packets: 1,
-            command_opcode: Command::ReadBdAddr.op_code(),
+        Box::new(FakeOpener {
+            state: Arc::clone(&state),
+            expected_config: TransportConfig::for_model::<Pro>(),
         }),
-        command_complete(Command::ReadBdAddr, ReturnParameters::Raw { data: vec![0] }),
-        command_complete(
-            Command::ReadBdAddr,
-            ReturnParameters::ReadBdAddr {
-                status: 1,
-                bd_addr: Address::from_bytes(HCI_ADDRESS, AddressType::PUBLIC_DEVICE),
-            },
-        ),
-    ] {
-        let mut responses = controller_initialization_responses();
-        responses.push(identity_response);
-        let commands = Arc::new(Mutex::new(Vec::new()));
-        let (transport, _drops) = scripted_transport(responses, commands, None);
-        let selectors = Arc::new(Mutex::new(Vec::new()));
-        let mut opener = ScriptedOpener::new(transport, selectors);
-
-        let error = match initialize_bumble_session_with(
-            &mut opener,
-            &AdapterSelector::from("usb:0"),
-            &config,
-            activity_channel().0,
-        ) {
-            Ok(_) => panic!("ReadBdAddr requires exact successful Command Complete"),
-            Err(error) => error,
-        };
-
-        assert_eq!(error.kind(), TransportErrorKind::OpenFailed);
-        assert!(
-            error.source().is_some(),
-            "ReadBdAddr failure retains a typed initialization source"
-        );
-        assert!(!error.to_string().contains("ReadBdAddr"));
-        assert!(!format!("{error:?}").contains("ReadBdAddr"));
-    }
-}
-
-#[test]
-fn bumble_initialization_rejects_failed_reset_with_typed_source() {
-    let config = TransportConfig::for_model::<Pro>();
-    let mut responses = controller_initialization_responses();
-    responses[0] = command_complete(Command::Reset, ReturnParameters::Status { status: 1 });
-    let commands = Arc::new(Mutex::new(Vec::new()));
-    let (transport, _drops) = scripted_transport(responses, commands, None);
-    let selectors = Arc::new(Mutex::new(Vec::new()));
-    let mut opener = ScriptedOpener::new(transport, selectors);
-
-    let error = match initialize_bumble_session_with(
-        &mut opener,
-        &AdapterSelector::from("usb:0"),
-        &config,
-        activity_channel().0,
-    ) {
-        Ok(_) => panic!("failed HCI Reset must stop initialization"),
-        Err(error) => error,
-    };
-
-    assert_eq!(error.kind(), TransportErrorKind::OpenFailed);
-    assert!(
-        matches!(
-            error
-                .source()
-                .and_then(|source| source.downcast_ref::<BumbleError>()),
-            Some(BumbleError::Remote(_))
-        ),
-        "failed Reset retains the typed Bumble source"
-    );
-    assert!(!error.to_string().contains("Reset"));
-    assert!(!format!("{error:?}").contains("Reset"));
-}
-
-#[test]
-fn bumble_initialization_requires_successful_complete_identity_writes() {
-    let config = TransportConfig::for_model::<Pro>();
-    let command = identity_commands(&config)[0].clone();
-    for response in [
-        HciPacket::Event(Event::CommandStatus {
-            status: 0,
-            num_hci_command_packets: 1,
-            command_opcode: command.op_code(),
-        }),
-        command_complete(command.clone(), ReturnParameters::Raw { data: vec![1] }),
-    ] {
-        let mut responses = successful_initialization_responses(&config);
-        responses[8] = response;
-        let commands = Arc::new(Mutex::new(Vec::new()));
-        let (transport, _drops) = scripted_transport(responses, commands, None);
-        let selectors = Arc::new(Mutex::new(Vec::new()));
-        let mut opener = ScriptedOpener::new(transport, selectors);
-
-        let error = match initialize_bumble_session_with(
-            &mut opener,
-            &AdapterSelector::from("usb:0"),
-            &config,
-            activity_channel().0,
-        ) {
-            Ok(_) => panic!("identity writes require successful Command Complete"),
-            Err(error) => error,
-        };
-
-        assert_eq!(error.kind(), TransportErrorKind::OpenFailed);
-    }
-}
-
-#[test]
-fn bumble_initialization_failure_preserves_source_and_releases_scripted_resources() {
-    let config = TransportConfig::for_model::<Pro>();
-    let commands = Arc::new(Mutex::new(Vec::new()));
-    let fail_opcode = Command::WriteExtendedInquiryResponse {
-        fec_required: 0,
-        extended_inquiry_response: [0; 240],
-    }
-    .op_code();
-    let (transport, drops) = scripted_transport(
-        successful_initialization_responses(&config),
-        commands,
-        Some(fail_opcode),
-    );
-    let selectors = Arc::new(Mutex::new(Vec::new()));
-    let mut opener = ScriptedOpener::new(transport, selectors);
-
-    let error = match initialize_bumble_session_with(
-        &mut opener,
-        &AdapterSelector::from("usb:0"),
-        &config,
-        activity_channel().0,
-    ) {
-        Ok(_) => panic!("scripted identity write failure"),
-        Err(error) => error,
-    };
-
-    assert_eq!(error.kind(), TransportErrorKind::OpenFailed);
-    assert!(
-        error
-            .source()
-            .and_then(|source| source.downcast_ref::<BumbleError>())
-            .is_some()
-    );
-    assert!(!error.to_string().contains("secret"));
-    assert!(!format!("{error:?}").contains("secret"));
-    let mut released = [
-        drops
-            .recv_timeout(Duration::from_secs(1))
-            .expect("scripted source or sink is released"),
-        drops
-            .recv_timeout(Duration::from_secs(1))
-            .expect("both scripted transport halves are released"),
-    ];
-    released.sort_unstable();
-    assert_eq!(released, ["sink", "source"]);
-}
-
-#[test]
-fn bumble_reader_enqueues_before_wake_and_coalesces_activity() {
-    let (mut session, source, wakes, _drops) = controlled_session();
-
-    wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("initialization activity");
-    assert_eq!(wakes.try_recv(), Err(TryRecvError::Empty));
-
-    source.push(Ok(Some(command_complete(
-        Command::Reset,
-        ReturnParameters::Status { status: 0 },
-    ))));
-    wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("reader activity after enqueue");
-    session
-        .poll(Duration::ZERO)
-        .expect("zero-time poll observes enqueued packet");
-    assert_eq!(wakes.try_recv(), Err(TryRecvError::Empty));
-
-    session.close().expect("reader cleanup");
-}
-
-#[test]
-fn bumble_reader_end_and_failure_are_single_wake_and_sticky() {
-    let (mut ended, end_source, end_wakes, _drops) = controlled_session();
-    end_wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("initialization activity");
-    end_source.finish();
-    end_wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("clean end activity");
-    assert!(matches!(
-        end_wakes.try_recv(),
-        Err(TryRecvError::Empty | TryRecvError::Disconnected)
-    ));
-
-    let first = ended
-        .poll(Duration::ZERO)
-        .expect_err("clean end is terminal");
-    assert_eq!(first.kind(), TransportErrorKind::SourceTerminated);
-    let repeated = ended
-        .poll(Duration::ZERO)
-        .expect_err("clean end remains terminal");
-    assert_eq!(repeated.kind(), TransportErrorKind::SourceTerminated);
-    ended.close().expect("clean end remains closable");
-
-    let (failed, fail_source, fail_wakes, _drops) = controlled_session();
-    let mut failed = BumbleTransportPort::from_session_for_test(failed);
-    fail_wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("initialization activity");
-    fail_source.push(Err(std::io::Error::other(
-        "PAIRING-KEY reader failure sentinel",
-    )
-    .into()));
-    fail_wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("failure activity");
-    assert!(matches!(
-        fail_wakes.try_recv(),
-        Err(TryRecvError::Empty | TryRecvError::Disconnected)
-    ));
-
-    let first = failed
-        .poll(Duration::ZERO)
-        .expect_err("reader failure is terminal");
-    assert_eq!(first.kind(), TransportErrorKind::SourceTerminated);
-    let source = first.source().expect("typed Bumble source");
-    let bumble = source
-        .downcast_ref::<BumbleError>()
-        .expect("Bumble error remains in the source chain");
-    assert!(matches!(
-        bumble,
-        BumbleError::ExternalHostFailure(error)
-            if matches!(error.as_ref(), BumbleError::Io(_))
-    ));
-    assert!(!first.to_string().contains("PAIRING-KEY"));
-    assert!(!format!("{first:?}").contains("PAIRING-KEY"));
-
-    let repeated = failed
-        .poll(Duration::ZERO)
-        .expect_err("reader failure remains terminal");
-    assert_eq!(repeated.kind(), TransportErrorKind::SourceTerminated);
-    assert!(std::ptr::eq(
-        first.source().expect("first source"),
-        repeated.source().expect("sticky source"),
-    ));
-    for terminal in [
-        failed
-            .start_pairing()
-            .expect_err("pairing retains the reader terminal"),
-        failed
-            .send_interrupt(&[])
-            .expect_err("send retains the reader terminal"),
-        failed
-            .drain_interrupt(Duration::ZERO)
-            .expect_err("drain retains the reader terminal"),
-        failed
-            .disconnect()
-            .expect_err("disconnect retains the reader terminal"),
-    ] {
-        assert_eq!(terminal.kind(), TransportErrorKind::SourceTerminated);
-        assert!(std::ptr::eq(
-            first.source().expect("first source"),
-            terminal.source().expect("port preserves the sticky source"),
-        ));
-    }
-    failed.close().expect("failed reader remains closable");
-}
-
-#[test]
-fn bumble_session_drives_pairing_connection_drain_and_disconnect() {
-    const CONNECTION_HANDLE: u16 = 0x0040;
-
-    let ControlledSession {
-        mut session,
-        source,
-        wakes,
-        drops: _drops,
-        commands,
-        acl_packets,
-    } = controlled_session_with_recording();
-    wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("initialization activity");
-    let initialization_commands = lock(&commands).len();
-
-    session.start_pairing().expect("open pairing window");
-    session
-        .start_pairing()
-        .expect("repeated pairing start is idempotent");
-    assert!(matches!(
-        lock(&commands).as_slice(),
-        [.., Command::WriteScanEnable { scan_enable: 2 }]
-    ));
-    assert_eq!(lock(&commands).len(), initialization_commands + 1);
-
-    complete_next_command(
-        &mut session,
-        &source,
-        Command::WriteScanEnable { scan_enable: 2 },
-    );
-    let extended_inquiry_response = Command::WriteExtendedInquiryResponse {
-        fec_required: 0,
-        extended_inquiry_response: *TransportConfig::for_model::<Pro>().extended_inquiry_response(),
-    };
-    complete_next_command(&mut session, &source, extended_inquiry_response);
-    complete_next_command(
-        &mut session,
-        &source,
-        Command::WriteScanEnable { scan_enable: 3 },
     );
 
-    let peer = Address::parse("11:11:11:11:11:11", AddressType::PUBLIC_DEVICE)
-        .expect("valid peer address");
-    source.push(Ok(Some(HciPacket::Event(Event::ConnectionRequest {
-        bd_addr: peer.clone(),
-        class_of_device: 0,
-        link_type: 0x01,
-    }))));
-    assert!(
-        session
-            .poll(Duration::from_secs(1))
-            .expect("drive connection request")
-            .is_empty()
-    );
-    let accept = Command::AcceptConnectionRequest {
-        bd_addr: peer.clone(),
-        role: 0x01,
-    };
-    assert_eq!(lock(&commands).last(), Some(&accept));
-
-    source.push(Ok(Some(HciPacket::Event(Event::CommandStatus {
-        status: 0,
-        num_hci_command_packets: 1,
-        command_opcode: accept.op_code(),
-    }))));
-    source.push(Ok(Some(HciPacket::Event(Event::ConnectionComplete {
-        status: 0,
-        connection_handle: CONNECTION_HANDLE,
-        bd_addr: peer,
-        link_type: 0x01,
-        encryption_enabled: 0,
-    }))));
     assert_eq!(
-        poll_until_transport_event(
-            &mut session,
-            Duration::from_secs(1),
-            "drive accepted Classic connection",
-        ),
-        [TransportEvent::Connected]
+        transport.start_pairing().expect_err("not open").kind(),
+        TransportErrorKind::Closed
     );
-
-    const LOCAL_CID: u16 = 0x0040;
-    const PEER_CID: u16 = 0x0070;
-    source.push(Ok(Some(classic_signal(
-        CONNECTION_HANDLE,
-        ControlFrame::ConnectionRequest {
-            identifier: 1,
-            psm: 0x0013,
-            source_cid: PEER_CID,
-        },
-    ))));
-    assert!(
-        session
-            .poll(Duration::from_secs(1))
-            .expect("drive incoming HID interrupt request")
-            .is_empty()
-    );
-    source.push(Ok(Some(classic_signal(
-        CONNECTION_HANDLE,
-        ControlFrame::ConfigureRequest {
-            identifier: 2,
-            destination_cid: LOCAL_CID,
-            flags: 0,
-            options: Vec::new(),
-        },
-    ))));
-    source.push(Ok(Some(classic_signal(
-        CONNECTION_HANDLE,
-        ControlFrame::ConfigureResponse {
-            identifier: 3,
-            source_cid: LOCAL_CID,
-            flags: 0,
-            result: 0,
-            options: Vec::new(),
-        },
-    ))));
     assert_eq!(
-        poll_until_transport_event(
-            &mut session,
-            Duration::from_secs(1),
-            "complete HID interrupt configuration",
-        ),
-        [TransportEvent::HidChannelOpened {
-            channel: super::HidChannel::Interrupt,
-        }]
-    );
-
-    session
-        .send_interrupt(&[0x01, 0x02])
-        .expect("open production HID interrupt channel accepts input");
-    session
-        .drain_interrupt(Duration::ZERO)
-        .expect("in-flight ACL packet has left the host queue");
-    let sent_acl_packets = lock(&acl_packets).len();
-    assert!(sent_acl_packets >= 4);
-    source.push(Ok(Some(HciPacket::Event(
-        Event::NumberOfCompletedPackets {
-            connection_handles: vec![CONNECTION_HANDLE],
-            num_completed_packets: vec![
-                u16::try_from(sent_acl_packets).expect("test ACL count fits u16"),
-            ],
-        },
-    ))));
-    session
-        .drain_interrupt(Duration::from_secs(1))
-        .expect("completed ACL packet drains");
-
-    assert!(session.interrupt_send_capacity_available());
-    for packet in 0..8 {
-        session
-            .send_interrupt(&[0x30, packet])
-            .expect("controller ACL window accepts one in-flight packet");
-    }
-    assert!(!session.interrupt_send_capacity_available());
-    session
-        .send_interrupt(&[0x30, 8])
-        .expect("full controller window queues one host-side packet");
-    assert_eq!(
-        session
-            .drain_interrupt(Duration::ZERO)
-            .expect_err("host-side packet is not flushed")
-            .kind(),
-        TransportErrorKind::DrainTimedOut
-    );
-    source.push(Ok(Some(HciPacket::Event(
-        Event::NumberOfCompletedPackets {
-            connection_handles: vec![CONNECTION_HANDLE],
-            num_completed_packets: vec![1],
-        },
-    ))));
-    session
-        .drain_interrupt(Duration::from_secs(1))
-        .expect("one completion flushes the host-side packet");
-    assert!(!session.interrupt_send_capacity_available());
-    source.push(Ok(Some(HciPacket::Event(
-        Event::NumberOfCompletedPackets {
-            connection_handles: vec![CONNECTION_HANDLE],
-            num_completed_packets: vec![8],
-        },
-    ))));
-    assert!(
-        session
-            .poll(Duration::from_secs(1))
-            .expect("remaining completions restore capacity")
-            .is_empty()
-    );
-    assert!(session.interrupt_send_capacity_available());
-
-    session.disconnect().expect("disconnect active session");
-    session
-        .disconnect()
-        .expect("repeated disconnect is idempotent");
-    session.close().expect("reader cleanup");
-}
-
-#[test]
-fn bumble_close_cancels_reader_waits_for_completion_and_joins_once() {
-    let (mut session, _source, wakes, drops) = controlled_session();
-    wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("initialization activity");
-
-    session.close().expect("first close");
-    wakes
-        .recv_timeout(Duration::from_secs(1))
-        .expect("shutdown terminal activity");
-    assert!(matches!(
-        wakes.try_recv(),
-        Err(TryRecvError::Empty | TryRecvError::Disconnected)
-    ));
-    let mut released = [
-        drops
-            .recv_timeout(Duration::from_secs(1))
-            .expect("source released after reader join"),
-        drops
-            .recv_timeout(Duration::from_secs(1))
-            .expect("sink released after reader join"),
-    ];
-    released.sort_unstable();
-    assert_eq!(released, ["sink", "source"]);
-    assert_eq!(
-        session
-            .poll(Duration::ZERO)
-            .expect_err("closed session rejects poll")
+        transport
+            .send_interrupt(&[0x01])
+            .expect_err("not open")
             .kind(),
         TransportErrorKind::Closed
     );
+    assert!(!transport.interrupt_send_capacity_available());
+    transport
+        .drain_interrupt(Duration::ZERO)
+        .expect("pre-open drain is settled");
+    transport
+        .disconnect()
+        .expect("pre-open disconnect is settled");
+    transport.close().expect("pre-open close is settled");
 
-    session.close().expect("repeated close");
-    assert!(matches!(
-        drops.try_recv(),
-        Err(TryRecvError::Empty | TryRecvError::Disconnected)
-    ));
-}
-
-struct ScriptedOpener {
-    transports: VecDeque<SplitOpenedTransport>,
-    selectors: Arc<Mutex<Vec<String>>>,
-}
-
-impl ScriptedOpener {
-    fn new(transport: SplitOpenedTransport, selectors: Arc<Mutex<Vec<String>>>) -> Self {
-        Self {
-            transports: VecDeque::from([transport]),
-            selectors,
-        }
-    }
-
-    fn sequence(
-        transports: impl IntoIterator<Item = SplitOpenedTransport>,
-        selectors: Arc<Mutex<Vec<String>>>,
-    ) -> Self {
-        Self {
-            transports: transports.into_iter().collect(),
-            selectors,
-        }
-    }
-}
-
-impl SplitTransportOpener for ScriptedOpener {
-    fn open_split(&mut self, selector: &str) -> BumbleResult<SplitOpenedTransport> {
-        lock(&self.selectors).push(selector.to_owned());
-        self.transports
-            .pop_front()
-            .ok_or_else(|| BumbleError::Remote("scripted transport already consumed".into()))
-    }
-}
-
-struct ScriptedSource {
-    responses: VecDeque<BumbleResult<Option<HciPacket>>>,
-    dropped: Sender<&'static str>,
-}
-
-impl PacketSource for ScriptedSource {
-    fn read_packet(&mut self) -> BumbleResult<Option<HciPacket>> {
-        self.responses.pop_front().unwrap_or(Ok(None))
-    }
-
-    fn shutdown_handle(&self) -> Option<Arc<dyn PacketSourceShutdown>> {
-        Some(Arc::new(NoopScriptedShutdown))
-    }
-}
-
-struct NoopScriptedShutdown;
-
-impl PacketSourceShutdown for NoopScriptedShutdown {
-    fn request_shutdown(&self) {}
-}
-
-impl Drop for ScriptedSource {
-    fn drop(&mut self) {
-        let _ = self.dropped.send("source");
-    }
-}
-
-#[derive(Clone)]
-struct ControlledSourceControl {
-    shared: Arc<ControlledSourceShared>,
-}
-
-struct ControlledSourceShared {
-    state: Mutex<ControlledSourceState>,
-    wake: Condvar,
-}
-
-struct ControlledSourceState {
-    queued: VecDeque<BumbleResult<Option<HciPacket>>>,
-    shutdown_requested: bool,
-}
-
-impl ControlledSourceControl {
-    fn push(&self, result: BumbleResult<Option<HciPacket>>) {
-        lock(&self.shared.state).queued.push_back(result);
-        self.shared.wake.notify_all();
-    }
-
-    fn finish(&self) {
-        self.push(Ok(None));
-    }
-}
-
-impl PacketSourceShutdown for ControlledSourceControl {
-    fn request_shutdown(&self) {
-        lock(&self.shared.state).shutdown_requested = true;
-        self.shared.wake.notify_all();
-    }
-}
-
-struct ControlledSource {
-    control: ControlledSourceControl,
-    dropped: Sender<&'static str>,
-}
-
-impl PacketSource for ControlledSource {
-    fn read_packet(&mut self) -> BumbleResult<Option<HciPacket>> {
-        let mut state = lock(&self.control.shared.state);
-        loop {
-            if let Some(result) = state.queued.pop_front() {
-                return result;
-            }
-            if state.shutdown_requested {
-                return Ok(None);
-            }
-            state = self
-                .control
-                .shared
-                .wake
-                .wait(state)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-        }
-    }
-
-    fn shutdown_handle(&self) -> Option<Arc<dyn PacketSourceShutdown>> {
-        Some(Arc::new(self.control.clone()))
-    }
-}
-
-impl Drop for ControlledSource {
-    fn drop(&mut self) {
-        let _ = self.dropped.send("source");
-    }
-}
-
-struct RecordingSink {
-    commands: Arc<Mutex<Vec<Command>>>,
-    acl_packets: Arc<Mutex<Vec<AclDataPacket>>>,
-    fail_opcode: Option<u16>,
-    dropped: Sender<&'static str>,
-}
-
-impl PacketSink for RecordingSink {
-    fn write_packet(&mut self, packet: &HciPacket) -> BumbleResult<()> {
-        if let HciPacket::Command(command) = packet {
-            lock(&self.commands).push(command.clone());
-            if self.fail_opcode == Some(command.op_code()) {
-                return Err(BumbleError::Remote(
-                    "secret scripted identity write failure".into(),
-                ));
-            }
-            return Ok(());
-        }
-        match packet {
-            HciPacket::AclData(packet) => {
-                lock(&self.acl_packets).push(packet.clone());
-                Ok(())
-            }
-            _ => Err(BumbleError::Remote(
-                "scripted sink accepts HCI commands and ACL data only".into(),
-            )),
-        }
-    }
-}
-
-impl Drop for RecordingSink {
-    fn drop(&mut self) {
-        let _ = self.dropped.send("sink");
-    }
-}
-
-fn scripted_transport(
-    responses: Vec<HciPacket>,
-    commands: Arc<Mutex<Vec<Command>>>,
-    fail_opcode: Option<u16>,
-) -> (SplitOpenedTransport, Receiver<&'static str>) {
-    let (dropped, drops) = channel();
-    let mut responses = responses
-        .into_iter()
-        .map(|packet| Ok(Some(packet)))
-        .collect::<VecDeque<_>>();
-    responses.push_back(Ok(None));
-    let metadata = BTreeMap::from([
-        ("vendor_id".into(), "0a12".into()),
-        ("product_id".into(), "0001".into()),
-        ("bus".into(), "1".into()),
-        ("address".into(), "7".into()),
-    ]);
-    (
-        SplitOpenedTransport {
-            source: Box::new(ScriptedSource {
-                responses,
-                dropped: dropped.clone(),
-            }),
-            sink: Box::new(RecordingSink {
-                commands,
-                acl_packets: Arc::new(Mutex::new(Vec::new())),
-                fail_opcode,
-                dropped,
-            }),
-            metadata,
-        },
-        drops,
-    )
-}
-
-fn controlled_session() -> (
-    BumbleSession,
-    ControlledSourceControl,
-    Receiver<()>,
-    Receiver<&'static str>,
-) {
-    let controlled = controlled_session_with_recording();
-    (
-        controlled.session,
-        controlled.source,
-        controlled.wakes,
-        controlled.drops,
-    )
-}
-
-struct ControlledSession {
-    session: BumbleSession,
-    source: ControlledSourceControl,
-    wakes: Receiver<()>,
-    drops: Receiver<&'static str>,
-    commands: Arc<Mutex<Vec<Command>>>,
-    acl_packets: Arc<Mutex<Vec<AclDataPacket>>>,
-}
-
-fn poll_until_transport_event(
-    session: &mut BumbleSession,
-    timeout: Duration,
-    context: &str,
-) -> Vec<TransportEvent> {
-    let deadline = Instant::now()
-        .checked_add(timeout)
-        .expect("test poll deadline must be representable");
-    loop {
-        let events = session
-            .poll(deadline.saturating_duration_since(Instant::now()))
-            .unwrap_or_else(|error| panic!("{context}: {error}"));
-        if !events.is_empty() {
-            return events;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "{context}: timed out before a transport event"
-        );
-    }
-}
-
-fn controlled_session_with_recording() -> ControlledSession {
-    controlled_session_with_key_store(None)
-}
-
-fn controlled_session_with_key_store(
-    profile_key_store: Option<&ProfileKeyStoreFactory>,
-) -> ControlledSession {
-    let config = TransportConfig::for_model::<Pro>();
-    let commands = Arc::new(Mutex::new(Vec::new()));
-    let acl_packets = Arc::new(Mutex::new(Vec::new()));
-    let (transport, source, drops) = controlled_transport(
-        successful_initialization_responses(&config),
-        Arc::clone(&commands),
-        Arc::clone(&acl_packets),
+    transport
+        .open(activity_channel().0)
+        .expect("open fake backend session");
+    assert!(transport.interrupt_send_capacity_available());
+    transport.start_pairing().expect("start pairing");
+    transport.start_reconnect().expect("start reconnect");
+    assert_eq!(
+        transport.poll(Duration::from_millis(5)).expect("poll"),
+        [TransportEvent::Connected]
     );
-    let selectors = Arc::new(Mutex::new(Vec::new()));
-    let mut opener = ScriptedOpener::new(transport, selectors);
-    let (activity, wakes) = activity_channel();
-    let session = initialize_bumble_session_with_profile(
-        &mut opener,
-        &AdapterSelector::from("usb:0A12:0001"),
-        &config,
-        activity,
-        profile_key_store,
-    )
-    .expect("controlled Bumble initialization");
-    ControlledSession {
-        session,
-        source,
-        wakes,
-        drops,
-        commands,
-        acl_packets,
+    assert_eq!(
+        transport.send_interrupt(&[0x31, 0x02]).expect("send"),
+        SendAcceptance::ACCEPTED
+    );
+    transport
+        .drain_interrupt(Duration::from_millis(7))
+        .expect("drain");
+    transport.disconnect().expect("disconnect");
+    transport.close().expect("close");
+    transport.close().expect("repeated close");
+
+    let state = state.lock().expect("read fake state");
+    assert_eq!(state.start_pairing_count, 1);
+    assert_eq!(state.start_reconnect_count, 1);
+    assert_eq!(state.poll_timeouts, [Duration::from_millis(5)]);
+    assert_eq!(state.sent_payloads, [vec![0x31, 0x02]]);
+    assert_eq!(state.drain_timeouts, [Duration::from_millis(7)]);
+    assert_eq!(state.disconnect_count, 1);
+    assert_eq!(state.close_count, 1);
+}
+
+struct FakeOpener {
+    state: Arc<Mutex<FakeState>>,
+    expected_config: TransportConfig,
+}
+
+impl BackendOpener for FakeOpener {
+    fn open(
+        &mut self,
+        options: backend::OpenOptions,
+        mut bonds: Box<dyn backend::BondStore>,
+    ) -> TransportResult<Box<dyn BackendSessionPort>> {
+        let local_address = backend_address(LOCAL_NAMESPACE);
+        bonds
+            .select_local_address(local_address)
+            .expect("select profile namespace as backend initialization does");
+        let loaded_bond = bonds
+            .load(backend_address(PROFILE_PEER))
+            .expect("load profile bond");
+        let expected = &self.expected_config;
+        let actual = options.config();
+        let actual_policy = actual.hid_service().sdp_policy();
+        let expected_policy = &expected.hid_service.sdp_policy;
+        let config_matches = actual.local_name() == expected.local_name()
+            && actual.class_of_device() == expected.class_of_device()
+            && actual.complete_local_name_eir() == expected.complete_local_name_ad()
+            && actual.hid_service().report_descriptor()
+                == expected.hid_service.report_descriptor.as_ref()
+            && actual_policy.service_name == expected_policy.service_name
+            && actual_policy.service_description == expected_policy.service_description
+            && actual_policy.provider_name == expected_policy.provider_name
+            && actual_policy.device_release_number == expected_policy.device_release_number
+            && actual_policy.bluetooth_profile_version == expected_policy.bluetooth_profile_version
+            && actual_policy.parser_version == expected_policy.parser_version
+            && actual_policy.device_subclass == expected_policy.device_subclass
+            && actual_policy.country_code == expected_policy.country_code
+            && actual_policy.virtual_cable == expected_policy.virtual_cable
+            && actual_policy.reconnect_initiate == expected_policy.reconnect_initiate
+            && actual_policy.remote_wake == expected_policy.remote_wake
+            && actual_policy.profile_version == expected_policy.profile_version
+            && actual_policy.supervision_timeout == expected_policy.supervision_timeout
+            && actual_policy.normally_connectable == expected_policy.normally_connectable
+            && actual_policy.boot_device == expected_policy.boot_device
+            && actual_policy.ssr_host_max_latency == expected_policy.ssr_host_max_latency
+            && actual_policy.ssr_host_min_timeout == expected_policy.ssr_host_min_timeout;
+        let explicit_identity_le = match options.local_identity() {
+            backend::LocalIdentity::AdapterDefault => None,
+            backend::LocalIdentity::Explicit(address) => Some(*address.as_le_bytes()),
+        };
+
+        let mut state = self.state.lock().expect("update fake state");
+        state.open_count += 1;
+        state.selector_matches = options.adapter()
+            == &backend::AdapterSelector::from("usb:0a12:0001")
+            || options.adapter() == &backend::AdapterSelector::from("usb:0");
+        state.config_matches = config_matches;
+        state.explicit_identity_le = explicit_identity_le;
+        state.loaded_bond = loaded_bond;
+        drop(state);
+
+        Ok(Box::new(FakeSession {
+            state: Arc::clone(&self.state),
+            capabilities: TransportCapabilities::test_default(),
+        }))
     }
 }
 
-fn empty_profile_bytes() -> Vec<u8> {
-    serde_json::to_vec_pretty(&serde_json::json!({
-        "format": "swbt.profile",
-        "schema_version": 2,
-        "controller_kind": "pro",
-        "identity": {
-            "kind": "adapter-default"
-        },
-        "key_store": {
-            "namespaces": {}
-        }
-    }))
-    .expect("serialize empty test profile")
+struct FakeSession {
+    state: Arc<Mutex<FakeState>>,
+    capabilities: TransportCapabilities,
 }
 
-fn local_profile_bytes() -> Vec<u8> {
-    serde_json::to_vec_pretty(&serde_json::json!({
+impl BackendSessionPort for FakeSession {
+    fn capabilities(&self) -> TransportResult<TransportCapabilities> {
+        Ok(self.capabilities)
+    }
+
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        self.state
+            .lock()
+            .expect("update fake state")
+            .start_pairing_count += 1;
+        Ok(())
+    }
+
+    fn start_reconnect(&mut self) -> TransportResult<()> {
+        self.state
+            .lock()
+            .expect("update fake state")
+            .start_reconnect_count += 1;
+        Ok(())
+    }
+
+    fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+        self.state
+            .lock()
+            .expect("update fake state")
+            .poll_timeouts
+            .push(timeout);
+        Ok(vec![TransportEvent::Connected])
+    }
+
+    fn interrupt_send_capacity_available(&self) -> bool {
+        true
+    }
+
+    fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<()> {
+        self.state
+            .lock()
+            .expect("update fake state")
+            .sent_payloads
+            .push(payload.to_vec());
+        Ok(())
+    }
+
+    fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+        self.state
+            .lock()
+            .expect("update fake state")
+            .drain_timeouts
+            .push(timeout);
+        Ok(())
+    }
+
+    fn disconnect(&mut self) -> TransportResult<()> {
+        self.state
+            .lock()
+            .expect("update fake state")
+            .disconnect_count += 1;
+        Ok(())
+    }
+
+    fn close(&mut self) -> TransportResult<()> {
+        self.state.lock().expect("update fake state").close_count += 1;
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct FakeState {
+    open_count: usize,
+    selector_matches: bool,
+    config_matches: bool,
+    explicit_identity_le: Option<[u8; 6]>,
+    loaded_bond: Option<backend::ClassicBond>,
+    start_pairing_count: usize,
+    start_reconnect_count: usize,
+    poll_timeouts: Vec<Duration>,
+    sent_payloads: Vec<Vec<u8>>,
+    drain_timeouts: Vec<Duration>,
+    disconnect_count: usize,
+    close_count: usize,
+}
+
+fn backend_address(value: &str) -> backend::BluetoothAddress {
+    backend::BluetoothAddress::parse(value, backend::AddressKind::Public)
+        .expect("valid test address")
+}
+
+fn profile_bytes() -> Vec<u8> {
+    serde_json::to_vec_pretty(&json!({
         "format": "swbt.profile",
         "schema_version": 2,
         "controller_kind": "pro",
@@ -1354,24 +415,34 @@ fn local_profile_bytes() -> Vec<u8> {
             "address": "02:12:34:56:78:9A"
         },
         "key_store": {
-            "namespaces": {}
+            "namespaces": {
+                LOCAL_NAMESPACE: {
+                    PROFILE_PEER: {
+                        "address_type": 0,
+                        "link_key": {
+                            "authenticated": true,
+                            "value": "A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1"
+                        },
+                        "link_key_type": 4
+                    }
+                }
+            }
         }
     }))
-    .expect("serialize local-address test profile")
+    .expect("serialize test profile")
 }
 
-struct ProfileTempDirectory {
+struct TempDirectory {
     path: PathBuf,
 }
 
-impl ProfileTempDirectory {
+impl TempDirectory {
     fn new(label: &str) -> Self {
-        let sequence = NEXT_PROFILE_TEMP_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "swbt-rs-production-key-store-{label}-{}-{sequence}",
+            "swbt-rs-bumble-backend-{label}-{}",
             std::process::id()
         ));
-        fs::create_dir(&path).expect("create profile test directory");
+        fs::create_dir_all(&path).expect("create test directory");
         Self { path }
     }
 
@@ -1380,256 +451,8 @@ impl ProfileTempDirectory {
     }
 }
 
-impl Drop for ProfileTempDirectory {
+impl Drop for TempDirectory {
     fn drop(&mut self) {
-        fs::remove_dir_all(&self.path).expect("remove profile test directory");
+        fs::remove_dir_all(&self.path).expect("remove test directory");
     }
-}
-
-fn controlled_transport(
-    responses: Vec<HciPacket>,
-    commands: Arc<Mutex<Vec<Command>>>,
-    acl_packets: Arc<Mutex<Vec<AclDataPacket>>>,
-) -> (
-    SplitOpenedTransport,
-    ControlledSourceControl,
-    Receiver<&'static str>,
-) {
-    let (dropped, drops) = channel();
-    let shared = Arc::new(ControlledSourceShared {
-        state: Mutex::new(ControlledSourceState {
-            queued: responses
-                .into_iter()
-                .map(|packet| Ok(Some(packet)))
-                .collect(),
-            shutdown_requested: false,
-        }),
-        wake: Condvar::new(),
-    });
-    let control = ControlledSourceControl { shared };
-    let metadata = BTreeMap::from([
-        ("vendor_id".into(), "0a12".into()),
-        ("product_id".into(), "0001".into()),
-        ("bus".into(), "1".into()),
-        ("address".into(), "7".into()),
-    ]);
-    (
-        SplitOpenedTransport {
-            source: Box::new(ControlledSource {
-                control: control.clone(),
-                dropped: dropped.clone(),
-            }),
-            sink: Box::new(RecordingSink {
-                commands,
-                acl_packets,
-                fail_opcode: None,
-                dropped,
-            }),
-            metadata,
-        },
-        control,
-        drops,
-    )
-}
-
-fn successful_initialization_responses(config: &TransportConfig) -> Vec<HciPacket> {
-    successful_initialization_responses_for(config, DISPLAY_ADDRESS)
-}
-
-fn successful_initialization_responses_for(
-    config: &TransportConfig,
-    display_address: [u8; 6],
-) -> Vec<HciPacket> {
-    let mut responses = controller_initialization_responses();
-    let mut hci_address = display_address;
-    hci_address.reverse();
-    responses.push(command_complete(
-        Command::ReadBdAddr,
-        ReturnParameters::ReadBdAddr {
-            status: 0,
-            bd_addr: Address::from_bytes(hci_address, AddressType::PUBLIC_DEVICE),
-        },
-    ));
-    responses.extend(
-        identity_commands(config)
-            .into_iter()
-            .map(|command| command_complete(command, ReturnParameters::Raw { data: vec![0] })),
-    );
-    responses
-}
-
-fn identity_probe_responses(display_address: [u8; 6]) -> Vec<HciPacket> {
-    let mut hci_address = display_address;
-    hci_address.reverse();
-    vec![
-        command_complete(
-            Command::ReadLocalVersionInformation,
-            ReturnParameters::ReadLocalVersionInformation {
-                status: 0,
-                hci_version: 0x09,
-                hci_subversion: 0x1234,
-                lmp_version: 0x09,
-                company_identifier: 0x000a,
-                lmp_subversion: 0x5678,
-            },
-        ),
-        command_complete(
-            Command::ReadBdAddr,
-            ReturnParameters::ReadBdAddr {
-                status: 0,
-                bd_addr: Address::from_bytes(hci_address, AddressType::PUBLIC_DEVICE),
-            },
-        ),
-    ]
-}
-
-fn hex(value: &str) -> Vec<u8> {
-    value
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let text = std::str::from_utf8(pair).expect("ASCII hex fixture");
-            u8::from_str_radix(text, 16).expect("valid hex fixture")
-        })
-        .collect()
-}
-
-fn controller_initialization_responses() -> Vec<HciPacket> {
-    let mut supported_commands = [0; 64];
-    supported_commands[14] = 0xc8;
-    vec![
-        command_complete(Command::Reset, ReturnParameters::Status { status: 0 }),
-        command_complete(
-            Command::ReadLocalSupportedCommands,
-            ReturnParameters::ReadLocalSupportedCommands {
-                status: 0,
-                supported_commands,
-            },
-        ),
-        command_complete(
-            Command::ReadLocalVersionInformation,
-            ReturnParameters::ReadLocalVersionInformation {
-                status: 0,
-                hci_version: 0x09,
-                hci_subversion: 0x1234,
-                lmp_version: 0x09,
-                company_identifier: 0x000a,
-                lmp_subversion: 0x5678,
-            },
-        ),
-        command_complete(
-            Command::ReadLocalExtendedFeatures { page_number: 0 },
-            ReturnParameters::ReadLocalExtendedFeatures {
-                status: 0,
-                page_number: 0,
-                maximum_page_number: 0,
-                extended_lmp_features: [0; 8],
-            },
-        ),
-        command_complete(
-            Command::SetEventMask {
-                event_mask: HOST_EVENT_MASK,
-            },
-            ReturnParameters::Raw { data: vec![0] },
-        ),
-        command_complete(
-            Command::LeSetEventMask {
-                le_event_mask: HOST_LE_EVENT_MASK,
-            },
-            ReturnParameters::Raw { data: vec![0] },
-        ),
-        command_complete(
-            Command::ReadBufferSize,
-            ReturnParameters::ReadBufferSize {
-                status: 0,
-                hc_acl_data_packet_length: 1021,
-                hc_synchronous_data_packet_length: 0,
-                hc_total_num_acl_data_packets: 8,
-                hc_total_num_synchronous_data_packets: 0,
-            },
-        ),
-    ]
-}
-
-fn expected_commands(config: &TransportConfig) -> Vec<Command> {
-    let mut commands = vec![
-        Command::Reset,
-        Command::ReadLocalSupportedCommands,
-        Command::ReadLocalVersionInformation,
-        Command::ReadLocalExtendedFeatures { page_number: 0 },
-        Command::SetEventMask {
-            event_mask: HOST_EVENT_MASK,
-        },
-        Command::LeSetEventMask {
-            le_event_mask: HOST_LE_EVENT_MASK,
-        },
-        Command::ReadBufferSize,
-        Command::ReadBdAddr,
-    ];
-    commands.extend(identity_commands(config));
-    commands
-}
-
-fn identity_commands(config: &TransportConfig) -> [Command; 6] {
-    let mut local_name = [0; 248];
-    local_name[..config.local_name().len()].copy_from_slice(config.local_name().as_bytes());
-    [
-        Command::WriteLocalName { local_name },
-        Command::WriteClassOfDevice {
-            class_of_device: config.class_of_device(),
-        },
-        Command::WriteSimplePairingMode {
-            simple_pairing_mode: 1,
-        },
-        Command::WriteExtendedInquiryResponse {
-            fec_required: 0,
-            extended_inquiry_response: *config.extended_inquiry_response(),
-        },
-        Command::WriteDefaultLinkPolicySettings {
-            default_link_policy_settings: 0x0005,
-        },
-        Command::WriteScanEnable { scan_enable: 0 },
-    ]
-}
-
-fn command_complete(command: Command, return_parameters: ReturnParameters) -> HciPacket {
-    HciPacket::Event(Event::CommandComplete {
-        num_hci_command_packets: 1,
-        command_opcode: command.op_code(),
-        return_parameters,
-    })
-}
-
-fn classic_signal(connection_handle: u16, frame: ControlFrame) -> HciPacket {
-    let data = L2capPdu::new(L2CAP_SIGNALING_CID, frame.to_bytes()).to_bytes(false);
-    HciPacket::AclData(AclDataPacket {
-        connection_handle,
-        pb_flag: 0,
-        bc_flag: 0,
-        data_total_length: u16::try_from(data.len()).expect("test L2CAP PDU fits u16"),
-        data,
-    })
-}
-
-fn complete_next_command(
-    session: &mut BumbleSession,
-    source: &ControlledSourceControl,
-    command: Command,
-) {
-    source.push(Ok(Some(command_complete(
-        command,
-        ReturnParameters::Raw { data: vec![0] },
-    ))));
-    assert!(
-        session
-            .poll(Duration::from_secs(1))
-            .expect("drive successful command completion")
-            .is_empty()
-    );
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
