@@ -259,7 +259,11 @@ dependencies = [
 
 [[package]]
 name = "swbt-hardware-runner"
-version = "0.0.0"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "swbt-rs",
+]
 
 [[package]]
 name = "swbt-probe"

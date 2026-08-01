@@ -1,9 +1,13 @@
 [package]
 name = "swbt-hardware-runner"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.87"
 publish = false
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+serde_json = "1"
+swbt-rs = { path = "../..", features = ["bumble"] }

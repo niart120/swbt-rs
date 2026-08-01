@@ -1,8 +1,8 @@
 use std::{
-    env, fmt, fs,
+    fmt, fs,
     io::{self, Write},
     path::PathBuf,
-    process, thread,
+    thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -108,23 +108,23 @@ impl fmt::Display for UsageError {
 
 impl std::error::Error for UsageError {}
 
-fn main() {
-    let args = match parse_args(env::args().skip(1)) {
+pub(crate) fn run(arguments: Vec<String>) -> u8 {
+    let args = match parse_args(arguments) {
         Ok(args) => args,
         Err(error) => {
             eprintln!("{error}");
             eprintln!(
-                "usage: joycon_profile_hardware --adapter <selector> --profile <path> \
+                "usage: swbt-hardware-runner joycon-profile --adapter <selector> --profile <path> \
                  --model <left|right> --mode <periodic|direct> \
                  --connection <pair|reconnect> --timeout-secs <1..600> \
                  [--pre-input-idle-ms <0..10000>] --run <1..99>"
             );
-            process::exit(2);
+            return 2;
         }
     };
 
     let success = run_hardware(&args);
-    process::exit(if success { 0 } else { 1 });
+    u8::from(!success)
 }
 
 fn parse_args<I, S>(args: I) -> Result<RunnerArgs, UsageError>

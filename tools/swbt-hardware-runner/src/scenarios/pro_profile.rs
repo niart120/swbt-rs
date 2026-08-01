@@ -1,9 +1,9 @@
 use std::{
-    env, fmt, fs,
+    fmt, fs,
     fs::OpenOptions,
     io::{self, Write},
     path::PathBuf,
-    process, thread,
+    thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -98,23 +98,23 @@ impl fmt::Display for UsageError {
 
 impl std::error::Error for UsageError {}
 
-fn main() {
-    let args = match parse_args(env::args().skip(1)) {
+pub(crate) fn run(arguments: Vec<String>) -> u8 {
+    let args = match parse_args(arguments) {
         Ok(args) => args,
         Err(error) => {
             eprintln!("{error}");
             eprintln!(
-                "usage: pro_profile_hardware --adapter <selector> --profile <path> \
+                "usage: swbt-hardware-runner pro-profile --adapter <selector> --profile <path> \
                  --mode <periodic|direct> --setup <normal|post-power-cycle|stale-bond> \
                  --connect-timeout-secs <1..600> --run <1..99> \
                  [--stale-source-profile <existing-path>]"
             );
-            process::exit(2);
+            return 2;
         }
     };
 
     let success = run_hardware(&args);
-    process::exit(if success { 0 } else { 1 });
+    u8::from(!success)
 }
 
 fn parse_args<I, S>(args: I) -> Result<RunnerArgs, UsageError>
