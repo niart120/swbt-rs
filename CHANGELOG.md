@@ -17,13 +17,15 @@
 - M8 の subscriber 観測 interval は 8 ms report period に対して p95 16.6487–17.0223 ms だった。
   15秒 yaw run では横移動、目視カクつきなし、終了後の移動・入力残りなしを確認したが、
   subscriber 時刻は無線送信完了時刻ではない。
+- `swbt-python` 0.6.0 が保存する `/P` 付き Classic public peer を変換せず読み書きし、旧 Rust
+  profile の suffix なし peer も読み取る。
 
-### 公開停止条件
+### 公開状態
 
-0.1.0 は crates.io へ公開していない。固定 Bumble fork の同名 crate は registry へ正規化できない。
-crates.io の `bumble@0.1.0` は Google Bumble の別 crate で、必要な `bumble-controller@0.1.0` なども
-存在しない。配布境界を再設計し、clean `cargo package --locked` と archive smoke が成功するまで
-`publish = false` を維持する。
+0.1.0 は crates.io へ公開していない。Bumble 配布境界は registry の
+`swbt-bumble-backend = "=0.1.1"` へ切り替え、clean package、展開 archive の offline test、
+license/SBOM 監査まで成功した。`publish = false` の解除、production tag、GitHub Release、
+`cargo publish` は別の公開承認を得るまで実行しない。
 
 ## 版の方針
 

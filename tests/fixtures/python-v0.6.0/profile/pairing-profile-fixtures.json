@@ -11,7 +11,7 @@
         "key_store": {
           "namespaces": {
             "00:11:22:33:44:55": {
-              "98:B6:E9:11:22:33": {
+              "98:B6:E9:11:22:33/P": {
                 "link_key": {
                   "authenticated": true,
                   "value": "01010101010101010101010101010101"
@@ -35,7 +35,7 @@
         "key_store": {
           "namespaces": {
             "00:11:22:33:44:55": {
-              "98:B6:E9:11:22:33": {
+              "98:B6:E9:11:22:33/P": {
                 "link_key": {
                   "authenticated": true,
                   "value": "02020202020202020202020202020202"
@@ -59,7 +59,7 @@
         "key_store": {
           "namespaces": {
             "00:11:22:33:44:55": {
-              "98:B6:E9:11:22:33": {
+              "98:B6:E9:11:22:33/P": {
                 "link_key": {
                   "authenticated": true,
                   "value": "03030303030303030303030303030303"
@@ -84,7 +84,7 @@
         "key_store": {
           "namespaces": {
             "02:12:34:56:78:9A": {
-              "98:B6:E9:11:22:33": {
+              "98:B6:E9:11:22:33/P": {
                 "link_key": {
                   "authenticated": true,
                   "value": "04040404040404040404040404040404"
@@ -109,7 +109,7 @@
         "key_store": {
           "namespaces": {
             "02:12:34:56:78:9A": {
-              "98:B6:E9:11:22:33": {
+              "98:B6:E9:11:22:33/P": {
                 "link_key": {
                   "authenticated": true,
                   "value": "05050505050505050505050505050505"
@@ -134,7 +134,7 @@
         "key_store": {
           "namespaces": {
             "02:12:34:56:78:9A": {
-              "98:B6:E9:11:22:33": {
+              "98:B6:E9:11:22:33/P": {
                 "link_key": {
                   "authenticated": true,
                   "value": "06060606060606060606060606060606"
@@ -149,7 +149,7 @@
     }
   ],
   "format": "swbt.profile-fixtures",
-  "generation": "PairingProfile.create_new with adapter-default and exp-local-address identities followed by _PairingProfileKeyStore.update with model-specific synthetic key material",
+  "generation": "PairingProfile.create_new with adapter-default and exp-local-address identities followed by _PairingProfileKeyStore.update with typed public peer names and model-specific synthetic key material",
   "python_version": "3.13",
   "schema_version": 1,
   "source_commit": "84d2723b127f70fc78e12f4496f5c40af0ccfb0a",

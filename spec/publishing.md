@@ -26,14 +26,17 @@ GitHub Release、`cargo publish`、publish workflow の実行には、その tur
 - `niart120/swbt-rs`のGitHub Private Vulnerability Reportingを有効化し、`SECURITY.md`から
   `https://github.com/niart120/swbt-rs/security/advisories/new`へ案内した。2026-08-02のGitHub APIは
   `enabled:true`を返した。
+- [workload soak / backend rollback evidence](wip/unit_010/evidence/operational-cutover-windows-20260802.md)
+  では、連続2回の60秒IMU run、RustからPython 0.6.0への同一profile copyによる切戻し、A入力、
+  neutral終了、両backend終了後のadapter再利用、profileのバイト不変を確認した。
 
 ## 現在の停止条件
 
 0.1.0 は次の全条件を解消するまで公開しない。
 
 1. `Cargo.toml` の `publish = false` を維持している。
-2. unit_012 T08 の実機回帰は完了したが、公開対象となる `swbt-rs` 0.1.0 の exact head、merge SHA、
-   remote checkをまだ固定していない。
+2. 公開承認 turn で、対象となる `swbt-rs` 0.1.0 の exact main SHA と、そのSHAに対するremote checkを
+   固定する必要がある。このwork unitのmerge承認はcrates.io公開、tag、GitHub Releaseを含まない。
 
 fork 元 `chaitanyarahalkar/bumble-rs` への issue/PR はこの手順に含めない。自己所有 fork の
 [Issue #1](https://github.com/niart120/bumble-rs/issues/1) だけでbackend切り出しを追跡する。

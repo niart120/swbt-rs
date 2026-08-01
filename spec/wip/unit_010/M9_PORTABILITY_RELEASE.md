@@ -90,7 +90,7 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | refactor-done | T10: Bumble session 統合 test が reader thread の packet 分割順序に依存せず公開 transport event を検査する | regression | test harness / CI | PR #11 run `30649447099` で `CommandStatus` 後に空で返る red を記録。残り期限内の再 poll に変更し、対象100回と全 library testが green |
 | refactor-done | T11: registry backend 0.1.1 の現行 dependency graph、license、Windows/Linux SBOM、package archive を再生成できる | regression | package / release | red: 旧evidenceはGit Bumble 22 componentsとWindows 220 / Linux 222 dependenciesを記録し、現行graphと不一致。green: registry sourceだけでcargo-deny、120-file archive、MSRV offline test、33 / 34 component SBOM、license欠落0が成功。refactor: 旧Git allowlistと未使用license例外を削除し、SBOM local path正規化とreference検査をtool化 |
 | refactor-skipped | T12: 非公開脆弱性報告先が実際に有効で、`SECURITY.md` からその入口へ到達できる | new | repository security / docs | red: GitHub APIは`enabled:false`で、SECURITYはowner profileだけを案内。green: 自己所有repoのPrivate Vulnerability Reportingを有効化し、APIの`enabled:true`と`security/advisories/new`の入口を記録。public issueへ秘密情報を出さない契約を維持。設定と文書の小変更で追加構造は不要 |
-| pending | T13: workload soak と Python backend への切戻し訓練が、adapter排他・profile非破壊・neutral終了を満たす | acceptance | operational cutover / hardware | unit_012 の連続60秒runをsoakとして評価し、Rust終了後のadapter再利用、Python再接続、入力、neutral closeを新しい非秘密 evidenceへ記録する |
+| refactor-skipped | T13: workload soak と Python backend への切戻し訓練が、adapter排他・profile非破壊・neutral終了を満たす | acceptance | operational cutover / hardware | red: Python 0.6.0 profileの`/P` peerをRustが`invalid_profile`、`address_type`なしbondを`invalid_key_store`として拒否。green: fixture/unit/full test、Rust DirectとPython 0.6.0の同一copy再接続、A、neutral、両終了後adapter reopen、原本/copyのバイト不変、連続2×60秒soakが成功。peer検証・format helperとlegacy raw fallbackは責務内に収まり、green後の追加構造変更は不要 |
 
 ## 7. 設計メモ
 
@@ -151,6 +151,10 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | `README.md` | modify | platform support と公開 docs への入口 |
 | `docs/platform-support.md` | new | Windows/Linux/macOS、driver、udev、hardware matrix、known limitations |
 | `docs/troubleshooting.md` | new | claim/release/unplug と backend rollback |
+| `src/profile/document.rs` | modify | Python 0.6.0の`/P`付きpublic peer名を検証し、旧raw peerをcanonical名へ移行 |
+| `src/runtime/transport/profile_key_store.rs` | modify | Python/旧RustのClassic bondを読み、Python互換shapeを書き込む |
+| `src/profile/document_tests.rs` | modify | peer suffixとnamespace境界の検証 |
+| `tests/profile_compat.rs`、`tests/fixtures/python-v0.6.0/profile/` | modify | Python 0.6.0の実peer名を固定した互換fixture |
 | `CHANGELOG.md` | new | 0.1.0 の利用者向け変更履歴 |
 | `SECURITY.md` | new | 脆弱性報告と秘密情報を含む報告の扱い |
 | `deny.toml` | new | license/advisory/source policy |
@@ -201,6 +205,10 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 | `cargo tree --no-default-features --edges normal --locked` | success | Bumble/rusb を含まず、直接依存は atomic-write-file、fs2、serde_json、tracing |
 | Bumble session targeted test | success | 修正後1回と同じ compiled binary の100回反復が成功。全 library 300 passed / 2 ignored、Clippy success |
 | `git diff --check` | success | whitespace error なし |
+| T13 profile compatibility focused tests | success | Python fixture round-trip、`/P`境界、Python/旧Rust bond読取、canonical updateがgreen |
+| T13 `cargo clippy --all-targets --all-features --locked -- -D warnings` | success | warning なし |
+| T13 `cargo test --all-features --locked` | success | library 273 passed / 1 ignored、probe 11 passed、hardware 5 ignored、他target/doc test成功 |
+| T13 Windows workload soak / backend rollback rehearsal | success | 2×60秒IMU、Rust→Python 0.6.0、A、neutral、adapter再利用、profile非破壊を確認 |
 
 ## 10. 先送り事項
 
@@ -224,4 +232,4 @@ Windows で実機確認した `swbt-rs` の利用条件と制限を公開文書�
 - [x] package / release / public API に触れる gate を記録した
 - [x] registry backend 0.1.1 の dependency/license/SBOM/package evidence を再生成した
 - [x] GitHub の非公開脆弱性報告先を有効化し、`SECURITY.md` を更新した
-- [ ] workload soak と backend rollback rehearsal の結果を記録した
+- [x] workload soak と backend rollback rehearsal の結果を記録した

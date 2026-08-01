@@ -65,7 +65,7 @@ fn assert_typed_round_trip<M: model::ControllerModel>(input: &Value) {
         .and_then(|namespaces| namespaces.keys().next())
         .expect("fixture has one local namespace")
         .clone();
-    input["key_store"]["namespaces"][&namespace]["98:B6:E9:11:22:33"]["future_key_metadata"] = json!({
+    input["key_store"]["namespaces"][&namespace]["98:B6:E9:11:22:33/P"]["future_key_metadata"] = json!({
         "marker": "preserve-me"
     });
 
