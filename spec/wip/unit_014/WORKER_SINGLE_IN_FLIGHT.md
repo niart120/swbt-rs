@@ -129,7 +129,7 @@ in-flight responseだけを保持する構造へ縮小する。複数commandのq
 | `cargo test --doc --all-features --locked` | not run | public rustdoc |
 | `cargo package --locked` | not run | 公開API変更のpackage gate。versionは変更しない |
 | `git diff --check` | not run | whitespace |
-| `tools/measure_m2_runtime.ps1` before / after | not run | release profile retained measurement |
+| `pwsh -NoProfile -File tools/measure_m2_runtime.ps1 -OutputDirectory target\\measurements\\m2-activity-wait\\unit014-before-20260802` | before success / after not run | release profile、42,002 records、clean commit `afb20b0`。response p99 1.4 µs、Periodic lateness p99 1.9693 ms、skip 0、idle shutdown p99 56.1 µs、16-command飽和shutdown p99 54.4 µs |
 
 ## 10. 先送り事項
 
