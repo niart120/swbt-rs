@@ -114,7 +114,7 @@ administrator が専用 group と `MODE="0660"` を定義してください。ud
 
 ### kernel driver detach と reattach
 
-固定 Bumble revision `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1` の
+固定 Bumble revision `5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07` の
 `bumble-transport/src/usb.rs` は、USB handle に `set_auto_detach_kernel_driver(true)` を設定してから
 HCI interface を claim します。libusb の契約では、auto detach が有効な handle は claim 時に kernel
 driver を detach し、interface release 時に attach します。詳細は
@@ -134,6 +134,7 @@ Linux で実行した実機証跡はありません。CI success は Rust/libusb
   17.0223 ms だった。別の15秒 yaw run は横移動が反映され、目視カクつきと終了後の移動・入力残りは
   観測されなかった。subscriber 時刻は無線送信完了時刻ではないため、両者を同じ測定として扱わない。
 - pairing/reconnect の修正途中 run を含む履歴を成功率や長期信頼性として扱わない。
-- 明示 local Bluetooth address、macOS、複数 controller 管理は 0.1.0 の対象外。
+- 明示 local Bluetooth address は CSR8510 A10 の限定構成だけで実機確認済み。他 chipset へ一般化しない。
+- macOS と複数 controller 管理は 0.1.0 の対象外。
 - `Drop` は bounded best-effort shutdown で、neutral report と終了失敗の通知を保証しない。正常系は
   明示 `close()` を使う。

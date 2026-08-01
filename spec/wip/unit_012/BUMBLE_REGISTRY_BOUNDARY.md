@@ -57,7 +57,7 @@
 | green | T04: swbt-rs が renamed fork revision を同一 import surface で利用する | integration | default/all-feature check、clippy、test、build、doc が成功。fork 由来 22 package を単一 revision から解決 |
 | green | T05: 公開順序と公開前検査を再現可能にする | release | 9 layer の依存順序、未登録/owner なし、prefix 検索 0 件、24 archive checksum、公開停止点を evidence に記録 |
 | blocked | T06: registry archive から clean install を検証する | package | 明示承認後に 24 package を公開し、`cargo package --locked` と archive smoke を成功させる |
-| pending | T07: M9 と公開手順を current evidence に更新する | docs/spec | unit_011 完了、current revision/lock hash/CI、残る停止条件を反映する |
+| green | T07: M9 と公開手順を current evidence に更新する | docs/spec | unit_011 完了、fork revision、lock hash、CI、PVR 無効、24 package 未公開の停止条件を反映 |
 
 T06 の `blocked` は設計不明ではなく外部状態と権限の境界を示す。T02-T05 と T07 は公開せずに進める。
 全 Test List 完了前に unit_012 を complete へ移動せず、swbt-rs の PR を merge しない。
@@ -109,6 +109,10 @@ fork 側は対象 package ごとの `cargo package --list` と workspace gate �
 | swbt-rs default/all-feature build | success |
 | `RUSTDOCFLAGS=-D warnings cargo doc --no-deps --all-features --locked` | success |
 | `cargo fmt --all --check` / `git diff --check` | success |
+| current `cargo package --locked --allow-dirty --list` | success: 126 files |
+| current `cargo package --locked --allow-dirty` | blocked: crates.io に `swbt-bumble@0.1.0` がない |
+| GitHub Private Vulnerability Reporting API | `enabled:false` |
+| changed docs relative-link / placeholder audit | success |
 
 public fork branch は `niart120/bumble-rs` の `feat/swbt-registry-package-names`、head は
 `5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07` である。upstream PR / issue は作成していない。
@@ -129,5 +133,5 @@ public fork branch は `niart120/bumble-rs` の `feat/swbt-registry-package-name
 - [x] public fork branch を push し、revision を固定した
 - [ ] swbt-rs の全 gate を完了した
 - [ ] registry package と archive smoke を完了した
-- [ ] M9 の current evidence を更新した
+- [x] M9 の current evidence を更新した
 - [ ] PR merge cleanup を完了した

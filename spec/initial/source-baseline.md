@@ -63,9 +63,10 @@ Python の class 階層や `asyncio` 呼び出し形式そのものは互換対�
 - SDP server と L2CAP binding
 - software controller / virtual link
 
-## 4. Bumble 統合で残る確認事項
+## 4. Bumble 統合の初期確認事項
 
-次は部品の存在を確認しただけで、`swbt-rs` 用の一体動作は未検証である。
+次は公式基準断面を選んだ時点の確認事項である。1–4 は M4–M7 と unit_011 までに一体動作を確認した。
+5 の依存量と registry 配布は M9 / unit_012 の制約として残る。
 
 1. **HIDP と `bumble-host::Device` の接続方法**
    `bumble-hid::L2capTransport` は `bumble_l2cap::ChannelManager` を直接受け取る。一方、external controller の標準経路では `bumble_host::Device` が channel manager を所有し、SDU 単位の API を公開する。初期実装は `bumble_hid::Message` / `DeviceRuntime` と `Device` の SDU API を結ぶ薄い adapter を置く。上流 API が整えば置換する。
@@ -77,7 +78,7 @@ Python の class 階層や `asyncio` 呼び出し形式そのものは互換対�
    `classic_accept_any`、Classic SSP、stored link key、HID channel open の順序を virtual link と実機の両方で確認する。
 
 4. **明示 local Bluetooth address の設定と復旧**
-   Python 版には CSR8510 A10 向けの adapter identity 処理がある。Bumble 基準断面だけでは同じ安全契約を確認できていない。初期 bring-up は `adapter-default` identity を優先し、明示 address は専用 milestone で有効化する。
+   unit_011 で CSR8510 A10 の identity read/write、warm reset 後の readback、pair/reconnect、失敗時 recovery、power-cycle 復旧を実装・実機確認した。他 chipset は未検証である。
 
 5. **依存量**
    `bumble-transport` は現断面で audio、gRPC、WebSocket 等も直接依存する。初期実装では correctness を優先して受け入れ、build 時間・配布サイズを測定する。削減は上流 feature 分割または transport 部分の切り出しとして別変更にする。
@@ -99,17 +100,20 @@ bumble-transport = { git = "https://github.com/chaitanyarahalkar/bumble-rs", rev
 
 0.1.0 candidate は、上記の公式基準断面から public fork
 [`niart120/bumble-rs`](https://github.com/niart120/bumble-rs) の exact revision
-[`cb55e2d98dc7b7b0227c43772c9ae184034dd9a1`](https://github.com/niart120/bumble-rs/commit/cb55e2d98dc7b7b0227c43772c9ae184034dd9a1)
-へ進めている。差分は次の3 commit。
+[`5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07`](https://github.com/niart120/bumble-rs/commit/5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07)
+へ進めている。差分は次の5 commit。
 
 | commit | 目的 |
 |---|---|
 | `48f1bc3` | external transport reader の shutdown lifecycle を追加 |
 | `b8c7cd6` | ACL output が host queue を離れた状態を公開 |
 | `cb55e2d` | generic HCI command の Vendor Event 応答待ちと、応答を待たない command 送信を追加 |
+| `2f5c853` | 配布対象 24 package を `swbt-bumble*` 名へ変更し、内部 dependency alias と exact version を追加 |
+| `5fb0f6d` | package 名を変えても既存 Rust import 名を保つ `[lib] name` を追加 |
 
 先頭2 commit は M3-M9 の CI、仮想 Bluetooth test、Windows 実機試験で使った依存差分である。3つ目は
 unit_011 の dependency unit test と、CSR8510 A10 での明示 local-address pair / reconnect 実機試験を通した。
+後続2 commit は Rust source を変えず、fork workspace test と対象 24 package の archive verify を通した。
 この candidate revision は公式基準断面そのものを書き換えない。Bumble upstream への PR は作成していない。
 0.1.0 release commit は merge 前には確定せず、公開承認後に `spec/publishing.md` の手順で main SHA、
 Cargo.lock hash、Bumble revision を同時に記録する。

@@ -4,19 +4,20 @@
 [`swbt-python`](https://github.com/niart120/swbt-python) を Rust へ移植するプロジェクトです。
 Bluetooth stack の実装基盤には
 [`bumble-rs`](https://github.com/chaitanyarahalkar/bumble-rs) と、reader lifecycle 修正を含む
-[一時 fork](https://github.com/niart120/bumble-rs/tree/fix/external-host-reader-lifecycle)
+[一時 fork](https://github.com/niart120/bumble-rs/tree/feat/swbt-registry-package-names)
 を使います。
 
 ## 現在の状態
 
-このリポジトリは M8 の IMU、安定 diagnostics event、`swbt-probe` まで実装済みです。Cargo package は
+このリポジトリは M8 の IMU、安定 diagnostics event、`swbt-probe` と、独立 milestone の明示 local
+Bluetooth address まで実装済みです。Cargo package は
 library target `swbt` を提供し、
 model-valid input、crate 内部の Switch HID protocol と runtime、公開 controller builder、
 descriptor-only adapter discovery を実装しています。
 
-0.1.0 は未公開です。固定 Bumble fork の同名 crate を crates.io dependency へ正規化できないため、
-現在は repository source からだけ build できます。配布境界の再設計、clean `cargo package --locked`、
-archive smoke が完了するまで `publish = false` を維持します。利用者向けの変更は
+0.1.0 は未公開です。固定 Bumble fork の 24 package は衝突しない `swbt-bumble*` 名へ変換済みですが、
+crates.io には未公開であり、現在は repository source からだけ build できます。24 package の公開、clean
+`cargo package --locked`、archive smoke が完了するまで `publish = false` を維持します。利用者向けの変更は
 [変更履歴](CHANGELOG.md)、脆弱性報告時の注意は[セキュリティ方針](SECURITY.md)に記録しています。
 
 - pure protocol は `swbt-python` 0.6.0 の固定 commit
@@ -35,7 +36,7 @@ archive smoke が完了するまで `publish = false` を維持します。利�
   `ErrorKind::TransportClosed` を返します。
 - default feature は空です。`bumble` feature を有効にした場合だけ、reader shutdown と join、ACL パケットが
   host queue を離れた状態の判定、CSR command 用の Vendor Event 応答待ちと応答を待たない command 送信を追加した
-  一時 fork の commit `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1` と `rusb` を組み込みます。
+  一時 fork の commit `5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07` と `rusb` を組み込みます。
 - `list_adapters()` は `bumble` feature で USB device/config/interface descriptor を読み、
   Bluetooth HCI class の candidate を返します。device open、driver detach、interface claim、
   HCI command は行いません。feature 無効時は `ErrorKind::UnsupportedCapability` を返します。
