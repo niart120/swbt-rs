@@ -8,7 +8,7 @@
 - 実験 revision: `5fb0f6ddb811d1ad43dffa6e72a5d8cc6096fb07`
 - 採用した暫定 revision: `cb55e2d98dc7b7b0227c43772c9ae184034dd9a1`
 - backend 追跡先: [Issue #1](https://github.com/niart120/bumble-rs/issues/1)
-- remote branch cleanup: pending
+- remote/local branch cleanup: 2026-08-01 に削除済み
 
 ## 判断
 
@@ -40,7 +40,9 @@ fork workspace 24 packageを `swbt-bumble*` 名でcrates.ioへ公開する案は
 - default/all-featureのcheck、test、build、Clippyは成功した。
 - clean `cargo package --locked --list` は成功した。
 - clean `cargo package --locked` はcrates.ioに `bumble-controller@0.1.0` がないため停止した。
-- 実験branchはcurrent dependencyから参照されなくなった後に削除する。
+- current dependencyとrelease文書から参照を外した後、実験branchのremote/local refを削除した。
+- 削除後の `git ls-remote --heads origin main feat/swbt-registry-package-names` は
+  `main@cb55e2d` だけを返した。
 
 ## 後続
 

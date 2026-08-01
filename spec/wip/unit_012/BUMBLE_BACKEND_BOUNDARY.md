@@ -64,7 +64,7 @@ ACL flush 観測、Vendor Event 応答の実動作修正3 commitだけを含む�
 | pending | T06: 単一 backend archive を作る | backend implementation | `swbt-bumble-backend` が未公開fork packageなしでpackage/build/testできる |
 | pending | T07: swbt-rs を registry backendへ切り替える | integration/package | default/all-feature gate、`cargo package --locked`、archive smokeが成功する |
 | pending | T08: 実機回帰を確認する | hardware | pairing、再接続、入力、IMU、power-cycle、reader cleanupの既存契約を再確認する |
-| pending | T09: 旧改名branchを後片付けする | repository cleanup | current dependencyとcurrent release文書から `5fb0f6d` 参照を除き、remote branchを削除してIssue #1へ記録する |
+| green | T09: 旧改名branchを後片付けする | repository cleanup | 実験revisionの参照を不採用証跡だけに残し、remote/local branchを削除してIssue #1へ記録する |
 
 T05-T08 は backend 実装を伴うため、この依存・文書整理だけで green にしない。全項目完了前に
 unit_012 を `spec/complete` へ移動せず、0.1.0 を公開しない。
@@ -137,6 +137,7 @@ git diff --check
 | default/all-feature build | success |
 | `cargo package --locked --list` | success |
 | `cargo package --locked` | blocked: crates.io に `bumble-controller@0.1.0` がない |
+| fork branch cleanup | success: `feat/swbt-registry-package-names` のremote/local refを削除し、`git ls-remote --heads origin main feat/swbt-registry-package-names` は `main@cb55e2d` だけを返した |
 | crates.io publish / production tag / GitHub Release | not run: 対象外かつ明示承認なし |
 | 実機回帰 | not run: Rust sourceとfork実装は変更せず、package metadataと作業境界だけを変更 |
 
@@ -157,5 +158,5 @@ git diff --check
 - [ ] backend inventoryと実装を完了した
 - [ ] registry archive smokeを完了した
 - [ ] 実機回帰を完了した
-- [ ] 旧改名branchを削除した
+- [x] 旧改名branchを削除した
 - [ ] unit_012をcompleteへ移動した
