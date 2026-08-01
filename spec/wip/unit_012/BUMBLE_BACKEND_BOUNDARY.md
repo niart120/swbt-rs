@@ -69,7 +69,7 @@ ACL flush 観測、Vendor Event 応答の実動作修正3 commitだけを含む�
 | green | T06f1: backend の公開境界を定義する | backend public API | adapter、設定、bond store、event、error、session APIがBumble内部型を露出せず、公開API testとrustdocを通る |
 | green | T06f2: HCI session 初期化とevent変換を実装する | backend session | controller初期化、identity設定、pair/reconnectに必要なcommand/event変換がscripted testを通る |
 | green | T06f3: SDP/HID session を統合する | backend integration | pair→SDP continuation→HID channel→HID outputとinterrupt sendが公開event境界で動く |
-| pending | T06f4: 終了処理と最終archiveを完成する | backend lifecycle / package | disconnect、reader cancellation/join、残留入力なし、clean archive build/testが成功する |
+| green | T06f4: 終了処理と最終archiveを完成する | backend lifecycle / package | disconnect、reader cancellation/join、残留入力なし、clean archive build/testが成功する |
 | pending | T07: swbt-rs を registry backendへ切り替える | integration/package | default/all-feature gate、`cargo package --locked`、archive smokeが成功する |
 | pending | T08: 実機回帰を確認する | hardware | pairing、再接続、入力、IMU、明示local address、power-cycle、reader cleanupの既存契約を再確認する |
 | green | T09: 旧改名branchを後片付けする | repository cleanup | 実験revisionの参照を不採用証跡だけに残し、remote/local branchを削除してIssue #1へ記録する |
@@ -159,14 +159,14 @@ git diff --check
 | backend public API | success: fork `feat/swbt-bumble-backend@c7e5f3b` のadapter/config/bond/event/error/opaque session境界を外部API test 4件で確認。package全47 test、clippy `-D warnings`、rustdoc `-D warnings`が成功し、Classic link keyのDebug表示をredactした |
 | backend HCI session | success: fork `feat/swbt-bumble-backend@c6a89c4` の14-command初期化、Classic capability、pair/reconnect、link-key、reader通知、CSR volatile rewrite/re-enumeration/readbackをscripted testで確認。package全65 test、clippy `-D warnings`、rustdoc `-D warnings`が成功 |
 | backend SDP/HID session | success: fork `feat/swbt-bumble-backend@c39d711` でpair→SDP continuation→control/interrupt channel→HID output→interrupt inputを同一scripted sessionで確認し、能動再接続のcontrol→interrupt順序とevent queue overflowのterminal化も確認。package全68 test、fmt、clippy `-D warnings`、rustdoc `-D warnings`、diff checkが成功 |
+| backend lifecycle / final archive | success: fork `feat/swbt-bumble-backend@701f0dd` でcredit待ちdrain、切断後の送信拒否、stale handle完了の回収、reader close/join後のHCI I/O解放、pending event破棄を確認。package全72 test、build、fmt、clippy `-D warnings`、rustdoc `-D warnings`が成功。clean `cargo package --locked` は29 files / 437.0 KiB（圧縮87.4 KiB）のarchiveを生成し、展開archiveの全72 testも成功。SHA-256 `bde8fb6a5948324f2094db1f359a72feb6212353ee2cc00727f12b0270f785ce` |
 | crates.io publish / production tag / GitHub Release | not run: 対象外かつ明示承認なし |
 | 実機回帰 | not run: USB/HCI実装は追加したが、このTDD項目はscripted I/Oだけを対象とし、実機確認はT08で行うため |
 
 ## 10. 先送り事項
 
-- backend session 実装: T06f4で終了処理と最終archiveを完成する。
 - registry archive と clean-install smoke: `swbt-bumble-backend` 公開後にT07で実行する。
-- 実機回帰: T06f4とT07の完了後にT08で実行する。
+- 実機回帰: T07の完了後にT08で実行する。
 - GitHub Private Vulnerability Reporting: M9 の独立した公開停止条件として残す。
 
 ## 11. 完了チェックリスト
@@ -177,7 +177,7 @@ git diff --check
 - [x] package blockerをclean worktreeで再現した
 - [x] 単一backendのIssueと完了条件を記録した
 - [x] backend source/API inventoryを完了した
-- [ ] backend実装を完了した
+- [x] backend実装を完了した
 - [ ] registry archive smokeを完了した
 - [ ] 実機回帰を完了した
 - [x] 旧改名branchを削除した
