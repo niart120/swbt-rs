@@ -3,6 +3,8 @@
 
 use std::io;
 
+mod support;
+
 mod scenarios {
     pub(super) mod joycon_profile;
     pub(super) mod pro_periodic;

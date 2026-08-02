@@ -92,7 +92,7 @@
 | refactor-skipped | private `swbt-probe` が現行command、終了コード、profile安全出力、trace schema検査を公開`swbt` APIだけで維持する | regression | integration | red: private packageにbinaryと依存がなくCLI testがcompile失敗。green: unit 11件、CLI integration 8件成功。rootの`probe` feature、binary、`ErrorKind::Trace`を除去。既存test seamを維持でき、追加refactorなし |
 | refactor-done | featureなしのlibraryは`GamepadStatus`を維持してstable diagnosticsをemitせず、feature有効時はschema v1 eventを従来どおりemitする | regression | unit | red: default graphに`tracing`があり、新record framingをsubscriberが拒否。green: feature graph検査、default/all-feature library、probe test成功。refactor: `to_value()`をproduction emitにも使い、field組立てを一箇所へ統合 |
 | refactor-skipped | `swbt-hardware-runner` が三つのscenarioと既存flag集合を単一entry pointで受理し、欠落・重複・不正な組み合わせを実機open前に終了2で拒否する | new | unit | red: entry parser未実装でcompile失敗。green: scenario/parser 12件、CLI integration 2件成功。既存操作をそのままmodule移動し、共通化は次itemへ分離したため追加refactorなし |
-| todo | 各runner scenarioが既存の操作列、status、profile postflight、adapter reopen、evidence schemaを維持し、共通出力が秘密値を含まない | regression | unit | 実機I/Oは明示承認後の別gate |
+| refactor-done | 各runner scenarioが既存の操作列、status、profile postflight、adapter reopen、evidence schemaを維持し、共通出力が秘密値を含まない | regression | unit | green: 既存14件を維持し、共通引数解析の回帰testを加えた15件が成功。refactor: key/value引数、evidence基底項目、status/error射影、adapter reopenを`support`へ集約。機種別profile検査と入力列はscenarioに維持。実機I/Oは明示承認後の別gate |
 | todo | 公開`swbt-rs` archiveがtool専用source/testとhardware runnerを含まず、展開後にdefault/all-feature buildとtestが成功する | regression | package | package size/file countも記録する |
 | todo | workspace CI command、README、platform support、troubleshootingの実行例が新しいpackageと単一runner入口を指す | regression | docs | command実行とdocs reviewで確認する |
 
@@ -153,7 +153,7 @@ scenario subcommandを残す理由は、三つの証跡schema、pair／reconnect
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | 3 package、warningなし |
 | `cargo test --doc -p swbt-rs --all-features --locked` | success | doctest 1件 |
 | `cargo build -p swbt-rs --no-default-features --locked` | success | featureなしlibrary build |
-| `cargo test -p swbt-hardware-runner --all-targets --locked` | success | scenario/parser 12件、単一binary CLI integration 2件 |
+| `cargo test -p swbt-hardware-runner --all-targets --locked` | success | scenario/parser/support 13件、単一binary CLI integration 2件。schema v1、scenario次元、秘密値非出力、従来のM5 error分類を確認 |
 | `cargo clippy -p swbt-hardware-runner --all-targets --locked -- -D warnings` | success | warningなし |
 | `cargo run -p swbt-hardware-runner --locked -- help` | success | 単一binaryから3 scenarioを案内し、実機を開いていない |
 | `cargo fmt --all --check` | not run | 実装後に実行 |
