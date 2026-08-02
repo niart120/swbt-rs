@@ -116,7 +116,7 @@ canonical uppercase検査は既存address parserへ置き、profile model、nest
 | `spec/initial/architecture.md` | modify | canonical uppercase入力境界を明記 |
 | `spec/initial/testing.md` | modify | 非canonical key拒否と互換testを明記 |
 | `spec/initial/roadmap.md` | modify | M6 profile契約をcanonical uppercaseへ同期 |
-| `spec/wip/unit_021/PROFILE_KEY_CANONICAL_UPPERCASE.md` | new / modify | Intent Delta、TDD状態、検証結果 |
+| `spec/complete/unit_021/PROFILE_KEY_CANONICAL_UPPERCASE.md` | new / modify | Intent Delta、TDD状態、検証結果 |
 
 ## 9. 検証
 
@@ -124,26 +124,55 @@ canonical uppercase検査は既存address parserへ置き、profile model、nest
 |---|---|---|
 | `cargo test -p swbt-core typed_profile_normalizes_bluetooth_addresses_to_uppercase --locked` | success | 着手前baseline。lowercase namespace / peerを同時に正規化する既存test |
 | `cargo test -p swbt-core --test profile_compat typed_profile_writes_deterministic_python_json --locked` | success | 着手前baseline。pinned Python fixture 6件 |
-| itemごとのfocused `cargo test` | not run | T01 / T02 red-greenで実行する |
-| `cargo test -p swbt-core --all-targets --locked` | not run | profile core回帰 |
-| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | workspace lint gate |
-| `cargo test --workspace --all-targets --all-features --locked` | not run | workspace回帰 |
-| `cargo fmt --all --check` | not run | Rust formatting |
-| `git diff --check` | not run | whitespace検査 |
-| hardware / USB / Switch UI | not run | parser入力契約だけの変更であり対象外 |
+| T01 / T02 focused `cargo test` | success | 各itemのred失敗とgreen成功を確認。最終形では非canonical key単独とcanonical key前後の両順序を確認 |
+| `cargo test -p swbt-core --all-targets --locked` | success | profileを含むcore全target回帰。profile compatibilityは6 passed、manual Python reader gate 1 ignored |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | workspace lint gate、warningなし |
+| `cargo test --workspace --all-targets --all-features --locked` | success | workspace全target回帰。hardware/manual測定testの既存ignoreを除き失敗なし |
+| `cargo build --workspace --all-features --locked` | success | workspace build gate |
+| `cargo test --doc --workspace --all-features --locked` | success | `swbt-core`と`swbt-rs`のdoctest各1件成功 |
+| `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --all-features --no-deps --locked` | success | 公開rustdoc警告なし |
+| `cargo fmt --all --check` | success | Rust formatting |
+| `git diff --check` / `git diff --check main...HEAD` | success | working tree / branch差分のwhitespace検査 |
+| manual Rust→Python reader gate | not applicable | writer形式は変更せず、pinned Python fixtureのcanonical JSON round-tripで回帰確認した |
+| hardware / USB / Switch UI | not applicable | parser入力契約だけの変更であり対象外 |
 
 ## 10. 先送り事項
 
 - none
 
-## 11. チェックリスト
+## 11. Self Review
+
+### 11.1 Findings
+
+| severity | finding | evidence | disposition |
+|---|---|---|---|
+| medium | 初回green testは非canonical key単独だけで、Issue #31の順序非依存を直接固定していなかった | self-review時の`profile_compat`照合 | raw JSONでcanonical / noncanonical keyの両順序を追加し、namespace / peerとも成功 |
+| none | 公開型、error variant、所有権、async、feature、unsafeの変更はない | `git diff main...HEAD`と`rust-api-boundary-review` | 既存`ErrorKind::InvalidProfile`を維持 |
+| none | custom map deserializerや読み込み時変換は追加していない | `NamespaceMap|PeerMap|MapAccess|DeserializeSeed|to_ascii_uppercase`の該当なし | 選択した最小方針どおり |
+
+### 11.2 Review Gates
+
+| gate | result | evidence |
+|---|---|---|
+| Requirements / Scope | pass | Intent Delta、対象範囲、対象外とbranch差分が一致 |
+| TDD / Tests | pass | T01 / T02のred-green-refactor記録、focused / core / workspace test成功 |
+| Static | pass | fmt、clippy、diff check成功 |
+| Package | pass | workspace build成功。Cargo metadata変更なしのため`cargo package`は対象外 |
+| Rust API / rustdoc | pass | 新規公開surfaceなし、`InvalidProfile`契約維持、doctest / rustdoc成功 |
+| Docs Quality | pass | rustdoc、crate docs、architecture、testing、roadmapを同じcanonical契約へ同期。仮テキストなし |
+| Integration Review | pass | 順序test追加後のworkspace全target test成功。対象外へのscope driftなし |
+
+対象範囲内に残るtest gapはない。同一綴りJSON memberの重複診断、manual Python reader、USB、
+Switch実機は本unitのsupported contract / 適用範囲に含めない。
+
+## 12. チェックリスト
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test Listを更新した
-- [ ] T01 / T02をitem単位でred / green / refactor / commitした
-- [ ] pinned Python 0.6.0 fixture 6件の互換性を確認した
-- [ ] public rustdocと`spec/initial`を現行契約へ同期した
-- [ ] 検証結果または未実行理由を記録した
+- [x] T01 / T02をitem単位でred / green / refactor / commitした
+- [x] pinned Python 0.6.0 fixture 6件の互換性を確認した
+- [x] public rustdocと`spec/initial`を現行契約へ同期した
+- [x] 検証結果または未実行理由を記録した
 - [x] package / release / public APIに触れる場合のgateを記録した
-- [ ] docs-quality-reviewとagentic-self-reviewを完了した
-- [ ] `spec/complete/unit_021`へ移動した
+- [x] docs-quality-reviewとagentic-self-reviewを完了した
+- [x] `spec/complete/unit_021`へ移動した
