@@ -7,9 +7,7 @@ use crate::{
     CreateProfileOptions, ProfileIdentity,
     error::{Error, ErrorKind},
     model::ControllerModel,
-    profile::{
-        PairingProfile, ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState,
-    },
+    profile::{PairingProfile, ProfileStore},
     reporting::{self, ReportingMode},
     runtime::{
         cleanup::CloseMode,
@@ -50,7 +48,7 @@ impl<M: ControllerModel, R: ReportingMode> CreateProfilePlan<M, R> {
 
     fn persist_and_configure(
         self,
-        store: &mut impl ProfileCreatePort,
+        store: &mut impl ProfileStore,
     ) -> crate::Result<(ControllerConfig<M, R>, Duration)> {
         let CreateProfilePlan {
             config,
@@ -144,7 +142,7 @@ impl<M: ControllerModel, R: ReportingMode> ControllerRuntime<M, R> {
 
 pub(super) fn create_profile<M, R>(
     plan: CreateProfilePlan<M, R>,
-    store: &mut impl ProfileCreatePort,
+    store: &mut impl ProfileStore,
     open_and_pair: impl FnOnce(
         &ControllerConfig<M, R>,
         StatusPublisher<M>,
@@ -198,7 +196,6 @@ pub(super) fn with_cleanup_error(primary: Error, cleanup: crate::Result<()>) -> 
 pub(super) fn validate_target<M: ControllerModel, R: ReportingMode>(
     config: BuilderConfig<M, R>,
     options: CreateProfileOptions,
-    target: &mut impl ProfileCreateTargetPort,
 ) -> crate::Result<CreateProfilePlan<M, R>> {
     let path = config.profile_path().ok_or_else(|| {
         Error::new(
@@ -217,22 +214,10 @@ pub(super) fn validate_target<M: ControllerModel, R: ReportingMode>(
         }
     }
 
-    match target.inspect(path).map_err(|source| {
-        Error::with_source(
-            ErrorKind::Internal,
-            "profile creation target could not be inspected",
-            source,
-        )
-    })? {
-        ProfileCreateTargetState::Absent => Ok(CreateProfilePlan {
-            path: path.to_owned(),
-            config,
-            identity: options.identity,
-            pair_timeout: options.pair_timeout,
-        }),
-        ProfileCreateTargetState::Existing => Err(Error::new(
-            ErrorKind::ProfileAlreadyExists,
-            "profile creation target already exists",
-        )),
-    }
+    Ok(CreateProfilePlan {
+        path: path.to_owned(),
+        config,
+        identity: options.identity,
+        pair_timeout: options.pair_timeout,
+    })
 }

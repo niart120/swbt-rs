@@ -98,7 +98,7 @@ fn public_create_profile_reports_missing_backend_without_creating_the_target() {
 
 #[cfg(not(feature = "bumble"))]
 #[test]
-fn public_local_address_is_rejected_before_target_inspection() {
+fn public_local_address_is_rejected_before_target_filesystem_io() {
     let address = LocalAddress::parse("02:12:34:56:78:9A").expect("valid local address fixture");
     let invalid_target = PathBuf::from("profile\0must-not-be-inspected.json");
 
@@ -108,6 +108,18 @@ fn public_local_address_is_rejected_before_target_inspection() {
             identity: ProfileIdentity::LocalAddress(address),
             pair_timeout: Duration::from_secs(60),
         });
+
+    assert_controller_error_kind(result, ErrorKind::UnsupportedCapability);
+}
+
+#[cfg(not(feature = "bumble"))]
+#[test]
+fn public_adapter_default_is_rejected_before_target_filesystem_io() {
+    let invalid_target = PathBuf::from("profile\0must-not-be-accessed.json");
+
+    let result = ProController::builder("unavailable:adapter-default")
+        .profile_path(&invalid_target)
+        .create_profile(adapter_default_options());
 
     assert_controller_error_kind(result, ErrorKind::UnsupportedCapability);
 }
@@ -160,7 +172,7 @@ fn public_create_profile_reaches_the_production_backend_after_persisting() {
 }
 
 #[test]
-fn public_create_profile_keeps_preflight_errors_ahead_of_backend_availability() {
+fn public_create_profile_checks_builder_and_path_before_capability_or_create_new() {
     assert_controller_error_kind(
         ProController::builder("unavailable:no-profile-path")
             .create_profile(adapter_default_options()),
@@ -170,11 +182,16 @@ fn public_create_profile_keeps_preflight_errors_ahead_of_backend_availability() 
     let temp = TempDir::new("existing-profile");
     let target = temp.path().join("existing-profile.json");
     fs::write(&target, b"existing profile sentinel").expect("create existing profile fixture");
+    let expected_existing = if cfg!(feature = "bumble") {
+        ErrorKind::ProfileAlreadyExists
+    } else {
+        ErrorKind::UnsupportedCapability
+    };
     assert_controller_error_kind(
         ProController::builder("unavailable:existing-profile")
             .profile_path(&target)
             .create_profile(adapter_default_options()),
-        ErrorKind::ProfileAlreadyExists,
+        expected_existing,
     );
     assert_eq!(
         fs::read(&target).expect("read existing profile fixture"),
@@ -187,7 +204,7 @@ fn public_create_profile_keeps_preflight_errors_ahead_of_backend_availability() 
         ProController::builder("unavailable:existing-directory")
             .profile_path(&directory_target)
             .create_profile(adapter_default_options()),
-        ErrorKind::ProfileAlreadyExists,
+        expected_existing,
     );
     assert!(
         fs::symlink_metadata(&directory_target)
@@ -198,7 +215,7 @@ fn public_create_profile_keeps_preflight_errors_ahead_of_backend_availability() 
 
 #[cfg(any(unix, windows))]
 #[test]
-fn public_create_profile_treats_a_dangling_symlink_as_an_existing_target() {
+fn public_create_profile_never_replaces_a_dangling_symlink() {
     let temp = TempDir::new("dangling-symlink");
     let missing = temp.path().join("missing-target.json");
     let target = temp.path().join("dangling-profile.json");
@@ -216,7 +233,11 @@ fn public_create_profile_treats_a_dangling_symlink_as_an_existing_target() {
         ProController::builder("unavailable:dangling-symlink")
             .profile_path(&target)
             .create_profile(adapter_default_options()),
-        ErrorKind::ProfileAlreadyExists,
+        if cfg!(feature = "bumble") {
+            ErrorKind::ProfileAlreadyExists
+        } else {
+            ErrorKind::UnsupportedCapability
+        },
     );
     let metadata =
         fs::symlink_metadata(&target).expect("dangling profile symlink fixture must remain");

@@ -99,7 +99,7 @@ expected全バイトCASを削除する。
 |---|---|---|---|---|
 | done | T01: Python 0.6.0 Classic profileだけがtyped parse/canonical writeでき、旧Rust raw peer、unknown field、`address_type`、LE key fieldを秘密値非表示の`InvalidProfile`で拒否する | regression / edge | profile unit / integration | typed serdeへ置換済み |
 | done | T02: single writerの更新はexpected bytesやfile lockなしでexisting regular profileをatomic replaceし、中断前後にold/newのcomplete profileだけを残す | behavior | store unit / key-store integration | `fs2`とstale-writer `WouldBlock`を削除済み |
-| todo | T03: create-profileはtargetを事前inspectせず、create-new競合だけを`ProfileAlreadyExists`へ写像し、feature無効時はfilesystem I/Oなしで`UnsupportedCapability`を返す | regression | controller unit / public integration | green後にcrate-private store portを整理する |
+| done | T03: create-profileはtargetを事前inspectせず、create-new競合だけを`ProfileAlreadyExists`へ写像し、feature無効時はfilesystem I/Oなしで`UnsupportedCapability`を返す | regression | controller unit / public integration | store port統合済み |
 
 ### 6.1 TDD cycle evidence
 
@@ -111,6 +111,9 @@ expected全バイトCASを削除する。
 | red | T02 | store testをsingle-writerの`update(path, replacement)`契約へ変更した。focused testは現行traitがexpected bytesを含む3引数を要求したため`E0061`で期待どおりcompile失敗した |
 | green | T02 | `ProfileUpdatePort`とBumble key-storeからexpected bytesを除去し、OS file lock、CAS、`fs2`依存を削除した。`cargo test -p swbt-rs --all-features --locked profile`はprofile関連unit 38件とintegrationを成功し、atomic writer破棄時のold profile保持も確認した |
 | refactor-skipped | T02 | store portの統合はcreate-profile事前inspect削除と同時に行う方が境界を一度で確定できるためT03へ残した。`cargo clippy -p swbt-rs --all-targets --all-features --locked -- -D warnings`は成功した |
+| red | T03 | create成功時のevent列から`InspectTarget`を除いた。focused testは実装が`InspectTarget → CreateNew → Open`を記録したため、期待する`CreateNew → Open`との差分で失敗した |
+| green | T03 | create planからstore引数とtarget inspectを除去し、`create_new`だけを競合判定にした。all-featureのcreate-profile 8 unit / 3 public testと、no-featureのbackend contract 6 testが成功し、NUL入りpathでもfilesystemへ触れず`UnsupportedCapability`を返した |
+| refactor-done | T03 | read/create/updateの3 traitをcrate-private `ProfileStore`へ統合し、feature無効時に不要なClassic bond projectionをcompile対象外にした。all-feature lib 262 passed / 1 ignored、all-featureとno-featureのclippy `-D warnings`が成功した |
 
 ## 7. 設計メモ
 

@@ -101,13 +101,7 @@ impl ProfileDocument {
     }
 }
 
-#[cfg_attr(
-    not(feature = "bumble"),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not adapt profile pairing keys"
-    )
-)]
+#[cfg(feature = "bumble")]
 impl ProfileDocument {
     fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<ProfileClassicBond> {
         self.key_store
@@ -378,6 +372,7 @@ struct ClassicPairingKeysDocument {
 }
 
 impl ClassicPairingKeysDocument {
+    #[cfg(feature = "bumble")]
     const fn to_profile_bond(&self) -> ProfileClassicBond {
         ProfileClassicBond::new(
             self.link_key.value.0,
@@ -387,6 +382,7 @@ impl ClassicPairingKeysDocument {
     }
 }
 
+#[cfg(feature = "bumble")]
 impl From<ProfileClassicBond> for ClassicPairingKeysDocument {
     fn from(value: ProfileClassicBond) -> Self {
         Self {
@@ -429,12 +425,14 @@ impl<'de> Deserialize<'de> for LinkKeyBytes {
     }
 }
 
+#[cfg(feature = "bumble")]
 pub(crate) struct ProfileClassicBond {
     link_key: [u8; 16],
     link_key_type: u8,
     authenticated: bool,
 }
 
+#[cfg(feature = "bumble")]
 impl ProfileClassicBond {
     pub(crate) const fn new(link_key: [u8; 16], link_key_type: u8, authenticated: bool) -> Self {
         Self {
@@ -578,13 +576,7 @@ fn format_local_address(address: LocalAddress) -> String {
     )
 }
 
-#[cfg_attr(
-    not(feature = "bumble"),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not adapt profile pairing keys"
-    )
-)]
+#[cfg(feature = "bumble")]
 impl<M: ControllerModel> PairingProfile<M> {
     pub(crate) fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<ProfileClassicBond> {
         self.document.pairing_keys(namespace, peer)

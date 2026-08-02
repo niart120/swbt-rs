@@ -38,7 +38,7 @@ use crate::{
     CreateProfileOptions,
 };
 
-use build::{ProfileReadPort, read_typed_profile};
+use build::{ProfileStore, read_typed_profile};
 #[cfg(test)]
 use config::ProfileConfig;
 use config::{BuilderConfig, ControllerConfig};
@@ -520,12 +520,11 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
         self
     }
 
-    fn validate_create_profile_target(
+    fn validate_create_profile(
         self,
         options: CreateProfileOptions,
-        target: &mut impl crate::profile::ProfileCreateTargetPort,
     ) -> crate::Result<CreateProfilePlan<M, R>> {
-        create::validate_target(self.validate()?, options, target)
+        create::validate_target(self.validate()?, options)
     }
 
     #[cfg_attr(
@@ -538,14 +537,14 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     fn create_profile_with(
         self,
         options: CreateProfileOptions,
-        store: &mut impl crate::profile::ProfileCreatePort,
+        store: &mut impl crate::profile::ProfileStore,
         open_and_pair: impl FnOnce(
             &ControllerConfig<M, R>,
             StatusPublisher<M>,
             Duration,
         ) -> crate::Result<ControllerRuntime<M, R>>,
     ) -> crate::Result<Controller<M, R>> {
-        let plan = self.validate_create_profile_target(options, store)?;
+        let plan = self.validate_create_profile(options)?;
         create::create_profile(plan, store, open_and_pair)
     }
 
@@ -588,8 +587,7 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
         }
         #[cfg(not(feature = "bumble"))]
         {
-            let mut store = FileProfileStore;
-            let plan = self.validate_create_profile_target(options, &mut store)?;
+            let plan = self.validate_create_profile(options)?;
             create::reject_unavailable_backend(plan)
         }
     }
@@ -615,7 +613,7 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
 
     fn build_with_profile_reader(
         self,
-        reader: &mut impl ProfileReadPort,
+        reader: &mut impl ProfileStore,
     ) -> crate::Result<Controller<M, R>> {
         let config = self
             .validate()?

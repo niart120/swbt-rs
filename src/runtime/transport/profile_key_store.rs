@@ -4,9 +4,7 @@ use swbt_bumble_backend::{AddressKind, BluetoothAddress, BondStore, BondStoreErr
 
 use crate::{
     model::ControllerModel,
-    profile::{
-        FileProfileStore, PairingProfile, ProfileClassicBond, ProfileReadPort, ProfileUpdatePort,
-    },
+    profile::{FileProfileStore, PairingProfile, ProfileClassicBond, ProfileStore},
 };
 
 pub(crate) struct ProfileKeyStoreFactory {
@@ -78,10 +76,7 @@ impl<M: ControllerModel> SwbtProfileKeyStore<M> {
         self.namespace.as_deref().ok_or(error)
     }
 
-    fn read_profile(
-        &self,
-        error: BondStoreError,
-    ) -> Result<PairingProfile<M>, BondStoreError> {
+    fn read_profile(&self, error: BondStoreError) -> Result<PairingProfile<M>, BondStoreError> {
         let bytes = FileProfileStore.read(&self.path).map_err(|_| error)?;
         PairingProfile::from_json(&bytes).map_err(|_| error)
     }

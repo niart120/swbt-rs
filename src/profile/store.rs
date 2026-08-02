@@ -13,19 +13,11 @@ static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) struct FileProfileStore;
 
-impl ProfileCreateTargetPort for FileProfileStore {
-    fn inspect(&mut self, path: &Path) -> io::Result<ProfileCreateTargetState> {
-        inspect_target(path)
-    }
-}
-
-impl ProfileReadPort for FileProfileStore {
+impl ProfileStore for FileProfileStore {
     fn read(&mut self, path: &Path) -> io::Result<Vec<u8>> {
         fs::read(path)
     }
-}
 
-impl ProfileCreatePort for FileProfileStore {
     fn create_new(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
         let parent = usable_parent(path);
         fs::create_dir_all(parent)?;
@@ -54,9 +46,6 @@ impl ProfileCreatePort for FileProfileStore {
         }
         publish
     }
-}
-
-impl ProfileUpdatePort for FileProfileStore {
     fn update(&mut self, path: &Path, replacement: &[u8]) -> io::Result<()> {
         let metadata = fs::symlink_metadata(path)?;
         if !metadata.file_type().is_file() {
@@ -75,54 +64,24 @@ impl ProfileUpdatePort for FileProfileStore {
     }
 }
 
-pub(crate) trait ProfileReadPort {
+pub(crate) trait ProfileStore {
     fn read(&mut self, path: &Path) -> io::Result<Vec<u8>>;
-}
 
-/// Snapshot of a profile creation target before an atomic create-new attempt.
-///
-/// `Absent` does not reserve the path. The create-new operation must still use
-/// no-replace semantics and map a concurrent conflict to `ProfileAlreadyExists`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ProfileCreateTargetState {
-    Absent,
-    Existing,
-}
-
-pub(crate) trait ProfileCreateTargetPort {
-    /// Inspects the target without creating, replacing, or reserving it.
-    fn inspect(&mut self, path: &Path) -> io::Result<ProfileCreateTargetState>;
-}
-
-pub(crate) trait ProfileCreatePort: ProfileCreateTargetPort {
     /// Creates a new profile without replacing an existing target.
     ///
     /// An existing target must be reported as [`io::ErrorKind::AlreadyExists`].
     fn create_new(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()>;
-}
-
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not persist pairing-key updates"
-    )
-)]
-pub(crate) trait ProfileUpdatePort: ProfileReadPort {
     /// Atomically replaces an existing regular profile for its single live writer.
     ///
     /// Multiple processes or controllers updating the same path are unsupported.
+    #[cfg_attr(
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not persist pairing-key updates"
+        )
+    )]
     fn update(&mut self, path: &Path, replacement: &[u8]) -> io::Result<()>;
-}
-
-fn inspect_target(path: &Path) -> io::Result<ProfileCreateTargetState> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => Ok(ProfileCreateTargetState::Existing),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => {
-            Ok(ProfileCreateTargetState::Absent)
-        }
-        Err(source) => Err(source),
-    }
 }
 
 fn usable_parent(path: &Path) -> &Path {
@@ -182,16 +141,13 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use atomic_write_file::AtomicWriteFile;
     use crate::{
         model,
         profile::{PairingProfile, ProfileDocument},
     };
+    use atomic_write_file::AtomicWriteFile;
 
-    use super::{
-        FileProfileStore, ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState,
-        ProfileReadPort, ProfileUpdatePort,
-    };
+    use super::{FileProfileStore, ProfileStore};
 
     static NEXT_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
@@ -204,10 +160,6 @@ mod tests {
             .expect("serialize empty Pro profile");
         let mut store = FileProfileStore;
 
-        assert_eq!(
-            store.inspect(&target).expect("inspect absent target"),
-            ProfileCreateTargetState::Absent
-        );
         store
             .create_new(&target, &expected)
             .expect("create profile through production store");
@@ -229,10 +181,6 @@ mod tests {
         let file_target = temp.path().join("racing.json");
         let competitor = b"competitor-owned bytes";
 
-        assert_eq!(
-            store.inspect(&file_target).expect("inspect absent target"),
-            ProfileCreateTargetState::Absent
-        );
         fs::write(&file_target, competitor).expect("create racing target");
         let error = store
             .create_new(&file_target, b"replacement")
@@ -280,10 +228,6 @@ mod tests {
         }
         let mut store = FileProfileStore;
 
-        assert_eq!(
-            store.inspect(&target).expect("inspect symlink target"),
-            ProfileCreateTargetState::Existing
-        );
         let error = store
             .create_new(&target, b"replacement")
             .expect_err("create-new must not replace a dangling symlink");
@@ -313,7 +257,9 @@ mod tests {
             .create_new(&target, &old)
             .expect("create original profile");
 
-        store.update(&target, &new).expect("replace current profile");
+        store
+            .update(&target, &new)
+            .expect("replace current profile");
         assert_eq!(store.read(&target).expect("read updated profile"), new);
         PairingProfile::<model::Pro>::try_from(
             ProfileDocument::parse_json(&new).expect("updated profile remains valid"),
@@ -354,7 +300,9 @@ mod tests {
         )
         .expect("old profile remains Pro-typed");
 
-        store.update(&target, &new).expect("complete later replacement");
+        store
+            .update(&target, &new)
+            .expect("complete later replacement");
         let after_commit = store.read(&target).expect("read new profile");
         assert_eq!(after_commit, new);
         PairingProfile::<model::Pro>::try_from(
