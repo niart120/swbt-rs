@@ -1,11 +1,12 @@
 use std::{fmt, marker::PhantomData, path::PathBuf};
 
-use serde_json::{Value, json};
 use swbt_bumble_backend::{AddressKind, BluetoothAddress, BondStore, BondStoreError, ClassicBond};
 
 use crate::{
     model::ControllerModel,
-    profile::{FileProfileStore, PairingProfile, ProfileReadPort, ProfileUpdatePort},
+    profile::{
+        FileProfileStore, PairingProfile, ProfileClassicBond, ProfileReadPort, ProfileUpdatePort,
+    },
 };
 
 pub(crate) struct ProfileKeyStoreFactory {
@@ -108,14 +109,10 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
     fn load(&self, peer: BluetoothAddress) -> Result<Option<ClassicBond>, BondStoreError> {
         let namespace = self.namespace(BondStoreError::LoadFailed)?;
         let (_, profile) = self.read_profile(BondStoreError::LoadFailed)?;
-        let raw_peer = format_address(peer);
         let public_peer = format_public_peer(peer);
-        profile
+        Ok(profile
             .pairing_keys(namespace, &public_peer)
-            .or_else(|| profile.pairing_keys(namespace, &raw_peer))
-            .map(decode_bond)
-            .transpose()
-            .map_err(|_| BondStoreError::LoadFailed)
+            .map(decode_bond))
     }
 
     fn load_all(&self) -> Result<Vec<(BluetoothAddress, ClassicBond)>, BondStoreError> {
@@ -125,10 +122,10 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
             .all_pairing_keys(namespace)
             .into_iter()
             .map(|(peer, value)| {
-                let raw_peer = peer.strip_suffix("/P").unwrap_or(&peer);
+                let raw_peer = peer.strip_suffix("/P").ok_or(BondStoreError::ListFailed)?;
                 let peer = BluetoothAddress::parse(raw_peer, AddressKind::Public)
                     .map_err(|_| BondStoreError::ListFailed)?;
-                let bond = decode_bond(value).map_err(|_| BondStoreError::ListFailed)?;
+                let bond = decode_bond(value);
                 Ok((peer, bond))
             })
             .collect()
@@ -155,62 +152,16 @@ impl<M: ControllerModel> fmt::Debug for SwbtProfileKeyStore<M> {
     }
 }
 
-fn encode_bond(bond: &ClassicBond) -> Value {
-    json!({
-        "link_key": {
-            "authenticated": bond.authenticated(),
-            "value": encode_hex(bond.link_key()),
-        },
-        "link_key_type": bond.link_key_type(),
-    })
+fn encode_bond(bond: &ClassicBond) -> ProfileClassicBond {
+    ProfileClassicBond::new(*bond.link_key(), bond.link_key_type(), bond.authenticated())
 }
 
-fn decode_bond(value: Value) -> Result<ClassicBond, ()> {
-    let object = value.as_object().ok_or(())?;
-    if object
-        .get("address_type")
-        .is_some_and(|address_type| address_type.as_u64() != Some(0))
-    {
-        return Err(());
-    }
-    let link_key_type = object
-        .get("link_key_type")
-        .and_then(Value::as_u64)
-        .and_then(|value| u8::try_from(value).ok())
-        .ok_or(())?;
-    let link_key = object
-        .get("link_key")
-        .and_then(Value::as_object)
-        .ok_or(())?;
-    let authenticated = link_key
-        .get("authenticated")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let link_key = link_key.get("value").and_then(Value::as_str).ok_or(())?;
-    let link_key = decode_link_key(link_key)?;
-    Ok(ClassicBond::new(link_key, link_key_type, authenticated))
-}
-
-fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
-}
-
-fn decode_link_key(value: &str) -> Result<[u8; 16], ()> {
-    if value.len() != 32 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(());
-    }
-    let mut decoded = [0_u8; 16];
-    for (output, pair) in decoded.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
-        let pair = std::str::from_utf8(pair).map_err(|_| ())?;
-        *output = u8::from_str_radix(pair, 16).map_err(|_| ())?;
-    }
-    Ok(decoded)
+fn decode_bond(value: ProfileClassicBond) -> ClassicBond {
+    ClassicBond::new(
+        value.link_key(),
+        value.link_key_type(),
+        value.authenticated(),
+    )
 }
 
 fn format_address(address: BluetoothAddress) -> String {
@@ -262,15 +213,7 @@ mod tests {
     fn adapter_default_reads_only_the_resolved_local_namespace() {
         let temp = TempDirectory::new("read");
         let path = temp.path().join("pro.json");
-        let mut legacy: Value =
-            serde_json::from_slice(&profile_bytes()).expect("parse test profile");
-        legacy["key_store"]["namespaces"][LOCAL_NAMESPACE][ORIGINAL_PUBLIC_PEER]["address_type"] =
-            json!(0);
-        fs::write(
-            &path,
-            serde_json::to_vec_pretty(&legacy).expect("serialize legacy test profile"),
-        )
-        .expect("write test profile");
+        fs::write(&path, profile_bytes()).expect("write test profile");
         let mut store = SwbtProfileKeyStore::<model::Pro>::new(path.clone());
 
         assert_eq!(
@@ -303,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn upsert_preserves_extensions_and_replaces_the_current_peer_atomically() {
+    fn upsert_writes_the_python_classic_shape_and_replaces_the_current_peer_atomically() {
         let temp = TempDirectory::new("update");
         let path = temp.path().join("pro.json");
         fs::write(&path, profile_bytes()).expect("write test profile");
@@ -315,15 +258,6 @@ mod tests {
         let same_peer: Value =
             serde_json::from_slice(&fs::read(&path).expect("read same-peer update"))
                 .expect("updated profile remains JSON");
-        assert_eq!(same_peer["future_top"], json!({"retained": true}));
-        assert_eq!(
-            same_peer["key_store"]["future_store"],
-            json!({"retained": true})
-        );
-        assert_eq!(
-            same_peer["key_store"]["namespaces"][LOCAL_NAMESPACE][ORIGINAL_PUBLIC_PEER]["future_peer"],
-            json!({"retained": true})
-        );
         assert!(
             same_peer["key_store"]["namespaces"][LOCAL_NAMESPACE][ORIGINAL_PUBLIC_PEER]
                 .get("address_type")
@@ -355,47 +289,6 @@ mod tests {
             replacement["key_store"]["namespaces"][LOCAL_NAMESPACE]
                 .get(REPLACEMENT_PUBLIC_PEER)
                 .is_some()
-        );
-    }
-
-    #[test]
-    fn upsert_migrates_a_legacy_raw_peer_without_losing_extensions() {
-        let temp = TempDirectory::new("legacy-update");
-        let path = temp.path().join("pro.json");
-        let mut legacy: Value =
-            serde_json::from_slice(&profile_bytes()).expect("parse test profile");
-        let peers = legacy["key_store"]["namespaces"][LOCAL_NAMESPACE]
-            .as_object_mut()
-            .expect("test namespace is an object");
-        let keys = peers
-            .remove(ORIGINAL_PUBLIC_PEER)
-            .expect("typed test peer exists");
-        peers.insert(ORIGINAL_PEER.to_owned(), keys);
-        fs::write(
-            &path,
-            serde_json::to_vec_pretty(&legacy).expect("serialize legacy test profile"),
-        )
-        .expect("write legacy test profile");
-        let mut store = selected_store(path.clone());
-
-        assert_eq!(
-            store.load(peer(ORIGINAL_PEER)).expect("read legacy peer"),
-            Some(bond(0xA1))
-        );
-        store
-            .upsert(peer(ORIGINAL_PEER), bond(0xB2))
-            .expect("migrate legacy peer");
-
-        let migrated: Value =
-            serde_json::from_slice(&fs::read(&path).expect("read migrated profile"))
-                .expect("migrated profile remains JSON");
-        let peers = migrated["key_store"]["namespaces"][LOCAL_NAMESPACE]
-            .as_object()
-            .expect("migrated namespace remains an object");
-        assert!(!peers.contains_key(ORIGINAL_PEER));
-        assert_eq!(
-            peers[ORIGINAL_PUBLIC_PEER]["future_peer"],
-            json!({"retained": true})
         );
     }
 
@@ -459,14 +352,10 @@ mod tests {
                                 "value": SECRET_SENTINEL
                             },
                             "link_key_type": 4,
-                            "future_peer": {
-                                "retained": true
-                            }
                         }
                     },
                     "10:11:22:33:44:55": {
-                        "AA:BB:CC:DD:EE:FF": {
-                            "address_type": 0,
+                        "AA:BB:CC:DD:EE:FF/P": {
                             "link_key": {
                                 "authenticated": true,
                                 "value": "D4D4D4D4D4D4D4D4D4D4D4D4D4D4D4D4"
@@ -475,12 +364,6 @@ mod tests {
                         }
                     }
                 },
-                "future_store": {
-                    "retained": true
-                }
-            },
-            "future_top": {
-                "retained": true
             }
         }))
         .expect("serialize test profile")

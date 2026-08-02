@@ -446,6 +446,12 @@ mod tests {
     }
 
     fn valid_profile_bytes(marker: &str) -> Vec<u8> {
+        let key_byte = match marker {
+            "old" => "11",
+            "new" => "22",
+            "competitor" => "33",
+            _ => panic!("unsupported test marker"),
+        };
         let value = serde_json::json!({
             "format": "swbt.profile",
             "schema_version": 2,
@@ -454,10 +460,17 @@ mod tests {
                 "kind": "adapter-default"
             },
             "key_store": {
-                "namespaces": {}
-            },
-            "future_extension": {
-                "marker": marker
+                "namespaces": {
+                    "02:12:34:56:78:9A": {
+                        "98:B6:E9:11:22:33/P": {
+                            "link_key": {
+                                "authenticated": true,
+                                "value": key_byte.repeat(16)
+                            },
+                            "link_key_type": 4
+                        }
+                    }
+                }
             }
         });
         ProfileDocument::parse_json(value.to_string().as_bytes())

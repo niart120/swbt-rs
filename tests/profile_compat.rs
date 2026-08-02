@@ -13,7 +13,7 @@ const PROFILE_FIXTURE_IDS: [&str; 6] = [
 ];
 
 #[test]
-fn typed_profile_preserves_unknown_fields_and_writes_deterministic_python_json() {
+fn typed_profile_writes_deterministic_python_json() {
     let fixtures = python_profile_fixtures();
     assert_eq!(fixtures.len(), PROFILE_FIXTURE_IDS.len());
 
@@ -56,21 +56,8 @@ fn typed_profile_rejects_the_opposite_joycon_fixture() {
 }
 
 fn assert_typed_round_trip<M: model::ControllerModel>(input: &Value) {
-    let mut input = input.clone();
-    input["future_extension"] = json!({
-        "opaque": [3, 1, 2]
-    });
-    let namespace = input["key_store"]["namespaces"]
-        .as_object()
-        .and_then(|namespaces| namespaces.keys().next())
-        .expect("fixture has one local namespace")
-        .clone();
-    input["key_store"]["namespaces"][&namespace]["98:B6:E9:11:22:33/P"]["future_key_metadata"] = json!({
-        "marker": "preserve-me"
-    });
-
     let profile = PairingProfile::<M>::from_json(
-        &serde_json::to_vec(&input).expect("serialize input profile"),
+        &serde_json::to_vec(input).expect("serialize input profile"),
     )
     .expect("matching Python profile must parse");
     let first = profile
@@ -84,8 +71,8 @@ fn assert_typed_round_trip<M: model::ControllerModel>(input: &Value) {
     assert_eq!(first.last(), Some(&b'\n'));
     assert_eq!(
         serde_json::from_slice::<Value>(&first).expect("serialized profile must remain JSON"),
-        input,
-        "known and unknown profile fields must be lossless"
+        *input,
+        "canonical profile fields must round-trip"
     );
     let expected = format!(
         "{}\n",
@@ -95,6 +82,62 @@ fn assert_typed_round_trip<M: model::ControllerModel>(input: &Value) {
         String::from_utf8(first).expect("profile output must be UTF-8"),
         expected,
         "Rust output must use sorted keys, two-space indent, and one trailing newline"
+    );
+}
+
+#[test]
+fn typed_profile_rejects_unknown_extensions() {
+    let mut input = python_profile_fixtures()
+        .into_iter()
+        .next()
+        .expect("fixture must retain the Pro case");
+    input["future_extension"] = json!({"opaque": [3, 1, 2]});
+
+    let error = PairingProfile::<model::Pro>::from_json(
+        &serde_json::to_vec(&input).expect("serialize extended profile"),
+    )
+    .expect_err("unknown profile fields must be rejected");
+
+    assert_eq!(error.kind(), ErrorKind::InvalidProfile);
+    assert!(!error.to_string().contains("opaque"));
+    assert!(!format!("{error:?}").contains("opaque"));
+}
+
+#[test]
+fn typed_profile_normalizes_bluetooth_addresses_to_uppercase() {
+    let mut input = python_profile_fixtures()
+        .into_iter()
+        .next()
+        .expect("fixture must retain the Pro case");
+    let namespaces = input["key_store"]["namespaces"]
+        .as_object_mut()
+        .expect("fixture namespaces must be an object");
+    let peers = namespaces
+        .remove("00:11:22:33:44:55")
+        .expect("fixture namespace must exist");
+    let mut peers = peers
+        .as_object()
+        .expect("fixture peers must be an object")
+        .clone();
+    let keys = peers
+        .remove("98:B6:E9:11:22:33/P")
+        .expect("fixture peer must exist");
+    peers.insert("98:b6:e9:11:22:33/P".to_owned(), keys);
+    namespaces.insert("aa:bb:cc:dd:ee:ff".to_owned(), Value::Object(peers));
+
+    let profile = PairingProfile::<model::Pro>::from_json(
+        &serde_json::to_vec(&input).expect("serialize lowercase profile"),
+    )
+    .expect("lowercase Bluetooth addresses must parse");
+    let output: Value = serde_json::from_slice(
+        &profile
+            .to_json_bytes()
+            .expect("normalized profile must serialize"),
+    )
+    .expect("normalized profile must remain JSON");
+
+    assert!(
+        output["key_store"]["namespaces"]["AA:BB:CC:DD:EE:FF"]["98:B6:E9:11:22:33/P"].is_object()
     );
 }
 

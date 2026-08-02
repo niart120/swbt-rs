@@ -120,13 +120,13 @@ fn raw_envelope_rejects_invalid_schema_and_shape_without_guessing() {
 fn namespace_shape_and_known_key_fields_are_validated_without_secret_echo() {
     let invalid_namespace_cases = [
         json!([]),
-        json!({"98:B6:E9:11:22:33": []}),
+        json!({"98:B6:E9:11:22:33/P": []}),
         json!({"not-an-address": {}}),
         json!({"00:11:22:33:44:55": {"not-an-address": {}}}),
         json!({
             "00:11:22:33:44:55": {
-                "98:B6:E9:11:22:33": {},
-                "98:B6:E9:44:55:66": {}
+                "98:B6:E9:11:22:33/P": {},
+                "98:B6:E9:44:55:66/P": {}
             }
         }),
     ];
@@ -143,28 +143,41 @@ fn namespace_shape_and_known_key_fields_are_validated_without_secret_echo() {
         json!({"link_key": {"value": SECRET_SENTINEL}}),
         json!({"link_key": {"value": "123"}}),
         json!({"link_key": {"value": "00", "authenticated": "yes"}}),
+        json!({
+            "link_key": {"value": "00", "authenticated": true},
+            "link_key_type": 4
+        }),
+        json!({
+            "link_key": {
+                "value": "01010101010101010101010101010101",
+                "authenticated": true
+            },
+            "link_key_type": 256
+        }),
         json!({"ltk": {"value": "00", "ediv": 65536}}),
         json!({"irk": {"value": "00", "rand": "xyz"}}),
         json!({"csrk": {"value": "00", "sign_counter": -1}}),
     ];
     for keys in invalid_key_cases {
         let mut invalid = valid_profile("pro");
-        invalid["key_store"]["namespaces"]["02:12:34:56:78:9A"]["AA:BB:CC:DD:EE:FF"] = keys;
+        invalid["key_store"]["namespaces"]["02:12:34:56:78:9A"]["AA:BB:CC:DD:EE:FF/P"] = keys;
         assert_invalid_profile_without_secret(invalid);
     }
 }
 
 #[test]
-fn public_peer_names_accept_only_the_bumble_public_suffix() {
-    let mut public_peer = valid_profile("pro");
-    let peers = public_peer["key_store"]["namespaces"]["02:12:34:56:78:9A"]
+fn public_peer_names_require_the_bumble_public_suffix() {
+    parse(valid_profile("pro"));
+
+    let mut raw_peer = valid_profile("pro");
+    let peers = raw_peer["key_store"]["namespaces"]["02:12:34:56:78:9A"]
         .as_object_mut()
         .expect("test namespace is an object");
     let keys = peers
-        .remove("AA:BB:CC:DD:EE:FF")
-        .expect("raw test peer exists");
-    peers.insert("AA:BB:CC:DD:EE:FF/P".to_owned(), keys);
-    parse(public_peer);
+        .remove("AA:BB:CC:DD:EE:FF/P")
+        .expect("canonical test peer exists");
+    peers.insert("AA:BB:CC:DD:EE:FF".to_owned(), keys);
+    assert_invalid_profile_without_secret(raw_peer);
 
     for invalid_peer in ["AA:BB:CC:DD:EE:FF/R", "AA:BB:CC:DD:EE:FF/Pextra"] {
         let mut invalid = valid_profile("pro");
@@ -172,8 +185,8 @@ fn public_peer_names_accept_only_the_bumble_public_suffix() {
             .as_object_mut()
             .expect("test namespace is an object");
         let keys = peers
-            .remove("AA:BB:CC:DD:EE:FF")
-            .expect("raw test peer exists");
+            .remove("AA:BB:CC:DD:EE:FF/P")
+            .expect("canonical test peer exists");
         peers.insert(invalid_peer.to_owned(), keys);
         assert_invalid_profile_without_secret(invalid);
     }
@@ -190,6 +203,46 @@ fn public_peer_names_accept_only_the_bumble_public_suffix() {
 }
 
 #[test]
+fn canonical_classic_profile_rejects_unknown_legacy_and_non_classic_fields() {
+    let mut root_extension = valid_profile("pro");
+    root_extension["future_extension"] = json!({"secret": SECRET_SENTINEL});
+
+    let mut identity_extension = valid_profile("pro");
+    identity_extension["identity"]["future_identity"] = json!(SECRET_SENTINEL);
+
+    let mut key_store_extension = valid_profile("pro");
+    key_store_extension["key_store"]["future_store"] = json!(SECRET_SENTINEL);
+
+    let mut peer_extension = valid_profile("pro");
+    peer_extension["key_store"]["namespaces"]["02:12:34:56:78:9A"]["AA:BB:CC:DD:EE:FF/P"]["future_peer"] =
+        json!(SECRET_SENTINEL);
+
+    let mut key_extension = valid_profile("pro");
+    key_extension["key_store"]["namespaces"]["02:12:34:56:78:9A"]["AA:BB:CC:DD:EE:FF/P"]["link_key"]
+        ["future_key"] = json!(SECRET_SENTINEL);
+
+    let mut address_type = valid_profile("pro");
+    address_type["key_store"]["namespaces"]["02:12:34:56:78:9A"]["AA:BB:CC:DD:EE:FF/P"]["address_type"] =
+        json!(0);
+
+    let mut le_key = valid_profile("pro");
+    le_key["key_store"]["namespaces"]["02:12:34:56:78:9A"]["AA:BB:CC:DD:EE:FF/P"]["ltk"] =
+        json!({"value": "00"});
+
+    for invalid in [
+        root_extension,
+        identity_extension,
+        key_store_extension,
+        peer_extension,
+        key_extension,
+        address_type,
+        le_key,
+    ] {
+        assert_invalid_profile_without_secret(invalid);
+    }
+}
+
+#[test]
 fn typed_conversion_returns_structured_model_mismatch_without_secret_echo() {
     let document = parse(valid_profile("pro"));
 
@@ -202,7 +255,7 @@ fn typed_conversion_returns_structured_model_mismatch_without_secret_echo() {
 }
 
 #[test]
-fn raw_and_typed_profile_debug_redact_key_material_and_unknown_fields() {
+fn raw_and_typed_profile_debug_redact_key_material() {
     let document = parse(valid_profile("pro"));
     let raw_debug = format!("{document:?}");
 
@@ -255,7 +308,7 @@ fn valid_profile(controller_kind: &str) -> Value {
         "key_store": {
             "namespaces": {
                 "02:12:34:56:78:9A": {
-                    "AA:BB:CC:DD:EE:FF": {
+                    "AA:BB:CC:DD:EE:FF/P": {
                         "link_key": {
                             "authenticated": true,
                             "value": "01010101010101010101010101010101"
@@ -264,9 +317,6 @@ fn valid_profile(controller_kind: &str) -> Value {
                     }
                 }
             }
-        },
-        "future_extension": {
-            "opaque_secret": SECRET_SENTINEL
         }
     })
 }
