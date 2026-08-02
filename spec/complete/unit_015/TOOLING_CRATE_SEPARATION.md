@@ -174,7 +174,8 @@ scenario subcommandを残す理由は、三つの証跡schema、pair／reconnect
 | 展開archiveのdefault/all-feature buildとtest（`--offline`） | success | default 253 passed / 1 ignored、all-feature 269 passed / 1 ignored。実機test 5件とprofile compatibility 1件はignore。両feature構成のbuild成功 |
 | `cargo deny --locked check` | not run | local環境に`cargo-deny`が未導入。CIのdependency-policy jobは更新対象外で、remote CIは未実行 |
 | `git diff main...HEAD --check` | success | whitespace errorなし |
-| Windows実機でのPeriodic reconnect 2件とfresh pairing 1件 | failed | 2026-08-02。保存鍵付きPro profile 2件はどちらも`NoBond`で接続前に停止し、外部SHA-256比較でprofile不変。fresh pairingは120秒で`ConnectionTimeout`。失敗後の176-byte空profileは型検査に成功し、adapter reopen、closed lifecycle、neutral snapshotを確認。Ready、入力送信、neutral closeの実機経路とSwitch UIは未到達 |
+| Windows実機でのPeriodic reconnect 2件とpower-cycle前のfresh pairing 1件 | failed | 2026-08-02。保存鍵付きPro profile 2件はどちらも`NoBond`で接続前に停止し、外部SHA-256比較でprofile不変。fresh pairingは120秒で`ConnectionTimeout`。失敗後の176-byte空profileは型検査に成功し、adapter reopen、closed lifecycle、neutral snapshotを確認 |
+| dongle power-cycle後のPro Periodic fresh pairing 1件 | success | 2026-08-02。ユーザ報告のSwitch 2 pairing画面準備後、6.660秒でReady。全operationでinput report受理数が増加し、最終555件。ユーザがSwitch 2画面への入力反映を確認した。explicit neutral、neutral close、419-byte profile検査、adapter reopen、closed lifecycle、neutral snapshot、`runner_complete.success=true`を確認。画面反映は人手観測でありrunnerの機械証跡ではない |
 
 ## 10. 先送り事項
 
