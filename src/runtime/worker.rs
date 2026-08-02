@@ -233,8 +233,7 @@ where
 pub(crate) enum WorkerCommandError {
     Input(Error),
     Lifecycle(LifecycleCommandError),
-    Pair(PairingError),
-    Reconnect(ReconnectError),
+    Connection(ConnectionCommandError),
     Periodic(PeriodicError),
     Direct(DirectTapError),
     Shutdown,
@@ -262,32 +261,33 @@ pub(crate) enum WorkerCoreError {
 }
 
 #[derive(Debug)]
-pub(crate) enum PairingError {
+pub(crate) enum ConnectionCommandFailure {
     Begin(WorkerCoreError),
     Readiness(ReadinessError),
     InvalidKeyStore,
     WorkerFailed,
 }
 
-#[derive(Debug)]
-pub(crate) enum ReconnectError {
-    Begin(WorkerCoreError),
-    Readiness(ReadinessError),
-    InvalidKeyStore,
-    WorkerFailed,
-}
-
-#[derive(Clone, Copy)]
-enum ConnectionCommandKind {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConnectionCommandKind {
     Pair,
     Reconnect,
 }
 
-#[derive(Clone, Copy)]
-enum ConnectionAttemptFailure {
-    Readiness(ReadinessError),
-    InvalidKeyStore,
-    WorkerFailed,
+#[derive(Debug)]
+pub(crate) struct ConnectionCommandError {
+    pub(crate) command: ConnectionCommandKind,
+    pub(crate) failure: ConnectionCommandFailure,
+}
+
+impl ConnectionCommandError {
+    const fn new(command: ConnectionCommandKind, failure: ConnectionCommandFailure) -> Self {
+        Self { command, failure }
+    }
+
+    pub(crate) const fn is_worker_failed(&self) -> bool {
+        matches!(self.failure, ConnectionCommandFailure::WorkerFailed)
+    }
 }
 
 impl WorkerCoreError {
@@ -723,7 +723,10 @@ where
                                 WorkerCommandProgress::Pending
                             }
                             Err(error) => WorkerCommandProgress::Complete(Err(
-                                WorkerCommandError::Pair(PairingError::Begin(error)),
+                                WorkerCommandError::Connection(ConnectionCommandError::new(
+                                    ConnectionCommandKind::Pair,
+                                    ConnectionCommandFailure::Begin(error),
+                                )),
                             )),
                         }
                     }
@@ -740,7 +743,10 @@ where
                                 WorkerCommandProgress::Pending
                             }
                             Err(error) => WorkerCommandProgress::Complete(Err(
-                                WorkerCommandError::Reconnect(ReconnectError::Begin(error)),
+                                WorkerCommandError::Connection(ConnectionCommandError::new(
+                                    ConnectionCommandKind::Reconnect,
+                                    ConnectionCommandFailure::Begin(error),
+                                )),
                             )),
                         }
                     }
@@ -1012,7 +1018,7 @@ where
                 &mut connection.handshake,
                 ReadinessError::Disconnected { reason },
             );
-            self.complete_connection_failure(ConnectionAttemptFailure::Readiness(error), progress);
+            self.complete_connection_failure(ConnectionCommandFailure::Readiness(error), progress);
             progress
                 .operation_errors
                 .push(WorkerOperationError::Readiness);
@@ -1113,7 +1119,7 @@ where
         progress: &mut StepProgress,
     ) {
         let error = connection.readiness.abort(&mut connection.handshake, error);
-        self.complete_connection_failure(ConnectionAttemptFailure::Readiness(error), progress);
+        self.complete_connection_failure(ConnectionCommandFailure::Readiness(error), progress);
         progress
             .operation_errors
             .push(WorkerOperationError::Readiness);
@@ -1221,9 +1227,9 @@ where
             WorkerCoreError::Transport(source)
                 if source.kind() == TransportErrorKind::InvalidKeyStore =>
             {
-                ConnectionAttemptFailure::InvalidKeyStore
+                ConnectionCommandFailure::InvalidKeyStore
             }
-            _ => ConnectionAttemptFailure::WorkerFailed,
+            _ => ConnectionCommandFailure::WorkerFailed,
         };
         self.complete_connection_failure(failure, &mut progress);
         self.lifecycle.mark_failed();
@@ -1251,24 +1257,13 @@ where
 
     fn complete_connection_failure(
         &mut self,
-        failure: ConnectionAttemptFailure,
+        failure: ConnectionCommandFailure,
         progress: &mut StepProgress,
     ) {
-        let error = match self.connection_command_pending {
-            Some(ConnectionCommandKind::Pair) => WorkerCommandError::Pair(match failure {
-                ConnectionAttemptFailure::Readiness(error) => PairingError::Readiness(error),
-                ConnectionAttemptFailure::InvalidKeyStore => PairingError::InvalidKeyStore,
-                ConnectionAttemptFailure::WorkerFailed => PairingError::WorkerFailed,
-            }),
-            Some(ConnectionCommandKind::Reconnect) => {
-                WorkerCommandError::Reconnect(match failure {
-                    ConnectionAttemptFailure::Readiness(error) => ReconnectError::Readiness(error),
-                    ConnectionAttemptFailure::InvalidKeyStore => ReconnectError::InvalidKeyStore,
-                    ConnectionAttemptFailure::WorkerFailed => ReconnectError::WorkerFailed,
-                })
-            }
-            None => return,
+        let Some(command) = self.connection_command_pending else {
+            return;
         };
+        let error = WorkerCommandError::Connection(ConnectionCommandError::new(command, failure));
         self.complete_connection_command(Err(error), progress);
     }
 
@@ -1990,9 +1985,10 @@ mod tests {
                 fake::{FakeTransport, FakeTransportControl, ScriptedSendOutcome},
             },
             worker::{
-                ChannelWorkerWaiter, CommandSource, CommonCommand, DirectCommand, MonotonicClock,
-                PairingError, PeriodicCommand, PriorityShutdown, RuntimeCommand, ShutdownRequest,
-                StepProgress, WorkerBudget, WorkerCommandError, WorkerCore, WorkerCoreError,
+                ChannelWorkerWaiter, CommandSource, CommonCommand, ConnectionCommandError,
+                ConnectionCommandFailure, ConnectionCommandKind, DirectCommand, MonotonicClock,
+                PeriodicCommand, PriorityShutdown, RuntimeCommand, ShutdownRequest, StepProgress,
+                WorkerBudget, WorkerCommandError, WorkerCore, WorkerCoreError,
                 WorkerOperationError, WorkerStep, WorkerWaitError, WorkerWaitRequest, WorkerWaiter,
                 periodic_tap_times, wait_for_next_iteration,
             },
@@ -2177,18 +2173,20 @@ mod tests {
         assert_eq!(lock(&trace).first(), Some(&Trace::StartPairing));
         assert!(matches!(
             rejected.command_result.as_ref(),
-            Some(Err(
-                WorkerCommandError::Pair(PairingError::Begin(WorkerCoreError::Transport(error)))
-            )) if error.kind() == TransportErrorKind::SourceTerminated
+            Some(Err(WorkerCommandError::Connection(ConnectionCommandError {
+                command: ConnectionCommandKind::Pair,
+                failure: ConnectionCommandFailure::Begin(WorkerCoreError::Transport(error)),
+            }))) if error.kind() == TransportErrorKind::SourceTerminated
         ));
         commands
             .deliver_progress(&mut rejected)
             .expect("deliver typed pair begin failure");
         assert!(matches!(
             response.try_recv(),
-            Ok(Err(WorkerCommandError::Pair(PairingError::Begin(
-                WorkerCoreError::Transport(error)
-            )))) if error.kind() == TransportErrorKind::SourceTerminated
+            Ok(Err(WorkerCommandError::Connection(ConnectionCommandError {
+                command: ConnectionCommandKind::Pair,
+                failure: ConnectionCommandFailure::Begin(WorkerCoreError::Transport(error)),
+            }))) if error.kind() == TransportErrorKind::SourceTerminated
         ));
     }
 
@@ -2232,18 +2230,24 @@ mod tests {
         };
         assert!(matches!(
             timed_out.command_result.as_ref(),
-            Some(Err(WorkerCommandError::Pair(PairingError::Readiness(
-                ReadinessError::TimedOut
-            ))))
+            Some(Err(WorkerCommandError::Connection(
+                ConnectionCommandError {
+                    command: ConnectionCommandKind::Pair,
+                    failure: ConnectionCommandFailure::Readiness(ReadinessError::TimedOut),
+                }
+            )))
         ));
         commands
             .deliver_progress(&mut timed_out)
             .expect("complete retained pair response");
         assert!(matches!(
             response.try_recv(),
-            Ok(Err(WorkerCommandError::Pair(PairingError::Readiness(
-                ReadinessError::TimedOut
-            ))))
+            Ok(Err(WorkerCommandError::Connection(
+                ConnectionCommandError {
+                    command: ConnectionCommandKind::Pair,
+                    failure: ConnectionCommandFailure::Readiness(ReadinessError::TimedOut),
+                }
+            )))
         ));
         assert!(matches!(
             response.try_recv(),

@@ -21,8 +21,8 @@ use crate::{
             ActivityNotifier, TransportError, TransportErrorKind, TransportPort, activity_channel,
         },
         worker::{
-            MonotonicClock, PairingError, RuntimeCommand, WorkerBudget, WorkerCommandError,
-            WorkerReporting, WorkerWaiter,
+            MonotonicClock, RuntimeCommand, WorkerBudget, WorkerCommandError, WorkerReporting,
+            WorkerWaiter,
         },
         worker_thread::{
             WorkerOwner, WorkerSpawnError, priority_shutdown_channel, spawn_worker_thread,
@@ -257,8 +257,13 @@ where
             Err(error) => return Err(map_enqueue_error(error)),
         };
         match response.recv() {
-            Ok(Err(error @ WorkerCommandError::Pair(PairingError::WorkerFailed))) => {
-                finish_terminal_owner(&mut self.owner, map_command_error(error))
+            Ok(Err(WorkerCommandError::Connection(connection)))
+                if connection.is_worker_failed() =>
+            {
+                finish_terminal_owner(
+                    &mut self.owner,
+                    map_command_error(WorkerCommandError::Connection(connection)),
+                )
             }
             Err(error @ CommandResponseError::WorkerFailed) => {
                 finish_terminal_owner(&mut self.owner, map_response_error(error))

@@ -94,7 +94,7 @@ connection command error を実際の実行経路に合わせて縮小する。�
 | refactor-done | T01 open 済み transport から始まる worker が公開 `Open→Connecting→Ready→Open→Closing→Closed` を維持し、failure cleanup 後の公開 status は `Failed` のままになる | regression / characterization | runtime unit / integration | internal `Configured`、`opening`、同一 worker reopen を除去した |
 | refactor-done | T02 session ID が `u64::MAX` の次に 1 へ wrap し、wrap 前 session の event を current session event として受理しない | edge | runtime unit | `SessionError` と上位 error variant を除去した |
 | refactor-done | T03 表現不能な caller timeout は transport 副作用前に `InvalidInput` となり、長時間稼働を模した clock projection は専用 overflow errorなしで monotonic timestamp を飽和する | edge / regression | controller/runtime unit | clock/deadline errorを共通 helper と入力境界へ集約した |
-| todo | T04 pair/reconnect が共通 connection failure を通っても no-bond、timeout、pre-ready disconnect、protocol/worker failure の公開 `ErrorKind` と source を維持する | regression | runtime/error unit / integration | PairingError/ReconnectError の重複を除去する |
+| refactor-done | T04 pair/reconnect が共通 connection failure を通っても no-bond、timeout、pre-ready disconnect、protocol/worker failure の公開 `ErrorKind` と source を維持する | regression | runtime/error unit / integration | PairingError/ReconnectError の重複を除去した |
 | todo | T05 公開接続面が `pair`、`reconnect`、`connect -> Result<ConnectionPath, Error>` に一本化され、README、rustdoc、初期仕様、移行記述、package archive が同じ API を示す | behavior / regression | public API / docs / package | compile-fail fixture は追加せず、残す API の integration test、rustdoc、package gateで確認する |
 
 status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`deferred` を使う。
@@ -112,6 +112,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | red | T03 | `u64` ナノ秒を超える timeout を pair に渡す公開 test は `InvalidInput` ではなく `ConnectionFailed` となり、transport 側まで到達した。clock helper の飽和 test は helper 未定義で compile error になった |
 | green | T03 | `pair`、`reconnect`、profile 作成の timeout を公開命令や profile I/O より前に検査した。共通 clock helper は protocol timestamp と `Duration` deadline を上限で飽和させ、focused test 2件が成功した |
 | refactor-done | T03 | handshake、周期送信、Direct/Periodic tap、cleanup の時刻変換を共通 helper に揃え、`ClockOverflow` と worker/direct の重複 deadline variant を削除した。library 267件と all-feature library Clippy が成功した |
+| red | T04 | pair 開始時の内部 `NoBond` を reconnect 専用の公開 `NoBond` にしない test を追加した。focused test は actual `NoBond` / expected `WorkerFailed` で失敗した |
+| green | T04 | command 種別を保持する共通 `ConnectionCommandError` で pair の `NoBond` を `WorkerFailed`、reconnect の `NoBond` を `NoBond` に分類した。双方の source chain と readiness error 分類を確認した |
+| refactor-done | T04 | `PairingError`、`ReconnectError`、`ConnectionAttemptFailure` を単一の `ConnectionCommandFailure` へ統合し、error mapper の pair/reconnect 重複を一つの context-aware mapper に置き換えた。error-map 9件、worker 37件、controller runtime 31件、all-feature library Clippy が成功した |
 
 ## 7. 設計メモ
 
@@ -155,7 +158,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | `cargo test -p swbt-rs --lib controller::runtime_tests::public_connection_rejects_timeout_outside_protocol_range_before_transport_side_effects --all-features --locked` | success | T03: 1 passed。RED は actual `ConnectionFailed` / expected `InvalidInput` |
 | `cargo test -p swbt-rs --lib --all-features --locked` | success | T03: 267 passed, 1 ignored。ignored は手動 timing gate |
 | `cargo test -p swbt-rs --lib controller::runtime_tests --all-features --locked` | success | T01 baseline: 30 passed。T03-T05 後に再実行する |
-| `cargo test -p swbt-rs --lib runtime::error_map --all-features --locked` | not run | T04 |
+| `cargo test -p swbt-rs --lib runtime::error_map --all-features --locked` | success | T04: 9 passed。RED は pair NoBond が actual `NoBond` / expected `WorkerFailed` |
+| `cargo test -p swbt-rs --lib runtime::worker --all-features --locked` | success | T04: 37 passed |
+| `cargo test -p swbt-rs --lib controller::runtime_tests --all-features --locked` | success | T04: 31 passed |
 | `cargo fmt --all --check` | not run | final gate |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | final gate |
 | `cargo clippy -p swbt-rs --all-targets --no-default-features --locked -- -D warnings` | not run | final gate |
