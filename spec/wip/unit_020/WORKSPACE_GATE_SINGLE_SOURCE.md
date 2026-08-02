@@ -71,10 +71,18 @@ Cargo manifestとは別の検査へ複製する。採用方針では、workspace
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | T01 CIのpackage-boundary jobがrepository-local dependency boundary scriptを実行し、同じ依存契約のBash実装を持たない | regression | CI / package | CI command契約とscript実行を検査する |
+| refactor-skipped | T01 CIのpackage-boundary jobがrepository-local dependency boundary scriptを実行し、同じ依存契約のBash実装を持たない | regression | CI / package | CI command契約とscript実行が成功。重複削除後の追加refactorなし |
 | todo | T02 通常のlocal gateがworkspace全体を明示的に対象とし、旧workspace検査がoperational surfaceに残らない | regression / cleanup | package / docs | command契約、file不在、参照範囲を検査する |
 
 status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`deferred` を使う。
+
+### 6.1 TDD cycle evidence
+
+| phase | item | evidence |
+|---|---|---|
+| red | T01 | CI command契約のPowerShell assertionは`package-boundary job does not invoke check-library-features.ps1`で失敗した |
+| green | T01 | CIのinline Bash処理を`pwsh ./tools/check-library-features.ps1`へ置換した。command契約のassertionとscript実行が成功した |
+| refactor-skipped | T01 | package名、依存名、正規表現のCI重複は削除済みで、追加の構造変更は不要と判断した |
 
 ## 7. 設計メモ
 
@@ -98,8 +106,8 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 
 | command | result | notes |
 |---|---|---|
-| CI command契約のPowerShell assertion | not run | T01 red/greenで実行する |
-| `pwsh -NoProfile -File ./tools/check-library-features.ps1` | not run | core/runtime依存graph |
+| CI command契約のPowerShell assertion | success | T01 redはrepo-local script未呼出しで失敗。greenはscript呼出しとinline実装不在を確認 |
+| `pwsh -NoProfile -File ./tools/check-library-features.ps1` | success | `core/runtime package boundary passed` |
 | local gate command契約、旧script不在、operational参照のPowerShell assertion | not run | T02 red/greenで実行する |
 | `cargo fmt --all --check` | not run | workspace formatting |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | workspace static gate |
@@ -119,7 +127,7 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test Listを作成した
-- [ ] CIの依存境界検査をrepo-local scriptへ一本化した
+- [x] CIの依存境界検査をrepo-local scriptへ一本化した
 - [ ] workspace構成の固定検査を削除した
 - [ ] 通常gateがworkspace全体を明示的に対象とする
 - [ ] 検証結果または未実行理由を記録した
