@@ -14,8 +14,6 @@ mod identity_tests;
 pub use crate::model::ControllerKind;
 pub use colors::{ControllerColors, Rgb24};
 pub use document::PairingProfile;
-#[cfg(feature = "bumble")]
-pub(crate) use document::ProfileClassicBond;
 pub(crate) use document::ProfileDocument;
 pub use identity::{LocalAddress, ProfileIdentity};
 pub(crate) use store::{FileProfileStore, ProfileStore};

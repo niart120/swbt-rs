@@ -4,23 +4,21 @@ use swbt_bumble_backend::{AddressKind, BluetoothAddress, BondStore, BondStoreErr
 
 use crate::{
     model::ControllerModel,
-    profile::{FileProfileStore, PairingProfile, ProfileClassicBond, ProfileStore},
+    profile::{FileProfileStore, PairingProfile, ProfileStore},
 };
 
 pub(crate) struct ProfileKeyStoreFactory {
-    create: Box<dyn Fn() -> ProfileKeyStore + Send>,
+    create: Box<dyn Fn() -> Box<dyn BondStore> + Send>,
 }
 
 impl ProfileKeyStoreFactory {
     pub(crate) fn for_model<M: ControllerModel>(path: PathBuf) -> Self {
         Self {
-            create: Box::new(move || {
-                ProfileKeyStore(Box::new(SwbtProfileKeyStore::<M>::new(path.clone())))
-            }),
+            create: Box::new(move || Box::new(SwbtProfileKeyStore::<M>::new(path.clone()))),
         }
     }
 
-    pub(super) fn create(&self) -> ProfileKeyStore {
+    pub(super) fn create(&self) -> Box<dyn BondStore> {
         (self.create)()
     }
 }
@@ -31,29 +29,6 @@ impl fmt::Debug for ProfileKeyStoreFactory {
             .debug_struct("ProfileKeyStoreFactory")
             .field("path", &Redacted)
             .finish_non_exhaustive()
-    }
-}
-
-pub(super) struct ProfileKeyStore(Box<dyn BondStore>);
-
-impl BondStore for ProfileKeyStore {
-    fn select_local_address(
-        &mut self,
-        local_address: BluetoothAddress,
-    ) -> Result<(), BondStoreError> {
-        self.0.select_local_address(local_address)
-    }
-
-    fn load(&self, peer: BluetoothAddress) -> Result<Option<ClassicBond>, BondStoreError> {
-        self.0.load(peer)
-    }
-
-    fn load_all(&self) -> Result<Vec<(BluetoothAddress, ClassicBond)>, BondStoreError> {
-        self.0.load_all()
-    }
-
-    fn upsert(&mut self, peer: BluetoothAddress, bond: ClassicBond) -> Result<(), BondStoreError> {
-        self.0.upsert(peer, bond)
     }
 }
 
@@ -104,9 +79,7 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
         let namespace = self.namespace(BondStoreError::LoadFailed)?;
         let profile = self.read_profile(BondStoreError::LoadFailed)?;
         let public_peer = format_public_peer(peer);
-        Ok(profile
-            .pairing_keys(namespace, &public_peer)
-            .map(decode_bond))
+        Ok(profile.pairing_keys(namespace, &public_peer))
     }
 
     fn load_all(&self) -> Result<Vec<(BluetoothAddress, ClassicBond)>, BondStoreError> {
@@ -119,8 +92,7 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
                 let raw_peer = peer.strip_suffix("/P").ok_or(BondStoreError::ListFailed)?;
                 let peer = BluetoothAddress::parse(raw_peer, AddressKind::Public)
                     .map_err(|_| BondStoreError::ListFailed)?;
-                let bond = decode_bond(value);
-                Ok((peer, bond))
+                Ok((peer, value))
             })
             .collect()
     }
@@ -129,7 +101,7 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
         let namespace = self.namespace(BondStoreError::UpsertFailed)?.to_owned();
         let mut profile = self.read_profile(BondStoreError::UpsertFailed)?;
         profile
-            .replace_pairing_keys(&namespace, &format_public_peer(peer), encode_bond(&bond))
+            .replace_pairing_keys(&namespace, &format_public_peer(peer), bond)
             .map_err(|_| BondStoreError::UpsertFailed)?;
         self.commit(&profile)
     }
@@ -144,18 +116,6 @@ impl<M: ControllerModel> fmt::Debug for SwbtProfileKeyStore<M> {
             .field("namespace", &Redacted)
             .finish()
     }
-}
-
-fn encode_bond(bond: &ClassicBond) -> ProfileClassicBond {
-    ProfileClassicBond::new(*bond.link_key(), bond.link_key_type(), bond.authenticated())
-}
-
-fn decode_bond(value: ProfileClassicBond) -> ClassicBond {
-    ClassicBond::new(
-        value.link_key(),
-        value.link_key_type(),
-        value.authenticated(),
-    )
 }
 
 fn format_address(address: BluetoothAddress) -> String {

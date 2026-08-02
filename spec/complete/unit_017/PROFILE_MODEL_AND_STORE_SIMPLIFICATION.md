@@ -114,6 +114,7 @@ expected全バイトCASを削除する。
 | red | T03 | create成功時のevent列から`InspectTarget`を除いた。focused testは実装が`InspectTarget → CreateNew → Open`を記録したため、期待する`CreateNew → Open`との差分で失敗した |
 | green | T03 | create planからstore引数とtarget inspectを除去し、`create_new`だけを競合判定にした。all-featureのcreate-profile 8 unit / 3 public testと、no-featureのbackend contract 6 testが成功し、NUL入りpathでもfilesystemへ触れず`UnsupportedCapability`を返した |
 | refactor-done | T03 | read/create/updateの3 traitをcrate-private `ProfileStore`へ統合し、feature無効時に不要なClassic bond projectionをcompile対象外にした。all-feature lib 262 passed / 1 ignored、all-featureとno-featureのclippy `-D warnings`が成功した |
+| refactor-done | T01 / T02 | identityの`kind`専用enum、profile専用Classic bond DTO、`BondStore`のforwarding wrapperと二重boxingを削除した。unit variantだけのinternally tagged identityは余分なfieldを受理したため採用せず、既存strict rejection testが守るpayload structを維持した。all-feature profile unit 36件、no-feature profile unit 28件、Python fixture integration 5件が成功し、manual cross-language writer 1件だけをignoredとした |
 
 ## 7. 設計メモ
 
@@ -141,7 +142,8 @@ domain validationし、内部mutation後のshape再検証を不要にする。
 | `src/controller/mod.rs` | modify | feature dispatchとstore注入整理 |
 | `src/controller/build.rs` | modify | read seam整理 |
 | `src/controller/*_tests.rs` | modify | create/buildのobservable contract更新 |
-| `src/runtime/transport/profile_key_store.rs` | modify | typed Classic key projectionとsingle-writer commit |
+| `src/runtime/transport/profile_key_store.rs` | modify | backend Classic bondへの直接projection、single-writer commit、二重boxing削除 |
+| `src/runtime/transport/bumble.rs` | modify | factoryが返す`BondStore`を直接backendへ渡す |
 | `tests/profile_compat.rs` | modify | Python canonical compatibilityとreject境界 |
 | `tests/backend_unavailable_contract.rs` | modify | feature無効時のfilesystem非接触 |
 | `tools/swbt-probe/tests/probe_cli.rs` | modify | profile inspect / verify用fixtureのcanonical化 |
@@ -157,6 +159,7 @@ domain validationし、内部mutation後のshape再検証を不要にする。
 | `cargo test -p swbt-rs --all-features --locked profile` | success | 着手前baseline。focused unit/integrationとPython fixtureが成功、manual cross-language writer 1件ignored |
 | `cargo clippy -p swbt-rs --all-targets --all-features --locked -- -D warnings` | success | 着手前baseline |
 | itemごとのfocused `cargo test` | success | T01 strict rejection、T02 single-writer store、T03 create orderingとfeature無効filesystem非接触をRED/GREENで確認 |
+| post-green focused profile test | success | `cargo test -p swbt-rs --lib --all-features --locked profile`は36件、`cargo test -p swbt-rs --lib --no-default-features --locked profile`は28件、`cargo test -p swbt-rs --test profile_compat --all-features --locked`は5 passed / 1 manual ignored。identity unknown field拒否、canonical bytes、backend bond round-tripを維持 |
 | `cargo test --workspace --all-targets --all-features --locked` | success | 初回にtoolの旧fixture 1件を検出してcanonical化。再実行はworkspace全target成功。本体262 passed / 1 manual ignored、profile互換5 passed / 1 manual ignored、実機adapter 5 ignored |
 | `cargo test -p swbt-rs --all-targets --no-default-features --locked` | success | 本体248 passed / 1 manual ignored。backend-unavailable 6件を含む全integration成功 |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | workspace 3 packageにwarningなし |
