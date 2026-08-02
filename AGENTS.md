@@ -44,10 +44,10 @@
 変更範囲に応じて次を選ぶ。すべてを機械的に実行せず、実行した command と検査対象を記録する。
 
 ```powershell
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-cargo build --all-features
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-targets --all-features --locked
+cargo build --workspace --all-features --locked
 git diff --check
 ```
 

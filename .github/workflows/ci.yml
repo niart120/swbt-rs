@@ -69,21 +69,7 @@ jobs:
       - run: cargo test -p swbt-core --all-targets --locked
       - run: cargo build -p swbt-core --locked
       - run: cargo build -p swbt-rs --no-default-features --locked
-      - name: Verify core and runtime dependency graphs
-        shell: bash
-        run: |
-          core_tree="$(cargo tree -p swbt-core --edges normal --locked)"
-          if grep -Eq '(swbt-bumble-backend|rusb v|tracing v|atomic-write-file)' <<<"${core_tree}"; then
-            echo 'swbt-core must not contain runtime, USB, tracing, or profile writer dependencies.'
-            exit 1
-          fi
-          runtime_tree="$(cargo tree -p swbt-rs --no-default-features --edges normal --locked)"
-          for package in 'swbt-bumble-backend v' 'rusb v' 'tracing v'; do
-            if ! grep -q "${package}" <<<"${runtime_tree}"; then
-              echo "swbt-rs --no-default-features must contain ${package}."
-              exit 1
-            fi
-          done
+      - run: pwsh ./tools/check-library-features.ps1
 
   doc:
     runs-on: ubuntu-latest
