@@ -11,6 +11,9 @@ const PROFILE_FIXTURE_IDS: [&str; 6] = [
     "joycon_l_local_address_with_classic_link_key",
     "joycon_r_local_address_with_classic_link_key",
 ];
+const CANONICAL_NAMESPACE: &str = "00:11:22:33:44:55";
+const CANONICAL_PEER: &str = "98:B6:E9:11:22:33/P";
+const TEST_LINK_KEY: &str = "01010101010101010101010101010101";
 
 #[test]
 fn typed_profile_writes_deterministic_python_json() {
@@ -106,64 +109,82 @@ fn typed_profile_rejects_unknown_extensions() {
 #[test]
 fn typed_profile_requires_canonical_uppercase_namespace() {
     for noncanonical_namespace in ["aa:bb:cc:dd:ee:ff", "Aa:BB:CC:DD:EE:FF"] {
-        let mut input = python_profile_fixtures()
-            .into_iter()
-            .next()
-            .expect("fixture must retain the Pro case");
-        let namespaces = input["key_store"]["namespaces"]
-            .as_object_mut()
-            .expect("fixture namespaces must be an object");
-        let peers = namespaces
-            .remove("00:11:22:33:44:55")
-            .expect("fixture namespace must exist");
-        namespaces.insert(noncanonical_namespace.to_owned(), peers);
+        let peer = classic_peer_member(CANONICAL_PEER);
+        let canonical = namespace_member(CANONICAL_NAMESPACE, &peer);
+        let noncanonical = namespace_member(noncanonical_namespace, &peer);
 
-        let error = PairingProfile::<model::Pro>::from_json(
-            &serde_json::to_vec(&input).expect("serialize noncanonical namespace profile"),
-        )
-        .expect_err("noncanonical Bluetooth namespace must fail");
-
-        assert_eq!(error.kind(), ErrorKind::InvalidProfile);
-        assert!(!error.to_string().contains(noncanonical_namespace));
-        assert!(!format!("{error:?}").contains(noncanonical_namespace));
-        let source = error.source().expect("invalid profile source");
-        assert!(!source.to_string().contains(noncanonical_namespace));
-        assert!(!format!("{source:?}").contains(noncanonical_namespace));
+        for members in [
+            noncanonical.clone(),
+            format!("{canonical},{noncanonical}"),
+            format!("{noncanonical},{canonical}"),
+        ] {
+            assert_invalid_profile_redacts(
+                &profile_with_namespace_members(&members),
+                &[noncanonical_namespace, TEST_LINK_KEY],
+            );
+        }
     }
 }
 
 #[test]
 fn typed_profile_requires_canonical_uppercase_peer() {
-    const LINK_KEY: &str = "01010101010101010101010101010101";
-
     for noncanonical_peer in ["98:b6:e9:11:22:33/P", "98:B6:E9:11:22:3a/P"] {
-        let mut input = python_profile_fixtures()
-            .into_iter()
-            .next()
-            .expect("fixture must retain the Pro case");
-        let peers = input["key_store"]["namespaces"]["00:11:22:33:44:55"]
-            .as_object_mut()
-            .expect("fixture peers must be an object");
-        let keys = peers
-            .remove("98:B6:E9:11:22:33/P")
-            .expect("fixture peer must exist");
-        peers.insert(noncanonical_peer.to_owned(), keys);
+        let canonical = classic_peer_member(CANONICAL_PEER);
+        let noncanonical = classic_peer_member(noncanonical_peer);
 
-        let error = PairingProfile::<model::Pro>::from_json(
-            &serde_json::to_vec(&input).expect("serialize noncanonical peer profile"),
-        )
-        .expect_err("noncanonical Bluetooth peer must fail");
+        for peers in [
+            noncanonical.clone(),
+            format!("{canonical},{noncanonical}"),
+            format!("{noncanonical},{canonical}"),
+        ] {
+            let namespace = namespace_member(CANONICAL_NAMESPACE, &peers);
+            assert_invalid_profile_redacts(
+                &profile_with_namespace_members(&namespace),
+                &[noncanonical_peer, TEST_LINK_KEY],
+            );
+        }
+    }
+}
 
-        assert_eq!(error.kind(), ErrorKind::InvalidProfile);
-        assert!(!error.to_string().contains(noncanonical_peer));
-        assert!(!error.to_string().contains(LINK_KEY));
-        assert!(!format!("{error:?}").contains(noncanonical_peer));
-        assert!(!format!("{error:?}").contains(LINK_KEY));
-        let source = error.source().expect("invalid profile source");
-        assert!(!source.to_string().contains(noncanonical_peer));
-        assert!(!source.to_string().contains(LINK_KEY));
-        assert!(!format!("{source:?}").contains(noncanonical_peer));
-        assert!(!format!("{source:?}").contains(LINK_KEY));
+fn classic_peer_member(peer: &str) -> String {
+    let mut member = format!("\"{peer}\":");
+    member.push_str(r#"{"link_key":{"authenticated":true,"value":"#);
+    member.push_str(TEST_LINK_KEY);
+    member.push_str(r#""},"link_key_type":4}"#);
+    member
+}
+
+fn namespace_member(namespace: &str, peers: &str) -> String {
+    let mut member = format!("\"{namespace}\":{{");
+    member.push_str(peers);
+    member.push('}');
+    member
+}
+
+fn profile_with_namespace_members(namespaces: &str) -> Vec<u8> {
+    let mut profile = String::from(
+        r#"{"controller_kind":"pro","format":"swbt.profile","identity":{"kind":"adapter-default"},"key_store":{"namespaces":{"#,
+    );
+    profile.push_str(namespaces);
+    profile.push_str(r#"}},"schema_version":2}"#);
+    profile.into_bytes()
+}
+
+fn assert_invalid_profile_redacts(input: &[u8], exposed_values: &[&str]) {
+    let error = PairingProfile::<model::Pro>::from_json(input)
+        .expect_err("noncanonical Bluetooth key must fail");
+
+    assert_eq!(error.kind(), ErrorKind::InvalidProfile);
+    let display = error.to_string();
+    let debug = format!("{error:?}");
+    let source = error.source().expect("invalid profile source");
+    let source_display = source.to_string();
+    let source_debug = format!("{source:?}");
+    for exposed in exposed_values {
+        assert!(!display.contains(exposed));
+        assert!(!debug.contains(exposed));
+        assert!(!source_display.contains(exposed));
+        assert!(!source_debug.contains(exposed));
     }
 }
 

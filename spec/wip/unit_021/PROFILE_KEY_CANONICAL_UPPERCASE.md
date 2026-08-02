@@ -88,10 +88,10 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | phase | item | evidence |
 |---|---|---|
 | red | T01 | `cargo test -p swbt-core --test profile_compat typed_profile_requires_canonical_uppercase_namespace --locked`は、現行parserがlowercase namespaceを受理して`PairingProfile`を返したため期待どおり失敗した |
-| green | T01 | namespace parserがuppercase addressだけを変換せず保持するよう変更した。同じcommandは成功し、peerのlowercase正規化testとpinned Python fixture 6件も成功した |
+| green | T01 | namespace parserがuppercase addressだけを変換せず保持するよう変更した。同じcommandは成功し、後続self-reviewでは非canonical key単独とcanonical key前後の両順序も成功した |
 | refactor-skipped | T01 | canonical検査はT02でも使う一つのpredicateへ置いた。namespace item内で追加の構造変更は不要と判断した |
 | red | T02 | `cargo test -p swbt-core --test profile_compat typed_profile_requires_canonical_uppercase_peer --locked`は、現行parserがlowercase peerを受理して`PairingProfile`を返したため期待どおり失敗した |
-| green | T02 | peer parserがuppercase addressと`/P`だけを変換せず保持するよう変更した。同じcommand、namespace test、pinned Python fixture 6件はすべて成功した |
+| green | T02 | peer parserがuppercase addressと`/P`だけを変換せず保持するよう変更した。同じcommand、namespace test、pinned Python fixture 6件は成功し、後続self-reviewではcanonical key前後の両順序も成功した |
 | refactor-skipped | T02 | T01で追加したcanonical address predicateをそのまま再利用できた。map deserializerや追加のkey型は不要と判断した |
 
 ## 7. 設計メモ
