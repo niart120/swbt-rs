@@ -93,8 +93,8 @@
 | refactor-done | featureなしのlibraryは`GamepadStatus`を維持してstable diagnosticsをemitせず、feature有効時はschema v1 eventを従来どおりemitする | regression | unit | red: default graphに`tracing`があり、新record framingをsubscriberが拒否。green: feature graph検査、default/all-feature library、probe test成功。refactor: `to_value()`をproduction emitにも使い、field組立てを一箇所へ統合 |
 | refactor-skipped | `swbt-hardware-runner` が三つのscenarioと既存flag集合を単一entry pointで受理し、欠落・重複・不正な組み合わせを実機open前に終了2で拒否する | new | unit | red: entry parser未実装でcompile失敗。green: scenario/parser 12件、CLI integration 2件成功。既存操作をそのままmodule移動し、共通化は次itemへ分離したため追加refactorなし |
 | refactor-done | 各runner scenarioが既存の操作列、status、profile postflight、adapter reopen、evidence schemaを維持し、共通出力が秘密値を含まない | regression | unit | green: 既存14件を維持し、共通引数解析の回帰testを加えた15件が成功。refactor: key/value引数、evidence基底項目、status/error射影、adapter reopenを`support`へ集約。機種別profile検査と入力列はscenarioに維持。実機I/Oは明示承認後の別gate |
-| todo | 公開`swbt-rs` archiveがtool専用source/testとhardware runnerを含まず、展開後にdefault/all-feature buildとtestが成功する | regression | package | package size/file countも記録する |
-| todo | workspace CI command、README、platform support、troubleshootingの実行例が新しいpackageと単一runner入口を指す | regression | docs | command実行とdocs reviewで確認する |
+| refactor-skipped | 公開`swbt-rs` archiveがtool専用source/testとhardware runnerを含まず、展開後にdefault/all-feature buildとtestが成功する | regression | package | green: 113 files / 1.3 MiB（圧縮224.9 KiB）。`tools/`、`src/bin/`、旧実機exampleは0件。展開archiveのdefault/all-feature testとbuildをofflineで確認。package includeは既に最小境界だったため追加refactorなし |
+| refactor-skipped | workspace CI command、README、platform support、troubleshootingの実行例が新しいpackageと単一runner入口を指す | regression | docs | green: 二つのtool helpを実行し、旧feature/bin/example command残りを検索。CIはworkspace gateとroot限定gateを明示。docs reviewでrepository checkout限定とarchive非収録を明記。文章変更のみなので追加refactorなし |
 
 ## 7. 設計メモ
 
@@ -136,7 +136,7 @@ scenario subcommandを残す理由は、三つの証跡schema、pair／reconnect
 | `tools/swbt-probe/**` | new | probe package、CLI、subscriber、test |
 | `tools/swbt-hardware-runner/**` | new | 単一binary、scenario、共通support、test |
 | `.github/workflows/ci.yml` | modify | root packageとworkspace gateの区別 |
-| `README.md` / `docs/*.md` / crate rustdoc | modify | 現在の入口、feature、配布範囲へ更新 |
+| `README.md` / `CHANGELOG.md` / `docs/*.md` / crate rustdoc | modify | 現在の入口、feature、配布範囲、非互換変更へ更新 |
 | `spec/publishing.md` | modify | workspace後のpackage commandとarchive境界 |
 
 ## 9. 検証
@@ -156,20 +156,24 @@ scenario subcommandを残す理由は、三つの証跡schema、pair／reconnect
 | `cargo test -p swbt-hardware-runner --all-targets --locked` | success | scenario/parser/support 13件、単一binary CLI integration 2件。schema v1、scenario次元、秘密値非出力、従来のM5 error分類を確認 |
 | `cargo clippy -p swbt-hardware-runner --all-targets --locked -- -D warnings` | success | warningなし |
 | `cargo run -p swbt-hardware-runner --locked -- help` | success | 単一binaryから3 scenarioを案内し、実機を開いていない |
-| `cargo fmt --all --check` | not run | 実装後に実行 |
-| `cargo check --workspace --all-targets --all-features --locked` | not run | 3 packageの全target |
-| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | workspace全体 |
-| `cargo test --workspace --all-targets --all-features --locked` | not run | toolを含む全自動test |
-| `cargo test -p swbt-rs --all-targets --locked` | not run | featureなしlibrary |
-| `cargo build -p swbt-rs --no-default-features --locked` | not run | 通常利用境界 |
-| `cargo tree -p swbt-rs --no-default-features -e normal` | not run | `tracing`が通常graphにないことを目視確認 |
-| `cargo test --doc -p swbt-rs --all-features --locked` | not run | 公開rustdoc |
-| `cargo run -p swbt-probe -- help` | not run | probe入口 |
-| `cargo run -p swbt-hardware-runner -- help` | not run | 単一runner入口、実機を開かない |
-| `cargo package -p swbt-rs --locked --list` | not run | archive収録範囲 |
-| `cargo package -p swbt-rs --locked` | not run | 公開package |
-| 展開archiveのdefault/all-feature buildとtest | not run | checkout外参照の不在 |
-| `git diff --check` | not run | whitespace |
+| `cargo fmt --all --check` | success | workspace全体の整形差分なし |
+| `cargo +1.87.0 check --workspace --all-targets --all-features --locked` | success | MSRVで3 packageの全targetを確認 |
+| `cargo check --workspace --all-targets --all-features --locked` | success | 3 packageの全target |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | workspace全体、warningなし |
+| `cargo test --workspace --all-targets --all-features --locked` | success | root 269 passed / 1 ignored、hardware 5 ignored、profile compatibility 1 ignored、probe 19件、runner 15件、他target成功 |
+| `cargo test -p swbt-rs --all-targets --locked` | success | featureなしlibrary 253 passed / 1 ignored、profile compatibility 1 ignored、他target成功 |
+| `cargo build --workspace --all-features --locked` | success | Cargo metadata変更後の3 package build |
+| `cargo build -p swbt-rs --no-default-features --locked` | success | 通常利用境界 |
+| `cargo tree -p swbt-rs --no-default-features --edges normal --locked` | success | `atomic-write-file`、`fs2`、`serde_json`だけで、`tracing`、Bumble、`rusb`なし |
+| `cargo test --doc --workspace --all-features --locked` | success | root doctest 1件、tool doctest 0件 |
+| `$env:RUSTDOCFLAGS = '-D warnings'; cargo doc --no-deps --workspace --all-features --locked` | success | 公開libraryとworkspace toolの文書warningなし |
+| `cargo run -p swbt-probe --locked -- help` | success | 6 commandを確認、実機を開いていない |
+| `cargo run -p swbt-hardware-runner --locked -- help` | success | 単一binaryから3 scenarioを確認、実機を開いていない |
+| `cargo package -p swbt-rs --locked --list` | success | 113 files。`tools/`、`src/bin/`、旧実機exampleは0件 |
+| `cargo package -p swbt-rs --locked` | success | 113 files / 1.3 MiB、圧縮224.9 KiB。archive verify成功 |
+| 展開archiveのdefault/all-feature buildとtest（`--offline`） | success | default 253 passed / 1 ignored、all-feature 269 passed / 1 ignored。実機test 5件とprofile compatibility 1件はignore。両feature構成のbuild成功 |
+| `cargo deny --locked check` | not run | local環境に`cargo-deny`が未導入。CIのdependency-policy jobは更新対象外で、remote CIは未実行 |
+| `git diff main...HEAD --check` | success | whitespace errorなし |
 | Windows実機でのpair/reconnect、Periodic/Direct、neutral close、profile、adapter reopen | not run | 実機I/Oはユーザの明示承認後に実行する |
 
 ## 10. 先送り事項
@@ -181,12 +185,12 @@ scenario subcommandを残す理由は、三つの証跡schema、pair／reconnect
 ## 11. チェックリスト
 
 - [x] 対象範囲と対象外を確認した
-- [ ] TDD Test List を更新した
-- [ ] probeとrunnerが公開APIだけでbuildできる
-- [ ] featureなしのlibraryがprobe専用schemaとsubscriberをコンパイルしない
-- [ ] runnerの単一entry pointと既存scenario操作を維持した
-- [ ] 秘密値をtrace／evidence／errorへ出さない
-- [ ] 公開packageの収録内容と依存境界を縮小した
-- [ ] README、docs、CI、publishing手順を更新した
-- [ ] 検証結果または未実行理由を記録した
+- [x] TDD Test List を更新した
+- [x] probeとrunnerが公開APIだけでbuildできる
+- [x] featureなしのlibraryがprobe専用schemaとsubscriberをコンパイルしない
+- [x] runnerの単一entry pointと既存scenario操作を維持した
+- [x] 秘密値をtrace／evidence／errorへ出さない
+- [x] 公開packageの収録内容と依存境界を縮小した
+- [x] README、docs、CI、publishing手順を更新した
+- [x] 検証結果または未実行理由を記録した
 - [x] package / release / public API に触れる場合の gate を記録した
