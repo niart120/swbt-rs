@@ -99,10 +99,6 @@ pub enum ProfileIdentity {
     AdapterDefault,
     /// Use an explicit locally administered address.
     ///
-    /// Profile creation requires the `bumble` feature. Feature-disabled builds
-    /// reject this variant with [`ErrorKind::UnsupportedCapability`] before
-    /// target inspection or adapter changes.
-    ///
     /// The supported and hardware-verified path is a CSR8510 A10 USB adapter
     /// using WinUSB on Windows. The address is written to volatile controller
     /// storage and remains active until the adapter is physically

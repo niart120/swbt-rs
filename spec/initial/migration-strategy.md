@@ -424,7 +424,7 @@ Python `DiagnosticsConfig` writerはRustでは`tracing` subscriberへ移す。
 | `InvalidProfileError` | `InvalidProfile` |
 | `ProfileControllerMismatchError` | `ProfileControllerMismatch` |
 | `InvalidKeyStoreError` | `InvalidKeyStore` |
-| `AdapterIdentityRecoveryRequired` | `UnsupportedCapability`またはidentity-specific error |
+| `AdapterIdentityRecoveryRequired` | `AdapterIdentityRecoveryRequired` |
 
 静的Rust APIでは多くのunsupported inputが型として表現不能になる。`UnsupportedInput`は動的境界に残る。
 

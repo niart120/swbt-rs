@@ -36,7 +36,7 @@ pub enum ErrorKind {
     InvalidInput,
     /// A dynamic input is not supported by the selected controller model.
     UnsupportedInput,
-    /// The requested operation requires a capability unavailable in this build.
+    /// The selected implementation does not support the requested operation.
     UnsupportedCapability,
     /// An explicit adapter identity write started, but its final state could not be verified.
     ///
@@ -51,7 +51,7 @@ pub enum ErrorKind {
     Internal,
 }
 
-/// Error returned by `swbt` operations.
+/// Error returned by `swbt-core` and `swbt` operations.
 pub struct Error {
     kind: ErrorKind,
     message: String,

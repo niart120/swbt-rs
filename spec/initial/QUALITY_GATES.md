@@ -15,8 +15,15 @@ git diff --check
 Cargo metadata / release / public API を触る変更:
 
 ```powershell
-cargo package
+cargo package -p swbt-core --locked
+cargo package -p swbt-rs --locked
 ```
+
+`swbt-rs`が未公開版の`swbt-core`へ依存する変更では、core archiveの検証を先に完了する。
+root packageのclean verificationがregistry上のcoreを要求して失敗する場合は、失敗結果と公開順序を
+work unitへ記録し、`cargo package -p swbt-rs --list`で収録対象を検査する。`--no-verify`でも
+registry解決が必要なため、root archiveの生成とverificationは`swbt-core`公開後、`swbt-rs`公開前に
+必ず再実行する。
 
 `publish = false` の作業単位で package artifact を完了条件に含めない場合も、
 command は実行して結果を記録する。失敗は成功扱いにせず、公開を再び有効にする

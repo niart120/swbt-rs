@@ -9,13 +9,13 @@
 //! [`Controller::open`] succeeds. Selecting an existing profile reads and
 //! validates it during construction.
 //!
-//! The `bumble` feature enables descriptor-only USB adapter discovery and the
-//! Bluetooth HCI runtime. Without it, adapter discovery, opening, and profile
-//! creation return [`ErrorKind::UnsupportedCapability`] before transport or
-//! filesystem side effects. [`Controller::pair`] waits for one session to reach
-//! protocol readiness. [`Controller::reconnect`] uses the stored Classic bond
-//! without deleting it or falling back to pairing; [`Controller::connect`] can
-//! permit that fallback only when configured by the caller.
+//! Descriptor-only USB adapter discovery and the Bumble Bluetooth HCI runtime
+//! are always included. Backend-independent model, input, profile, and protocol
+//! values are provided by the `swbt-core` package and re-exported here as the
+//! same types. [`Controller::pair`] waits for one session to reach protocol
+//! readiness. [`Controller::reconnect`] uses the stored Classic bond without
+//! deleting it or falling back to pairing; [`Controller::connect`] can permit
+//! that fallback only when configured by the caller.
 //!
 //! [`PairingProfile`] accepts the strict Classic pairing subset emitted by
 //! swbt-python 0.6.0; unknown fields, legacy Rust peer names, and LE key fields
@@ -31,8 +31,8 @@
 //! in-flight packet. Dropping a controller is bounded best-effort shutdown: it
 //! omits neutral reporting and draining and cannot report failures. With the
 //! `diagnostics-schema` feature, runtime changes emit secret-free
-//! schema-v1 `tracing` events on the `swbt::diagnostics` target. Featureless
-//! builds do not compile that stable event emitter. Accepted-report counters
+//! schema-v1 `tracing` events on the `swbt::diagnostics` target. Builds without
+//! that feature do not compile the stable event emitter. Accepted-report counters
 //! indicate transport acceptance, not radio delivery or console behavior.
 //! Platform support and hardware verification limits are documented in
 //! `docs/platform-support.md`.

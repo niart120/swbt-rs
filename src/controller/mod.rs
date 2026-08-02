@@ -162,8 +162,8 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
 
     /// Opens the configured controller transport.
     ///
-    /// With the `bumble` feature, this operation opens and initializes the
-    /// selected Bluetooth HCI adapter and starts the owned worker. A persistent
+    /// Opens and initializes the selected Bluetooth HCI adapter through the
+    /// Bumble backend, then starts the owned worker. A persistent
     /// explicit-local-address profile first applies and reads back its volatile
     /// CSR adapter identity, then verifies the same address after normal HCI
     /// initialization. Repeated calls while that runtime is open succeed
@@ -171,9 +171,9 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     ///
     /// # Errors
     ///
-    /// Without the `bumble` feature, returns
-    /// [`ErrorKind::UnsupportedCapability`] before transport side effects.
-    /// Returns [`ErrorKind::AdapterIdentityRecoveryRequired`] when an explicit
+    /// Returns [`ErrorKind::TransportOpen`] when the selected adapter cannot be
+    /// opened or initialized. Returns
+    /// [`ErrorKind::AdapterIdentityRecoveryRequired`] when an explicit
     /// identity write started but the final adapter state could not be
     /// verified; physically power-cycle the USB adapter and verify its
     /// original identity before retrying.
@@ -489,22 +489,19 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     /// Attempts to create a new pairing profile and return a paired controller.
     ///
     /// Builder settings, the required profile path, and the requested identity
-    /// are validated without inspecting the target. With the `bumble` feature,
-    /// one create-new attempt persists a valid empty profile without replacing
-    /// an existing file, directory, or symbolic link. Persistence completes
-    /// before the selected adapter is opened, then pairing waits for normal-input
-    /// readiness. Without `bumble`, the method returns an unsupported-capability
-    /// error before profile filesystem I/O.
+    /// are validated without inspecting the target. One create-new attempt
+    /// persists a valid empty profile without replacing an existing file,
+    /// directory, or symbolic link. Persistence completes
+    /// before the selected adapter is opened through the Bumble backend, then
+    /// pairing waits for normal-input readiness.
     ///
     /// # Errors
     ///
     /// Returns [`crate::ErrorKind::InvalidInput`] for invalid builder settings
     /// or a pairing timeout above `u64::MAX` nanoseconds,
     /// [`crate::ErrorKind::ProfilePathRequired`] when no target path was
-    /// selected, [`crate::ErrorKind::UnsupportedCapability`] for an unsupported
-    /// identity or unavailable Bluetooth transport,
-    /// [`crate::ErrorKind::ProfileAlreadyExists`] when the feature-enabled
-    /// create-new attempt finds an existing target,
+    /// selected, [`crate::ErrorKind::ProfileAlreadyExists`] when the create-new
+    /// attempt finds an existing target,
     /// [`crate::ErrorKind::TransportOpen`] when the adapter cannot be
     /// opened and initialized,
     /// [`crate::ErrorKind::AdapterIdentityRecoveryRequired`] when an explicit

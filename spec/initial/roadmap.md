@@ -179,7 +179,7 @@ M9 portability / release
 - malformed parser corpus
 - subcommand `0x02/03/04/08/10/21/30/40/48`
 - SPI policy
-- protocol moduleのfilesystem/thread/Bumble非依存
+- protocol moduleを`swbt-core`に置き、filesystem/thread/Bumble非依存
 
 ### 4.3 exit criteria
 
@@ -190,7 +190,7 @@ M9 portability / release
 - `ButtonKind`の数値をwire offsetへ直接使用しない
 - Stick/IMU変換一致
 - malformed inputでpanicなし
-- protocol testがBumbleをlinkしない
+- `swbt-core`のprotocol testがBumbleをlinkしない
 - Miri selected通過
 - source audit fixture commit済み
 
@@ -540,7 +540,8 @@ CLIは`ControllerKind`をparseし、入口で`run::<M>()`へ分岐する。
 
 ## 13. explicit local address milestone
 
-M6以降の独立milestone。完了まで`UnsupportedCapability`。
+M6以降の独立milestoneとして完了済み。CSR8510 A10の揮発書換え、readback、失敗時の
+`AdapterIdentityRecoveryRequired`を公開契約とする。
 
 - identity backend
 - CSR semantics

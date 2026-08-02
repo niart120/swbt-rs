@@ -1,6 +1,25 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
-//! Backend-independent values and protocol core for `swbt`.
+//! Backend-independent values for `swbt`.
+//!
+//! Use this package for model-valid input, pairing-profile data, and shared
+//! errors without linking the Bluetooth runtime, USB support, or a profile file
+//! writer. The `swbt-rs` package re-exports these public values as the same Rust
+//! types and adds controller runtime operations. The protocol engine in this
+//! package is runtime support and is not a stable user-facing API.
+//!
+//! # Example
+//!
+//! ```
+//! use swbt_core::{ButtonKind, ProButton, ProInputState, Stick};
+//!
+//! let state = ProInputState::neutral()
+//!     .with_buttons([ProButton::A])
+//!     .with_left_stick(Stick::up(0.5)?);
+//! let pressed = state.buttons().map(|button| button.kind()).collect::<Vec<_>>();
+//! assert_eq!(pressed, [ButtonKind::A]);
+//! # Ok::<(), swbt_core::Error>(())
+//! ```
 
 pub mod error;
 pub mod input;

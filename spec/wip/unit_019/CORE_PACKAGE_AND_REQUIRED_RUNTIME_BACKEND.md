@@ -95,7 +95,7 @@ fallback 分岐と `dead_code` 抑制を削除し、backend 非依存 build の�
 | refactor-done | T01 `swbt-core` から model-valid input と profile 値を直接利用でき、`swbt` の既存 path が同一型を再公開する | behavior / compatibility | package integration | profile fixture と public contract test を core package へ移した |
 | refactor-done | T02 pure protocol の全 unit/fixture test が `swbt-core` で同じ bytes と error を返し、`swbt` runtime が一つの protocol 実装を利用する | regression / architecture | core unit / runtime build | raw protocol 面は rustdoc 非表示 |
 | refactor-done | T03 default/no-default の `swbt` が常に Bumble backend を含み、不正 selector は `TransportOpen`、既存 profile target は `ProfileAlreadyExists` となる | behavior / package | public integration / Cargo graph | `bumble` cfg、fallback、dead-code 抑制を削除した |
-| todo | T04 core/runtime/tool の feature metadata、CI、README、rustdoc、初期仕様、package archive が同じ package 境界を示す | regression / docs | metadata / docs / package | publish と version 更新は行わない |
+| refactor-done | T04 core/runtime/tool の feature metadata、CI、README、rustdoc、初期仕様、package archive が同じ package 境界を示す | regression / docs | metadata / docs / package | core archiveは検証済み。root archive生成はcore公開後へ先送り |
 
 status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`deferred` を使う。
 
@@ -112,7 +112,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | red | T03 | no-defaultでproduction backendへ到達する公開testはactual `UnsupportedCapability` / expected `TransportOpen` で失敗した。直接依存graphにもBumble/rusb/tracingが存在しなかった |
 | green | T03 | Bumble/rusb/tracingを必須依存にし、no-default公開backend testは`TransportOpen`で成功した。default/no-defaultのroot全target testは各185 library passed/1 ignored、public runtime backend 4 passed。all-featureだけadapter実機5件をignoredで列挙した |
 | refactor-done | T03 | `bumble` feature、backend不在fallback test、77個のfeature-disabled `dead_code`抑制、全`cfg(feature = "bumble")`を削除した。tool manifestもfeature指定をやめ、workspace all-featureとroot no-default Clippy `-D warnings`が成功した |
-| pending | T04 | 未着手 |
+| red | T04 | 現行CIと`tools/check-library-features.ps1`はroot no-default graphからBumble/rusb/tracingが消える旧契約を検査し、README、公開rustdoc、初期仕様にも廃止した`bumble` featureとbackend無効時`UnsupportedCapability`の説明が残っていた |
+| green | T04 | feature検査script、core全target 82 unitと各integration、runtime no-default backend契約4件、workspace doctest 1件、core/root rustdoc `-D warnings`が成功した。metadataはcore通常依存2件、root feature 3件とmandatory backendを示した |
+| refactor-done | T04 | README、CHANGELOG、core README、公開rustdoc、初期仕様、CIを同じ境界へ同期した。core packageはMIT本文を含む56 files、287.9 KiBでverify成功。rootは通常/`--no-verify`とも未公開coreのregistry解決で失敗し、`cargo package --list`で収録対象だけを確認してrelease unitへ先送りした |
 
 ## 7. 設計メモ
 
@@ -126,15 +128,16 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
   backend 非依存値へ変換してから runtime adapter で `ClassicBond` と相互変換する。
 - `tracing` は adapter discovery/runtime の必須依存になるが、schema-v1 event の emit は引き続き
   `diagnostics-schema` で制御する。
-- root package の clean verification が未公開 `swbt-core` の registry 解決を要求する場合は、core package の
-  clean package gateとroot archive生成を行い、root verifyはrelease work-unitでcore公開後に実行する。
+- root package の clean verification と archive生成は、`--no-verify`でも未公開 `swbt-core` の
+  registry解決を要求する。core package gateとrootの収録対象一覧を先に確認し、root archive/verifyは
+  release work-unitでcore公開後に実行する。
 
 ## 8. 対象ファイル
 
 | path | change | 内容 |
 |---|---|---|
 | `Cargo.toml` / `Cargo.lock` | modify | workspace member、core dependency、Bumble必須化、feature整理 |
-| `crates/swbt-core/Cargo.toml` | new | publishable core package metadata |
+| `crates/swbt-core/Cargo.toml` / `README.md` / `LICENSE` | new | publishable core package metadataと利用入口 |
 | `crates/swbt-core/src/**` | new / move | error、input、model、profile、protocol、runtime support |
 | `crates/swbt-core/tests/**` | new / move | public value/profile/protocol contract と fixture |
 | `src/lib.rs` / `src/profile/**` / `src/protocol.rs` | modify | core再公開、runtime file store、private protocol bridge |
@@ -157,12 +160,13 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | `cargo test -p swbt-rs --all-targets --no-default-features` | success | T03: library 185 passed/1 ignored、runtime backend 4 passed、他integration成功。adapter実機targetは0 tests |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | pending | workspace lint |
 | `cargo +1.87.0 test --workspace --all-targets --all-features --locked` | pending | MSRV |
-| `cargo test --doc --workspace --all-features --locked` | pending | public examples |
-| `cargo rustdoc -p swbt-core --locked -- -D warnings` | pending | core rustdoc |
-| `cargo rustdoc -p swbt-rs --all-features --locked -- -D warnings` | pending | compatibility rustdoc |
+| `cargo test --doc --workspace --all-features --locked` | success | core/root crate example各1件passed、tool 0件 |
+| `cargo rustdoc -p swbt-core --locked -- -D warnings` | success | backend非依存の公開値とhidden runtime supportを検査 |
+| `cargo rustdoc -p swbt-rs --all-features --locked -- -D warnings` | success | core同一型再公開とmandatory backend説明を検査 |
 | `cargo build --workspace --all-features --locked` | pending | libraryとtool package |
-| `cargo package -p swbt-core --locked` | pending | core archive/verify |
-| `cargo package -p swbt-rs --locked` または未公開core向けarchive gate | pending | release順序制約を結果に記録 |
+| `cargo package -p swbt-core --locked --allow-dirty` | success | MIT本文を含む56 files、287.9 KiB、55.8 KiB compressed、archive verify成功 |
+| `cargo package -p swbt-rs --locked --allow-dirty` | expected failure | crates.ioに`swbt-core` 0.1.0が未公開のため解決不能。`--no-verify`も同じ段階で失敗 |
+| `cargo package -p swbt-rs --allow-dirty --list` | success | root packageの収録対象を確認。archive生成/verifyはcore公開後に再実行 |
 | `cargo fmt --all -- --check` | pending | workspace formatting |
 | `git diff --check` | pending | branch差分 |
 | hardware / USB / Switch UI | not run | package/feature境界変更であり対象外 |

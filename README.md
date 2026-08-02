@@ -10,17 +10,18 @@ reader lifecycle 修正などを加えた
 ## 現在の状態
 
 このリポジトリは M9 の portability / release readiness と、独立 milestone の明示 local Bluetooth
-address まで実装済みです。Cargo package は library target `swbt` を提供し、
-model-valid input、crate 内部の Switch HID protocol と runtime、公開 controller builder、
-descriptor-only adapter discovery を実装しています。
+address まで実装済みです。公開 Cargo package は backend 非依存の値と protocol を提供する
+`swbt-core` と、library target `swbt` を持つ runtime package `swbt-rs` です。`swbt-rs` は
+`swbt-core` の型を同一型として再公開し、公開 controller builder、Bumble runtime、
+descriptor-only adapter discovery を提供します。
 
-repository は公開 package `swbt-rs` と、`publish = false` の検証用 package `swbt-probe`、
-`swbt-hardware-runner` からなる Cargo workspace です。crates.io archive に検証用 package は
-含まれません。
+repository はこの二つの公開 package と、`publish = false` の検証用 package `swbt-probe`、
+`swbt-hardware-runner` からなる Cargo workspace です。crates.io archive に検証用 package は含まれません。
 
-`swbt-rs` 0.1.0 は crates.io の初回公開版です。`bumble` feature は crates.io の
+公開済みの `swbt-rs` 0.1.0 は crates.io の初回公開版です。この版の `bumble` feature は crates.io の
 `swbt-bumble-backend = "=0.1.1"` を使い、clean `cargo package --locked`、展開archiveのMSRV offline
 all/default test、license/SBOM、Windows限定構成のrollback rehearsalまで確認済みです。
+Unreleased では `swbt-core` を分離し、`swbt-rs` の Bumble backend を必須化しています。
 利用者向けの変更は[変更履歴](CHANGELOG.md)、脆弱性報告時の注意は
 [セキュリティ方針](SECURITY.md)に記録しています。
 
@@ -38,18 +39,20 @@ all/default test、license/SBOM、Windows限定構成のrollback rehearsalまで
   前 session の入力状態と stale event を持ち越しません。
 - `build()` 直後の Configured controller には open runtime がないため、入力操作は
   `ErrorKind::TransportClosed` を返します。
-- default feature は空です。`bumble` feature を有効にした場合だけ、
-  `swbt-bumble-backend = "=0.1.1"` と `rusb` を組み込みます。backend は reader shutdown と join、
+- `swbt-core` は model-valid input、profile 値、共有 error、pure protocol を提供し、通常依存は
+  `serde` と `serde_json` だけです。runtime、USB、profile file writer は含みません。
+- `swbt-rs` は default feature が空でも `swbt-bumble-backend = "=0.1.1"`、`rusb`、`tracing` を
+  常に組み込みます。default feature が空であることは、`diagnostics-schema` と実機向け
+  `adapter-tests` が無効であることだけを表します。backend は reader shutdown と join、
   ACL パケットが host queue を離れた状態の判定、CSR command の Vendor Event 応答待ちと
   応答を待たない command 送信を含みます。
-- `list_adapters()` は `bumble` feature で USB device/config/interface descriptor を読み、
+- `list_adapters()` は USB device/config/interface descriptor を読み、
   Bluetooth HCI class の candidate を返します。device open、driver detach、interface claim、
-  HCI command は行いません。feature 無効時は `ErrorKind::UnsupportedCapability` を返します。
-- `bumble` feature の公開 `open()` は USB HCI adapter を claim し、HCI 初期化と worker
+  HCI command は行いません。
+- 公開 `open()` は USB HCI adapter を claim し、HCI 初期化と worker
   起動を完了して lifecycle `Open` を返します。同じ controller に対する repeated open は
   adapter や worker を追加せず成功し、close 後は同じ controller を reopen できます。
-- feature 無効時の `open()` は `ErrorKind::UnsupportedCapability` を返します。
-  `pair()` は open runtime がなければ `ErrorKind::TransportClosed`、open runtime では
+- `pair()` は open runtime がなければ `ErrorKind::TransportClosed`、open runtime では
   bounded worker command として pairing window の開始から NX readiness まで待ちます。
   timeout と Ready 前の disconnect は成功に変換しません。
 - `reconnect()` は profile の保存済み Classic bond 1件を使い、失敗時に bond を削除したり
@@ -63,10 +66,9 @@ all/default test、license/SBOM、Windows限定構成のrollback rehearsalまで
   Windows 11 25H2、CSR8510 A10、Switch 2 system version 22.5.0
   （ユーザ報告）で実機 pairing、保存鍵からの reconnect、Periodic/Direct 入力を確認しています。
   他の OS、adapter、system version と長時間の信頼性は未検証です。
-- `bumble` feature の `create_profile()` はtargetを事前検査せず、create-newの一回で既存targetを
+- `create_profile()` はtargetを事前検査せず、create-newの一回で既存targetを
   置換せずにvalid empty envelopeをUSB openより先に保存し、pairingとNX readinessを待ちます。
-  feature無効時はprofile pathへ触れず`ErrorKind::UnsupportedCapability`を返します。profileは
-  swbt-python 0.6.0のClassic pairing形状だけを受け付け、unknown field、旧Rustのraw peer名、
+  profileはswbt-python 0.6.0のClassic pairing形状だけを受け付け、unknown field、旧Rustのraw peer名、
   LE key fieldを拒否します。pairing keyの更新は一つのlive writerがprofile全体をatomic replace
   して保存します。同一pathの複数process/controllerによる同時更新は非対応です。保存鍵を使う
   active/incoming reconnectはvirtual Classic
@@ -194,8 +196,9 @@ worker failureを記録し、profile path、Bluetooth address、link key、USB s
 chainは安定fieldへ含めません。受理数はtransportがreportを受理した回数であり、無線到達やSwitch画面の
 変化を証明しません。
 
-`swbt-probe` は repository checkout 専用の `publish = false` package で、`bumble` と
-`diagnostics-schema` を有効にします。主な入口は次のとおりです。
+`swbt-probe` は repository checkout 専用の `publish = false` package で、
+`diagnostics-schema` を有効にします。Bumble backend は `swbt-rs` に常に含まれます。
+主な入口は次のとおりです。
 
 ```powershell
 cargo run -p swbt-probe --locked -- adapters
@@ -232,19 +235,20 @@ cargo fmt --all --check
 cargo check --workspace --all-targets --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --all-features --locked
-cargo test -p swbt-rs --lib protocol:: --no-default-features --locked
+cargo test -p swbt-core --all-targets --locked
+cargo tree -p swbt-core --edges normal --locked
 cargo tree -p swbt-rs --no-default-features --edges normal --locked
-cargo test --doc -p swbt-rs --all-features --locked
-cargo build -p swbt-rs --all-features --locked
+cargo test --doc --workspace --all-features --locked
+cargo build --workspace --all-features --locked
 git diff --check
 ```
 
-`cargo tree -p swbt-rs --no-default-features --edges normal --locked` の直接依存は
-`atomic-write-file`、`serde`、`serde_json` で、`tracing`、Bumble、`rusb` を含みません。selected Miri は nightly の
-`miri` component を導入した環境で次の command を実行します。
+`swbt-core` の依存 graph は Bumble、`rusb`、`tracing`、`atomic-write-file` を含みません。
+`swbt-rs --no-default-features` は `swbt-core`、Bumble、`rusb`、`tracing` を含みます。selected Miri は
+nightly の `miri` component を導入した環境で次の command を実行します。
 
 ```powershell
-cargo +nightly miri test --lib --no-default-features --locked protocol::
+cargo +nightly miri test -p swbt-core --lib --locked protocol::
 ```
 
 現在利用できる model-valid input 型は

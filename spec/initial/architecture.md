@@ -121,125 +121,53 @@ pub struct ModelSpec {
 ## 5. crate / module構成
 
 ```text
+crates/swbt-core/
+  Cargo.toml
+  src/
+    lib.rs
+    error.rs
+    input/
+    model/
+    profile/
+    protocol/
+  tests/
+
 src/
   lib.rs
-
   adapter/
-    mod.rs
-    discovery.rs
-    selector.rs
-
-  model/
-    mod.rs
-    declaration.rs
-    capability.rs
-    spec.rs
-
-  reporting/
-    mod.rs
-    periodic.rs
-    direct.rs
-
-  controller/
-    mod.rs
-    controller.rs
-    builder.rs
-    aliases.rs
-
-  input/
-    mod.rs
-    button.rs
-    button_kind.rs
-    button_set.rs
-    stick.rs
-    imu.rs
-    state.rs
-
   connection/
-    mod.rs
-    options.rs
-    result.rs
-
+  controller/
   diagnostics/
-    mod.rs
-    event.rs
-    status.rs
-
-  protocol/
-    mod.rs
-    input_report.rs
-    imu_report.rs
-    output_report.rs
-    session.rs
-    handshake.rs
-    subcommand.rs
-    spi.rs
-    rumble.rs
-    profile.rs
-
   profile/
     mod.rs
-    document.rs
-    typed.rs
-    key_store.rs
-    local_address.rs
     store.rs
-
+  protocol.rs
+  reporting/
   runtime/
-    mod.rs
-    command.rs
-    worker.rs
-    lifecycle.rs
-    state_store.rs
-    report_sender.rs
-    report_scheduler.rs
-    reporting_policy.rs
-    status.rs
-    clock.rs
-
-  transport/
-    mod.rs
-    port.rs
-    event.rs
-    bumble/
-      mod.rs
-      open.rs
-      host.rs
-      device.rs
-      pairing.rs
-      sdp.rs
-      hid.rs
-      key_store.rs
-
-  error.rs
-
-  bin/
-    swbt-probe.rs
+    transport/
 
 tests/
-  common/
-  fixtures/
-  model_mapping/
-  protocol/
-  runtime/
-  transport_contract/
-  bumble_virtual/
-  profile_compat/
-  hardware/
+
+tools/
+  swbt-probe/
+  swbt-hardware-runner/
 ```
 
 compiler UI test専用の`tests/ui/`は作らない。
 
-公開moduleは`adapter`、`connection`、`controller`、`diagnostics`、`input`、`model`、`profile`、`reporting`、`error`に限定する。`protocol`、`runtime`、`transport`はcrate-privateとする。
+`swbt-core`は`error`、`input`、`model`、`profile`を公開する。`swbt-rs`はそれらを同一型として
+再公開し、`adapter`、`connection`、`controller`、`diagnostics`、`reporting`を加える。
+protocol engineはcoreに一つだけ置き、rustdoc非表示のruntime support境界からrootのprivate bridgeへ
+渡す。runtimeとtransportは`swbt-rs`のcrate-privateとする。
 
 ## 6. 依存方向
 
 ```text
 controller<M, R>
-  → model
+  → swbt-core::model
   → reporting
-  → input<M>
-  → profile<M>
+  → swbt-core::input<M>
+  → swbt-core::profile<M>
   → runtime<M, R>
   → error
 
@@ -252,26 +180,27 @@ runtime<M, R>
   → transport::port
   → error
 
-protocol<M>
-  → model::ModelSpec
-  → input<M>
-  → error
+swbt-core::protocol<M>
+  → swbt-core::model::ModelSpec
+  → swbt-core::input<M>
+  → swbt-core::error
 
-profile<M>
-  → model
+swbt-core::profile<M>
+  → swbt-core::model
   → profile DTO
-  → error
+  → swbt-core::error
 
 transport::bumble
   → transport::port
-  → neutral key-store interface
+  → swbt-coreのbackend非依存bond値
   → bumble-* crates
-  → error
+  → swbt-core::error
 ```
 
 禁止する依存:
 
-- `input`からBumble、transport、runtime
+- `swbt-core`からBumble、USB、transport、runtime、profile file writer
+- `input`からprotocol、Bumble、transport、runtime
 - `ButtonKind` discriminantから暗黙にwire byte / bitを導くこと
 - profile DTOからpublic controller aliasへ依存すること
 - controllerから`transport::bumble` concrete typeへ依存すること
@@ -323,7 +252,7 @@ ControllerBuilder<M, R>::create_profile(options)
 - pairing failureでもempty envelopeは残す
 - failure時は内部controllerをcleanupし、partial objectは返さない
 - target existenceは事前検査せず、create-newの競合だけを`ProfileAlreadyExists`にする
-- `bumble` feature無効時はprofile filesystem I/Oより先に`UnsupportedCapability`
+- runtime packageはBumble backendを常に含み、backend非依存のprofile値と検証は`swbt-core`が所有する
 
 `Controller<M, R>`に`create_profile()` methodは置かない。existing empty profileからのpairing再試行は`build()`→`open()`→`pair()`を使う。
 

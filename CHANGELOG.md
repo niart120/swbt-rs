@@ -8,13 +8,19 @@
   `swbt-rs` archive から検証用 CLI、実機操作、専用 test を除外した。repository checkout では
   `cargo run -p swbt-probe -- ...` と、三つの scenario を持つ
   `cargo run -p swbt-hardware-runner -- <scenario> ...` を使う。
-- 安定 diagnostics schema を `diagnostics-schema` feature の明示選択に変更した。feature なしの
-  library dependency graph は `tracing` を含まず、`GamepadStatus` は引き続き利用できる。
+- 安定 diagnostics schema を `diagnostics-schema` feature の明示選択に変更した。この feature は
+  schema v1 event emitter だけを制御し、`GamepadStatus` は引き続き利用できる。
 - 公開 `ErrorKind::Trace` を削除し、trace の作成・subscriber・書き込み失敗を `swbt-probe`
   内部 error へ移した。この削除は source 非互換なので、次の公開版は 0.2.0 以降とする。
 - `try_reconnect()`、`try_connect()`、`ConnectionResult`、`ConnectionStatus` を削除した。
   接続成功は `reconnect()` / `connect()` の戻り値、回復判断可能な失敗は `Error::kind()` の
   `NoBond`、`ConnectionTimeout`、`ConnectionFailed` で扱う。この削除も source 非互換である。
+- backend 非依存の model、input、profile、pure protocol を公開 package `swbt-core` へ分離した。
+  `swbt-rs` は既存の crate-root と module path から core 型を同一型として再公開する。runtime が
+  不要な利用者は `swbt-core` を直接依存へ追加できる。
+- `swbt-rs` の `bumble` feature を削除し、`swbt-bumble-backend`、`rusb`、`tracing` を必須依存にした。
+  `--no-default-features` でも runtime backend は含まれる。`features = ["bumble"]` を指定していた
+  利用者はその指定を削除する必要がある。この変更は source と Cargo feature の両方で非互換である。
 
 ## 0.1.0 - 2026-08-02
 
