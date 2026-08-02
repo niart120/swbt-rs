@@ -11,6 +11,7 @@ use crate::{
     reporting::{self, ReportingMode},
     runtime::{
         cleanup::CloseMode,
+        clock::fits_protocol_timestamp,
         error_map::{map_command_error, map_enqueue_error, map_response_error, map_worker_outcome},
         status::{StatusPublisher, status_projection},
         worker::RuntimeCommand,
@@ -114,6 +115,7 @@ impl<M: ControllerModel, R: ReportingMode> ControllerRuntime<M, R> {
     }
 
     pub(super) fn pair(&mut self, timeout: Duration) -> crate::Result<()> {
+        validate_connection_timeout(timeout)?;
         let response = self
             .owner
             .try_enqueue(RuntimeCommand::Pair { timeout })
@@ -125,6 +127,7 @@ impl<M: ControllerModel, R: ReportingMode> ControllerRuntime<M, R> {
     }
 
     pub(super) fn reconnect(&mut self, timeout: Duration) -> crate::Result<()> {
+        validate_connection_timeout(timeout)?;
         let response = self
             .owner
             .try_enqueue(RuntimeCommand::Reconnect { timeout })
@@ -214,10 +217,22 @@ pub(super) fn validate_target<M: ControllerModel, R: ReportingMode>(
         }
     }
 
+    validate_connection_timeout(options.pair_timeout)?;
+
     Ok(CreateProfilePlan {
         path: path.to_owned(),
         config,
         identity: options.identity,
         pair_timeout: options.pair_timeout,
     })
+}
+
+pub(super) fn validate_connection_timeout(timeout: Duration) -> crate::Result<()> {
+    if fits_protocol_timestamp(timeout) {
+        return Ok(());
+    }
+    Err(Error::new(
+        ErrorKind::InvalidInput,
+        "connection timeout exceeds the protocol timestamp range",
+    ))
 }

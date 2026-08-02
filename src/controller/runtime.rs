@@ -30,7 +30,7 @@ use crate::{
     },
 };
 
-use super::create::with_cleanup_error;
+use super::create::{validate_connection_timeout, with_cleanup_error};
 #[cfg(feature = "bumble")]
 use crate::runtime::transport::{ProfileKeyStoreFactory, TransportConfig};
 #[cfg(feature = "bumble")]
@@ -241,6 +241,7 @@ where
     }
 
     pub(super) fn pair_to_ready(&mut self, pair_timeout: Duration) -> crate::Result<()> {
+        validate_connection_timeout(pair_timeout)?;
         let enqueue = self
             .owner
             .as_ref()

@@ -40,6 +40,11 @@ fn builder_and_path_failures_precede_create_planning() {
             adapter_default_options(Duration::from_secs(60)),
             ErrorKind::ProfilePathRequired,
         ),
+        (
+            ProController::builder("usb:0").profile_path("profiles/new.json"),
+            adapter_default_options(Duration::from_nanos(u64::MAX) + Duration::from_nanos(1)),
+            ErrorKind::InvalidInput,
+        ),
     ];
 
     for (builder, options, expected_kind) in cases {

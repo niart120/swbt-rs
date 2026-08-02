@@ -87,12 +87,6 @@ pub(crate) fn map_command_error(error: WorkerCommandError) -> Error {
             ErrorKind::WorkerFailed,
             "controller worker has entered a failed state",
         ),
-        WorkerCommandError::ClockOverflow => {
-            Error::new(ErrorKind::Internal, "worker monotonic clock overflowed")
-        }
-        WorkerCommandError::DeadlineOverflow => {
-            Error::new(ErrorKind::Internal, "worker operation deadline overflowed")
-        }
         WorkerCommandError::Disconnected => Error::new(
             ErrorKind::Internal,
             "an unclassified disconnect interrupted the operation",
@@ -294,10 +288,6 @@ fn map_delivery_error(error: CommandDeliveryError) -> Error {
 
 fn map_worker_core_error(error: WorkerCoreError) -> Error {
     match error {
-        WorkerCoreError::DeadlineOverflow => Error::new(
-            ErrorKind::WorkerFailed,
-            "controller worker deadline overflowed",
-        ),
         WorkerCoreError::InvalidLifecycle => Error::new(
             ErrorKind::WorkerFailed,
             "controller worker entered an invalid lifecycle state",

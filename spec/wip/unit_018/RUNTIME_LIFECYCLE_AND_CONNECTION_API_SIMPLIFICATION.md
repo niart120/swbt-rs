@@ -93,7 +93,7 @@ connection command error を実際の実行経路に合わせて縮小する。�
 |---|---|---|---|---|
 | refactor-done | T01 open 済み transport から始まる worker が公開 `Open→Connecting→Ready→Open→Closing→Closed` を維持し、failure cleanup 後の公開 status は `Failed` のままになる | regression / characterization | runtime unit / integration | internal `Configured`、`opening`、同一 worker reopen を除去した |
 | refactor-done | T02 session ID が `u64::MAX` の次に 1 へ wrap し、wrap 前 session の event を current session event として受理しない | edge | runtime unit | `SessionError` と上位 error variant を除去した |
-| todo | T03 表現不能な caller timeout は transport 副作用前に `InvalidInput` となり、長時間稼働を模した clock projection は専用 overflow errorなしで monotonic timestamp を飽和する | edge / regression | controller/runtime unit | clock/deadline errorを共通 helper と入力境界へ集約する |
+| refactor-done | T03 表現不能な caller timeout は transport 副作用前に `InvalidInput` となり、長時間稼働を模した clock projection は専用 overflow errorなしで monotonic timestamp を飽和する | edge / regression | controller/runtime unit | clock/deadline errorを共通 helper と入力境界へ集約した |
 | todo | T04 pair/reconnect が共通 connection failure を通っても no-bond、timeout、pre-ready disconnect、protocol/worker failure の公開 `ErrorKind` と source を維持する | regression | runtime/error unit / integration | PairingError/ReconnectError の重複を除去する |
 | todo | T05 公開接続面が `pair`、`reconnect`、`connect -> Result<ConnectionPath, Error>` に一本化され、README、rustdoc、初期仕様、移行記述、package archive が同じ API を示す | behavior / regression | public API / docs / package | compile-fail fixture は追加せず、残す API の integration test、rustdoc、package gateで確認する |
 
@@ -109,6 +109,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | red | T02 | `last_issued = u64::MAX` の session から次 session を開始する test を追加した。focused test は `SessionError::IdExhausted` で失敗した |
 | green | T02 | session ID を 0 を飛ばす wrapping increment に変更した。最大 ID の event を保持したまま次 session が 1 になり、旧 event を拒否する focused test が成功した |
 | refactor-done | T02 | 到達不能になった `SessionError` と `WorkerCoreError::Session`、ID のみを包んでいた `ReadySession` を削除した。runtime 121件と all-feature library Clippy が成功した |
+| red | T03 | `u64` ナノ秒を超える timeout を pair に渡す公開 test は `InvalidInput` ではなく `ConnectionFailed` となり、transport 側まで到達した。clock helper の飽和 test は helper 未定義で compile error になった |
+| green | T03 | `pair`、`reconnect`、profile 作成の timeout を公開命令や profile I/O より前に検査した。共通 clock helper は protocol timestamp と `Duration` deadline を上限で飽和させ、focused test 2件が成功した |
+| refactor-done | T03 | handshake、周期送信、Direct/Periodic tap、cleanup の時刻変換を共通 helper に揃え、`ClockOverflow` と worker/direct の重複 deadline variant を削除した。library 267件と all-feature library Clippy が成功した |
 
 ## 7. 設計メモ
 
@@ -148,6 +151,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | `cargo test -p swbt-rs --lib runtime:: --all-features --locked` | success | T01: 120 passed |
 | `cargo test -p swbt-rs --lib runtime::session::tests::session_id_wraps_to_one_and_rejects_the_previous_max_session --all-features --locked` | success | T02: 1 passed。RED では `SessionError::IdExhausted` で失敗、GREEN で成功 |
 | `cargo test -p swbt-rs --lib runtime:: --all-features --locked` | success | T02: 121 passed |
+| `cargo test -p swbt-rs --lib runtime::clock::tests::protocol_clock_saturates_after_u64_nanoseconds_without_deadline_overflow --all-features --locked` | success | T03: 1 passed。RED は helper 未定義で compile error |
+| `cargo test -p swbt-rs --lib controller::runtime_tests::public_connection_rejects_timeout_outside_protocol_range_before_transport_side_effects --all-features --locked` | success | T03: 1 passed。RED は actual `ConnectionFailed` / expected `InvalidInput` |
+| `cargo test -p swbt-rs --lib --all-features --locked` | success | T03: 267 passed, 1 ignored。ignored は手動 timing gate |
 | `cargo test -p swbt-rs --lib controller::runtime_tests --all-features --locked` | success | T01 baseline: 30 passed。T03-T05 後に再実行する |
 | `cargo test -p swbt-rs --lib runtime::error_map --all-features --locked` | not run | T04 |
 | `cargo fmt --all --check` | not run | final gate |

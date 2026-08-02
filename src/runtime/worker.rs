@@ -18,6 +18,7 @@ use crate::{
             CleanupContext, CleanupFailure, CleanupSequence, CloseCompletion, CloseMode,
             ExplicitCloseError,
         },
+        clock::{deadline_after, protocol_timestamp},
         connection::ObservedSubcommands,
         direct::{
             DirectTapContext, DirectTapError, DirectTapStep, DirectTapStimulus, PendingDirectTap,
@@ -236,8 +237,6 @@ pub(crate) enum WorkerCommandError {
     Reconnect(ReconnectError),
     Periodic(PeriodicError),
     Direct(DirectTapError),
-    ClockOverflow,
-    DeadlineOverflow,
     Shutdown,
     Disconnected,
 }
@@ -257,7 +256,6 @@ pub(crate) enum WorkerOperationError {
 
 #[derive(Debug)]
 pub(crate) enum WorkerCoreError {
-    DeadlineOverflow,
     InvalidLifecycle,
     Handshake(HandshakeError),
     Transport(TransportError),
@@ -295,7 +293,6 @@ enum ConnectionAttemptFailure {
 impl WorkerCoreError {
     pub(crate) fn status_message(&self) -> &'static str {
         match self {
-            Self::DeadlineOverflow => "worker deadline overflowed",
             Self::InvalidLifecycle => "worker lifecycle invariant failed",
             Self::Handshake(_) => "worker handshake failed",
             Self::Transport(error) if error.kind() == TransportErrorKind::InvalidKeyStore => {
@@ -662,9 +659,7 @@ where
         now: Duration,
         timeout: Duration,
     ) -> Result<ConnectionSessionId, WorkerCoreError> {
-        let operation_deadline = now
-            .checked_add(timeout)
-            .ok_or(WorkerCoreError::DeadlineOverflow)?;
+        let operation_deadline = deadline_after(now, timeout);
         if !self.lifecycle.begin_connection() {
             return Err(WorkerCoreError::InvalidLifecycle);
         }
@@ -1151,7 +1146,7 @@ where
             },
         );
         R::stop_session(&mut self.reporting);
-        let now_ns = u64::try_from(now.as_nanos()).unwrap_or(u64::MAX);
+        let now_ns = protocol_timestamp(now);
         let cleanup = match request {
             ShutdownRequest::Explicit(mode) => {
                 CleanupSequence::new(mode, EXPLICIT_CLOSE_DRAIN_TIMEOUT)
@@ -1204,7 +1199,7 @@ where
             CleanupSequence::new(CloseMode::WithoutNeutral, EXPLICIT_CLOSE_DRAIN_TIMEOUT).run(
                 CleanupContext {
                     connected: self.connected,
-                    now_ns: u64::try_from(now.as_nanos()).unwrap_or(u64::MAX),
+                    now_ns: protocol_timestamp(now),
                     lifecycle: &mut self.lifecycle,
                     protocol: &self.protocol,
                     sender: &mut self.sender,
@@ -1394,12 +1389,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
                         )));
                     }
                 };
-                let (now_ns, release_at) = match periodic_tap_times(context.now, plan.2) {
-                    Ok(times) => times,
-                    Err(error) => {
-                        return WorkerCommandProgress::Complete(Err(error));
-                    }
-                };
+                let (now_ns, release_at) = periodic_tap_times(context.now, plan.2);
                 match begin_periodic_tap(
                     context.ready,
                     plan,
@@ -1494,15 +1484,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
                 .expect("checked pending Periodic tap");
             due.actions += 1;
             due.immediate = true;
-            let now_ns = match u64::try_from(now.as_nanos()) {
-                Ok(now_ns) => now_ns,
-                Err(_) => {
-                    due.completion = Some(WorkerCommandProgress::Complete(Err(
-                        WorkerCommandError::ClockOverflow,
-                    )));
-                    return due;
-                }
-            };
+            let now_ns = protocol_timestamp(now);
             due.completion = Some(WorkerCommandProgress::Complete(
                 pending
                     .tap
@@ -1566,16 +1548,9 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
     }
 }
 
-fn periodic_tap_times(
-    now: Duration,
-    duration: Duration,
-) -> Result<(u64, Duration), WorkerCommandError> {
-    let release_at = now
-        .checked_add(duration)
-        .ok_or(WorkerCommandError::DeadlineOverflow)?;
-    let now_ns = u64::try_from(now.as_nanos()).map_err(|_| WorkerCommandError::ClockOverflow)?;
-    u64::try_from(release_at.as_nanos()).map_err(|_| WorkerCommandError::ClockOverflow)?;
-    Ok((now_ns, release_at))
+fn periodic_tap_times(now: Duration, duration: Duration) -> (u64, Duration) {
+    let release_at = deadline_after(now, duration);
+    (protocol_timestamp(now), release_at)
 }
 
 impl<M: ControllerModel> WorkerReporting<M> for Direct {
@@ -1845,12 +1820,7 @@ fn complete_direct_send<M: ControllerModel>(
             DirectTapError::NotReady,
         )));
     }
-    let now_ns = match u64::try_from(context.now.as_nanos()) {
-        Ok(now_ns) => now_ns,
-        Err(_) => {
-            return WorkerCommandProgress::Complete(Err(WorkerCommandError::ClockOverflow));
-        }
-    };
+    let now_ns = protocol_timestamp(context.now);
     WorkerCommandProgress::Complete(
         send_direct(
             candidate,
@@ -3552,51 +3522,17 @@ mod tests {
     }
 
     #[test]
-    fn periodic_tap_timing_limits_are_rejected_before_press() {
-        assert!(matches!(
+    fn periodic_tap_timing_saturates_internal_clock_boundaries() {
+        assert_eq!(
             periodic_tap_times(Duration::MAX, Duration::from_nanos(1)),
-            Err(WorkerCommandError::DeadlineOverflow)
-        ));
-        assert!(matches!(
-            periodic_tap_times(Duration::from_nanos(u64::MAX), Duration::from_nanos(1)),
-            Err(WorkerCommandError::ClockOverflow)
-        ));
-
-        let mut harness = PeriodicHarness::ready();
-        harness.clock.set(Duration::MAX);
-        let timer_before = harness.worker.sender_timer();
-        let mut commands = TracedCommands::new(
-            [(
-                "tap-b",
-                PeriodicCommand::Common(CommonCommand::Tap {
-                    buttons: vec![ProButton::B],
-                    duration: Duration::from_nanos(1),
-                }),
-            )],
-            Arc::clone(&harness.trace),
+            (u64::MAX, Duration::MAX)
         );
-        let mut no_shutdown = ShutdownLatch::default();
-        lock(&harness.trace).clear();
-
-        let step = harness
-            .worker
-            .step(&harness.clock, &mut no_shutdown, &mut commands);
-
-        let WorkerStep::Continue(progress) = step else {
-            panic!("tap timing validation is a command error");
-        };
-        assert!(matches!(
-            progress.command_result,
-            Some(Err(WorkerCommandError::DeadlineOverflow))
-        ));
-        assert_eq!(commands.remaining(), 0);
-        assert!(!harness.worker.has_pending_reporting_command());
-        assert_eq!(harness.worker.sender_timer(), timer_before);
-        assert_eq!(harness.worker.input_snapshot(), InputState::neutral());
-        assert!(
-            !lock(&harness.trace)
-                .iter()
-                .any(|event| matches!(event, Trace::Send { .. }))
+        assert_eq!(
+            periodic_tap_times(Duration::from_nanos(u64::MAX), Duration::from_nanos(1)),
+            (
+                u64::MAX,
+                Duration::from_nanos(u64::MAX) + Duration::from_nanos(1)
+            )
         );
     }
 

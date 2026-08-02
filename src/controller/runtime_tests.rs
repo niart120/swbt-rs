@@ -358,6 +358,41 @@ fn public_pair_requires_open_runtime_and_reports_timeout_and_disconnect() {
 }
 
 #[test]
+fn public_connection_rejects_timeout_outside_protocol_range_before_transport_side_effects() {
+    let invalid_timeout = Duration::from_nanos(u64::MAX)
+        .checked_add(Duration::from_nanos(1))
+        .expect("one nanosecond beyond the protocol range fits Duration");
+    let (mut controller, control, operations) = open_public_connection_controller([
+        PublicPairScript::Disconnect,
+        PublicPairScript::Disconnect,
+    ]);
+
+    assert_eq!(
+        controller
+            .pair(invalid_timeout)
+            .expect_err("out-of-range pair timeout must be rejected")
+            .kind(),
+        ErrorKind::InvalidInput
+    );
+    assert_eq!(control.pairing_starts(), 0);
+    assert!(lock(&operations).is_empty());
+    assert_eq!(controller.status().lifecycle, LifecycleState::Open);
+
+    assert_eq!(
+        controller
+            .reconnect(invalid_timeout)
+            .expect_err("out-of-range reconnect timeout must be rejected")
+            .kind(),
+        ErrorKind::InvalidInput
+    );
+    assert!(lock(&operations).is_empty());
+    assert_eq!(controller.status().lifecycle, LifecycleState::Open);
+    controller
+        .close_without_neutral()
+        .expect("close runtime after rejected timeouts");
+}
+
+#[test]
 fn public_pair_preserves_profile_key_store_failure_category() {
     let (mut controller, control) =
         open_public_pair_controller([PublicPairScript::InvalidKeyStore]);

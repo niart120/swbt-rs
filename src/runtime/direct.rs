@@ -5,6 +5,7 @@ use crate::{
     model::ControllerModel,
     protocol::SwitchHidProtocol,
     runtime::{
+        clock::{deadline_after, protocol_timestamp},
         connection::ObservedSubcommands,
         output::{
             OutputHandling, OutputHandlingContext, OutputHandlingError, OutputObservation,
@@ -40,8 +41,6 @@ pub(crate) enum DirectTapInterruption {
 #[derive(Debug)]
 pub(crate) enum DirectTapError {
     NotReady,
-    DeadlineOverflow,
-    ClockOverflow,
     Transport(TransportError),
     Interrupted(DirectTapInterruption),
 }
@@ -56,8 +55,6 @@ impl fmt::Display for DirectTapError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotReady => formatter.write_str("direct input requires a ready runtime"),
-            Self::DeadlineOverflow => formatter.write_str("direct tap deadline overflowed"),
-            Self::ClockOverflow => formatter.write_str("monotonic clock exceeds nanosecond range"),
             Self::Transport(error) => write!(formatter, "direct transport error: {error}"),
             Self::Interrupted(DirectTapInterruption::Disconnected { reason }) => {
                 write!(formatter, "direct tap interrupted by disconnect {reason:?}")
@@ -73,10 +70,7 @@ impl StdError for DirectTapError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             Self::Transport(error) => Some(error),
-            Self::NotReady
-            | Self::DeadlineOverflow
-            | Self::ClockOverflow
-            | Self::Interrupted(_) => None,
+            Self::NotReady | Self::Interrupted(_) => None,
         }
     }
 }
@@ -125,7 +119,7 @@ impl<M: ControllerModel> PendingDirectTap<M> {
         sender: &mut ReportSender<M>,
         transport: &mut dyn TransportPort,
     ) -> Result<(), DirectTapError> {
-        let now_ns = monotonic_ns(now)?;
+        let now_ns = protocol_timestamp(now);
         send_candidate(self.released, now_ns, state, protocol, sender, transport)
             .map(|_acceptance| ())
             .map_err(DirectTapError::Transport)
@@ -212,20 +206,13 @@ pub(crate) fn begin_tap<M: ControllerModel>(
     }
 
     let (pressed, released, duration) = plan;
-    let release_at = started_at
-        .checked_add(duration)
-        .ok_or(DirectTapError::DeadlineOverflow)?;
-    let now_ns = monotonic_ns(started_at)?;
-    monotonic_ns(release_at)?;
+    let release_at = deadline_after(started_at, duration);
+    let now_ns = protocol_timestamp(started_at);
     send_candidate(pressed, now_ns, state, protocol, sender, transport)?;
     Ok(PendingDirectTap {
         released,
         release_at,
     })
-}
-
-fn monotonic_ns(now: Duration) -> Result<u64, DirectTapError> {
-    u64::try_from(now.as_nanos()).map_err(|_| DirectTapError::ClockOverflow)
 }
 
 #[cfg(test)]

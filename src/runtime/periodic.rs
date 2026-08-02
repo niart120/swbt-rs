@@ -5,6 +5,7 @@ use crate::{
     model::ControllerModel,
     protocol::SwitchHidProtocol,
     runtime::{
+        clock::protocol_timestamp,
         output::{OutputHandling, OutputHandlingError},
         scheduler::{ReportScheduler, SchedulerError, TickDecision},
         sender::ReportSender,
@@ -115,7 +116,6 @@ pub(crate) enum AutomaticInput {
 pub(crate) enum PeriodicError {
     NotReady,
     Scheduler(SchedulerError),
-    ClockOverflow,
     Transport {
         error: TransportError,
         later_terminal: Option<TransportError>,
@@ -142,7 +142,6 @@ impl fmt::Display for PeriodicError {
         match self {
             Self::NotReady => formatter.write_str("periodic input requires a ready runtime"),
             Self::Scheduler(error) => write!(formatter, "periodic scheduler error: {error}"),
-            Self::ClockOverflow => formatter.write_str("monotonic clock exceeds nanosecond range"),
             Self::Transport { error, .. } => {
                 write!(formatter, "periodic transport error: {error}")
             }
@@ -155,7 +154,6 @@ impl StdError for PeriodicError {
         match self {
             Self::NotReady => None,
             Self::Scheduler(error) => Some(error),
-            Self::ClockOverflow => None,
             Self::Transport { error, .. } => Some(error),
         }
     }
@@ -272,7 +270,7 @@ impl PeriodicPolicy {
             return Ok(AutomaticInput::Backpressured { skipped });
         }
         let snapshot = state.snapshot();
-        let now_ns = u64::try_from(now.as_nanos()).map_err(|_| PeriodicError::ClockOverflow)?;
+        let now_ns = protocol_timestamp(now);
         let acceptance = sender.send_input(protocol, &snapshot, now_ns, transport)?;
         Ok(AutomaticInput::Sent {
             acceptance,

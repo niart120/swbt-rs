@@ -1,4 +1,5 @@
 pub(crate) mod cleanup;
+pub(crate) mod clock;
 pub(crate) mod command;
 pub(crate) mod connection;
 pub(crate) mod direct;
