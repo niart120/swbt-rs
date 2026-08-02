@@ -580,7 +580,8 @@ Python `PairingKeys.to_dict()`とBumble Rustのstored型のfield / hex表現をc
 ## 16. profile persistence
 
 未知field拒否付きserde DTOはcontroller kind、identity、namespace、Classic bondを型付きで持つ。
-validation後は`PairingProfile<M>`。
+key-store namespaceとClassic `/P` peerのaddress部分はcanonical uppercaseだけを受理し、
+lowercase / mixed-caseは正規化せず`InvalidProfile`で拒否する。validation後は`PairingProfile<M>`。
 
 ```text
 JSON bytes
