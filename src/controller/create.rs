@@ -8,7 +8,7 @@ use crate::{
     error::{Error, ErrorKind},
     model::ControllerModel,
     profile::{
-        ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState, ProfileDocument,
+        PairingProfile, ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState,
     },
     reporting::{self, ReportingMode},
     runtime::{
@@ -19,7 +19,6 @@ use crate::{
 
 use super::{
     Controller,
-    build::read_typed_profile,
     config::{BuilderConfig, ControllerConfig},
 };
 
@@ -70,8 +69,8 @@ impl<M: ControllerModel, R: ReportingMode> BackendSupportedCreateProfilePlan<M, 
             identity,
             pair_timeout,
         } = self.plan;
-        let document = ProfileDocument::empty::<M>(identity);
-        let bytes = document.to_json_bytes()?;
+        let profile = PairingProfile::<M>::empty(identity);
+        let bytes = profile.to_json_bytes()?;
         store.create_new(&path, &bytes).map_err(|source| {
             let (kind, message) = if source.kind() == std::io::ErrorKind::AlreadyExists {
                 (
@@ -84,11 +83,10 @@ impl<M: ControllerModel, R: ReportingMode> BackendSupportedCreateProfilePlan<M, 
             Error::with_source(kind, message, source)
         })?;
 
-        let profile = read_typed_profile::<M>(store, &path)?;
         let config = config.finalize_with_profile(|configured_path| {
             debug_assert!(
                 configured_path == path,
-                "validated profile path changed before typed reopen"
+                "validated profile path changed before typed configuration"
             );
             Ok(profile)
         })?;

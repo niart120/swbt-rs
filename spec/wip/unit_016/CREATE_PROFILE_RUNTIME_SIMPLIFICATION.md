@@ -84,7 +84,20 @@
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | T01 create-profileが保存後のread capabilityを要求せず、保存bytesと同じ型付きmodel/identityをruntimeへ渡し、Ready ownerを一度だけ移譲する | new/regression | profile/controller/runtime integration | adapter-defaultとlocal identity、保存→open→pair順序、Drop一回性 |
+| green | T01 create-profileが保存後のread capabilityを要求せず、保存bytesと同じ型付きmodel/identityをruntimeへ渡し、Ready ownerを一度だけ移譲する | new/regression | profile/controller/runtime integration | adapter-defaultとlocal identity、保存→open→pair順序、Drop一回性 |
+
+### 6.1 TDD cycle evidence
+
+| phase | item | evidence |
+|---|---|---|
+| red | T01 | `FakeProfileStore`から`ProfileReadPort`を外し、期待イベントから`ReadBack`を削除した。`cargo test -p swbt-rs --lib controller::create_profile_tests --all-features --locked`は、`ProfileCreatePort`が`ProfileReadPort`を要求する`E0277`で失敗した |
+| green | T01 | `ProfileCreatePort`をtarget inspectionとcreate-newだけへ狭め、crate-privateなtyped empty profileを保存bytesとruntime configへ移譲した。同じcommandで13 tests passed。adapter-default/local identity、保存→open→pair→Ready、失敗cleanup、controller Drop一回性を確認した |
+
+Tidy decision:
+
+- classification: mixed
+- action: split
+- reason: read-back削除は観測可能なbehavior changeとして先にcommitし、`PairDriver`、runtime backend/attempt、`ControllerRuntimePort`の削除は同じgreen baselineを使うstructure changeとして後続commitへ分ける
 
 T01をgreenにした後、既存のcreate-profile/runtime契約テストをgreen baselineとして次の構造整理を`refactor-after-green`で分割する。
 
@@ -125,6 +138,11 @@ T01をgreenにした後、既存のcreate-profile/runtime契約テストをgreen
 | `cargo test -p swbt-rs --all-targets --no-default-features --locked` | success | 着手前baseline。root lib 253 passed / 1 ignored |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | 着手前baseline |
 | `rustup run 1.87.0 cargo check --workspace --all-targets --all-features --locked` | success | 着手前MSRV baseline |
+| `cargo test -p swbt-rs --lib controller::create_profile_tests --all-features --locked` | success | T01 green。13 passed |
+| `cargo test -p swbt-rs --lib controller::create_profile_tests --no-default-features --locked` | success | T01 featureなし。10 passed |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | T01 commit前gate |
+| `cargo fmt --all --check` | success | T01 commit前gate |
+| `git diff --check` | success | T01 commit前gate |
 
 ## 10. 先送り事項
 

@@ -21,7 +21,7 @@ use crate::{
     model::Pro,
     profile::{
         ControllerColors, ControllerKind, PairingProfile, ProfileCreatePort,
-        ProfileCreateTargetPort, ProfileCreateTargetState, ProfileDocument, ProfileReadPort, Rgb24,
+        ProfileCreateTargetPort, ProfileCreateTargetState, ProfileDocument, Rgb24,
     },
     reporting::{Periodic, ReportingKind},
     runtime::status::StatusPublisher,
@@ -181,7 +181,6 @@ enum CreateEvent {
     InspectTarget(PathBuf),
     CheckBackendCapability,
     CreateNew(PathBuf),
-    ReadBack(PathBuf),
     Open {
         adapter: AdapterSelector,
         controller_kind: ControllerKind,
@@ -227,15 +226,6 @@ impl ProfileCreateTargetPort for FakeProfileStore {
         } else {
             ProfileCreateTargetState::Absent
         })
-    }
-}
-
-impl ProfileReadPort for FakeProfileStore {
-    fn read(&mut self, path: &Path) -> io::Result<Vec<u8>> {
-        lock(&self.events).push(CreateEvent::ReadBack(path.to_owned()));
-        self.bytes
-            .clone()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "profile is absent"))
     }
 }
 
@@ -330,7 +320,7 @@ impl CreateProfileRuntimeBackend<Pro, Periodic> for FakeRuntimeBackend {
 impl CreateProfileRuntimeAttempt<Pro, Periodic> for FakeRuntimeAttempt {
     fn open(&mut self, config: &ControllerConfig<Pro, Periodic>) -> crate::Result<()> {
         let ProfileConfig::Persistent { profile, .. } = &config.profile else {
-            panic!("create-profile runtime must receive the reopened profile");
+            panic!("create-profile runtime must receive the generated typed profile");
         };
         assert_eq!(profile.controller_kind(), ControllerKind::Pro);
         lock(&self.events).push(CreateEvent::Open {
@@ -450,7 +440,7 @@ impl Drop for RuntimeLease {
 }
 
 #[test]
-fn create_profile_persists_and_reopens_before_open_then_returns_ready_controller() {
+fn create_profile_persists_typed_profile_before_open_then_returns_ready_controller() {
     let path = PathBuf::from("profiles/new-pro.json");
     let colors = ControllerColors::new(
         Rgb24::new(0x01, 0x02, 0x03),
@@ -482,7 +472,6 @@ fn create_profile_persists_and_reopens_before_open_then_returns_ready_controller
             CreateEvent::InspectTarget(path.clone()),
             CreateEvent::CheckBackendCapability,
             CreateEvent::CreateNew(path.clone()),
-            CreateEvent::ReadBack(path.clone()),
             CreateEvent::Open {
                 adapter: AdapterSelector::from("usb:fake"),
                 controller_kind: ControllerKind::Pro,
@@ -523,7 +512,7 @@ fn create_profile_persists_and_reopens_before_open_then_returns_ready_controller
 
 #[test]
 #[cfg(feature = "bumble")]
-fn local_address_profile_is_created_and_reopened_before_runtime_open() {
+fn local_address_profile_is_created_and_typed_before_runtime_open() {
     let path = PathBuf::from("profiles/local-pro.json");
     let address = LocalAddress::parse("02:12:34:56:78:9a").expect("valid local address fixture");
     let pair_timeout = Duration::from_secs(30);
@@ -550,7 +539,6 @@ fn local_address_profile_is_created_and_reopened_before_runtime_open() {
             CreateEvent::InspectTarget(path.clone()),
             CreateEvent::CheckBackendCapability,
             CreateEvent::CreateNew(path.clone()),
-            CreateEvent::ReadBack(path),
             CreateEvent::Open {
                 adapter: AdapterSelector::from("usb:local"),
                 controller_kind: ControllerKind::Pro,
@@ -776,7 +764,6 @@ fn assert_runtime_failure_cleanup(
         CreateEvent::InspectTarget(path.clone()),
         CreateEvent::CheckBackendCapability,
         CreateEvent::CreateNew(path.clone()),
-        CreateEvent::ReadBack(path),
         CreateEvent::Open {
             adapter: AdapterSelector::from("usb:failure"),
             controller_kind: ControllerKind::Pro,

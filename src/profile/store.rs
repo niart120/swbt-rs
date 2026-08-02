@@ -107,7 +107,7 @@ pub(crate) trait ProfileCreateTargetPort {
     fn inspect(&mut self, path: &Path) -> io::Result<ProfileCreateTargetState>;
 }
 
-pub(crate) trait ProfileCreatePort: ProfileCreateTargetPort + ProfileReadPort {
+pub(crate) trait ProfileCreatePort: ProfileCreateTargetPort {
     /// Creates a new profile without replacing an existing target.
     ///
     /// An existing target must be reported as [`io::ErrorKind::AlreadyExists`].
