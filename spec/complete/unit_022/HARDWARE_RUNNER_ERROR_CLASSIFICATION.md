@@ -113,23 +113,50 @@ Tidy decision:
 | focused T01 unit tests | success | known kind tableとsecret-free unsuccessful eventを各1 passed |
 | `cargo test -p swbt-hardware-runner --all-targets --locked` | success | 変更後17 passed。3 scenario unitとCLI smokeを含む |
 | `cargo test -p swbt-probe --all-targets --locked` | success | 変更後19 passed。既存recovery-required分類testを含む |
-| `cargo test --workspace --all-targets --all-features --locked` | not run | completion gate |
-| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | completion gate |
-| `cargo fmt --all --check` | not run | completion gate |
-| `git diff --check` | not run | completion gate |
+| `cargo test --workspace --all-targets --all-features --locked` | success | workspace全target回帰。既存manual / hardware testのignoreを除き失敗なし |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | workspace lint gate、warningなし |
+| `cargo fmt --all --check` | success | Rust formatting |
+| `git diff --check` / `git diff --check main...HEAD` | success | working tree / branch差分のwhitespace検査 |
+| `cargo build --workspace --all-features --locked` | not applicable | Cargo metadata、feature、公開APIを変更しておらず、workspace testが全targetをbuildした |
+| hardware / USB / Switch UI | not applicable | package内の分類とJSON event生成だけの変更。synthetic `Error`を使うunit testで検証した |
 
 ## 10. 先送り事項
 
 - none
 
-## 11. チェックリスト
+## 11. Self Review
+
+### 11.1 Findings
+
+| severity | finding | evidence | disposition |
+|---|---|---|---|
+| none | Issue #32の分類、終了結果、秘密情報非出力を満たす | known kind table、failure/completion event unit test、3 scenario source review | 対応完了 |
+| none | 公開API、Cargo metadata、schema、公開文書への変更はない | `git diff main...HEAD` | 既存境界を維持 |
+| none | scope外のbackend、retry、power-cycle処理へ変更がない | branch差分3 files | 対象外を維持 |
+
+### 11.2 Review Gates
+
+| gate | result | evidence |
+|---|---|---|
+| Requirements / Scope | pass | Issue #32、対象範囲、対象外とbranch差分が一致 |
+| TDD / Tests | pass | T01のred / green / refactor記録、focused / package / workspace test成功 |
+| Static | pass | fmt、clippy、diff check成功 |
+| Package | not applicable | manifestと公開package behaviorの変更なし |
+| Rust API | pass | public item、error variant、所有権、async、feature、unsafeの変更なし |
+| Docs Quality | pass | `unit_022`に事実、未実行範囲、完了条件を記録。参照先存在と仮テキスト残りを確認 |
+| Integration Review | pass | 3 scenarioが共通emitterを使い、pro-periodic固有mappingも当該variantを共通分類へ渡す |
+
+対象範囲内に残るtest gapはない。実機でrecovery-required errorを再発生させる操作、USB power-cycle、
+Switch UI観測は製品backendを変更しない分類修正の対象外であり、実行していない。
+
+## 12. チェックリスト
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test Listを更新した
-- [ ] T01をred / green / refactor / commitした
-- [ ] 3 scenarioの共通分類を確認した
-- [ ] 秘密情報非出力とrelated semanticsを確認した
-- [ ] 検証結果または未実行理由を記録した
+- [x] T01をred / green / refactor / commitした
+- [x] 3 scenarioの共通分類を確認した
+- [x] 秘密情報非出力とrelated semanticsを確認した
+- [x] 検証結果または未実行理由を記録した
 - [x] package / release / public APIに触れないことを確認した
-- [ ] docs-quality-reviewとagentic-self-reviewを完了した
-- [ ] `spec/complete/unit_022`へ移動した
+- [x] docs-quality-reviewとagentic-self-reviewを完了した
+- [x] `spec/complete/unit_022`へ移動した
