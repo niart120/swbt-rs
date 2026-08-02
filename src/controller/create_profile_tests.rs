@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(feature = "bumble")]
 use crate::LocalAddress;
 use crate::{
     AdapterSelector, CreateProfileOptions, ProfileIdentity,
@@ -59,7 +58,6 @@ fn builder_and_path_failures_precede_create_planning() {
 }
 
 #[test]
-#[cfg(feature = "bumble")]
 fn local_address_is_retained_in_the_create_plan() {
     let path = PathBuf::from("profiles/local-address.json");
     let address = LocalAddress::parse("02:12:34:56:78:9a").expect("valid local address fixture");
@@ -211,7 +209,6 @@ fn create_profile_persists_typed_profile_before_requesting_runtime() {
 }
 
 #[test]
-#[cfg(feature = "bumble")]
 fn local_address_profile_is_created_and_typed_before_runtime_open() {
     let path = PathBuf::from("profiles/local-pro.json");
     let address = LocalAddress::parse("02:12:34:56:78:9a").expect("valid local address fixture");
@@ -293,7 +290,6 @@ fn create_new_race_preserves_competitor_and_stops_before_runtime_open() {
 }
 
 #[test]
-#[cfg(feature = "bumble")]
 fn local_address_create_new_race_preserves_competitor_before_runtime_open() {
     let path = PathBuf::from("profiles/raced-local-pro.json");
     let competitor = b"competitor-owned local profile bytes".to_vec();
@@ -369,7 +365,6 @@ fn assert_valid_empty_profile(bytes: &[u8]) {
     assert_eq!(profile.controller_kind(), ControllerKind::Pro);
 }
 
-#[cfg(feature = "bumble")]
 fn assert_valid_empty_local_profile(bytes: &[u8], address: LocalAddress) {
     let value: serde_json::Value =
         serde_json::from_slice(bytes).expect("created profile must remain valid JSON");

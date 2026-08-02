@@ -39,7 +39,6 @@ use crate::{
     },
 };
 
-#[cfg(feature = "bumble")]
 use crate::controller::ControllerBuilder;
 
 use super::runtime::{
@@ -47,9 +46,7 @@ use super::runtime::{
     open_runtime_owner,
 };
 
-#[cfg(feature = "bumble")]
 use super::runtime::RuntimeFactoryConfig;
-#[cfg(feature = "bumble")]
 use crate::profile::{LocalAddress, PairingProfile};
 
 const DEVICE_INFO_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
@@ -58,7 +55,6 @@ const PERIODIC_READY_AT: Duration = Duration::from_millis(300);
 const DEADLOCK_WATCHDOG: Duration = Duration::from_secs(2);
 const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
 
-#[cfg(feature = "bumble")]
 #[test]
 fn runtime_factory_projects_only_persistent_profiles_to_the_key_store() {
     let profile_bytes = ProfileDocument::empty_adapter_default::<crate::model::Pro>()
@@ -116,7 +112,6 @@ fn runtime_factory_projects_only_persistent_profiles_to_the_key_store() {
     );
 }
 
-#[cfg(feature = "bumble")]
 #[test]
 fn local_identity_projects_for_every_model_and_reporting_mode_without_debug_disclosure() {
     let address = LocalAddress::parse("02:12:34:56:78:9A").expect("valid local address fixture");
@@ -129,7 +124,6 @@ fn local_identity_projects_for_every_model_and_reporting_mode_without_debug_disc
     assert_runtime_identity(DirectJoyConR::builder("usb:0"), address);
 }
 
-#[cfg(feature = "bumble")]
 fn assert_runtime_identity<M, R>(builder: ControllerBuilder<M, R>, address: LocalAddress)
 where
     M: ControllerModel,
@@ -174,7 +168,6 @@ where
     );
 }
 
-#[cfg(feature = "bumble")]
 #[test]
 fn post_write_identity_uncertainty_maps_to_the_public_recovery_kind() {
     let controller = ProController::builder("usb:0")
@@ -208,33 +201,6 @@ fn post_write_identity_uncertainty_maps_to_the_public_recovery_kind() {
         transport.kind(),
         TransportErrorKind::AdapterIdentityRecoveryRequired
     );
-}
-
-#[cfg(not(feature = "bumble"))]
-#[test]
-fn unavailable_public_lifecycle_keeps_the_runtime_owner_uninstalled() {
-    let mut controller = ProController::builder("unavailable:unit")
-        .build()
-        .expect("build configured controller");
-
-    assert!(controller._runtime.is_none());
-    assert_eq!(
-        controller
-            .open()
-            .expect_err("open must be unavailable")
-            .kind(),
-        ErrorKind::UnsupportedCapability
-    );
-    assert!(controller._runtime.is_none());
-    assert_eq!(
-        controller
-            .pair(PAIR_TIMEOUT)
-            .expect_err("pair requires an open runtime")
-            .kind(),
-        ErrorKind::TransportClosed
-    );
-    assert!(controller._runtime.is_none());
-    assert_eq!(controller.status().lifecycle, LifecycleState::Configured);
 }
 
 #[test]
@@ -1046,7 +1012,6 @@ fn non_classic_capabilities_fail_before_worker_spawn_and_clean_up_transport() {
     assert_eq!(control.counters(), (1, 1, 1));
 }
 
-#[cfg(feature = "bumble")]
 #[test]
 fn backend_open_failures_map_to_sanitized_public_transport_errors() {
     let cases = [
@@ -1111,7 +1076,6 @@ fn backend_open_failures_map_to_sanitized_public_transport_errors() {
     }
 }
 
-#[cfg(feature = "bumble")]
 #[test]
 fn invalid_usb_selector_maps_through_public_open_without_disclosure() {
     let mut controller = ProController::builder("usb:0a12:0001/secret-serial[metadata]")
@@ -1680,12 +1644,10 @@ struct DropTrackingTransport {
     dropped: Arc<AtomicBool>,
 }
 
-#[cfg(feature = "bumble")]
 struct BumbleOpenErrorTransport {
     source: Option<BackendOpenFailure>,
 }
 
-#[cfg(feature = "bumble")]
 #[derive(Debug)]
 enum BackendOpenFailure {
     NotFound(&'static str),
@@ -1694,7 +1656,6 @@ enum BackendOpenFailure {
     Claim,
 }
 
-#[cfg(feature = "bumble")]
 impl std::fmt::Display for BackendOpenFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1706,10 +1667,8 @@ impl std::fmt::Display for BackendOpenFailure {
     }
 }
 
-#[cfg(feature = "bumble")]
 impl std::error::Error for BackendOpenFailure {}
 
-#[cfg(feature = "bumble")]
 struct IdentityRecoveryOpenTransport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1973,7 +1932,6 @@ impl TransportPort for PartiallyOpeningTransport {
     }
 }
 
-#[cfg(feature = "bumble")]
 impl TransportPort for BumbleOpenErrorTransport {
     fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         let source = self
@@ -2011,7 +1969,6 @@ impl TransportPort for BumbleOpenErrorTransport {
     }
 }
 
-#[cfg(feature = "bumble")]
 impl TransportPort for IdentityRecoveryOpenTransport {
     fn open(&mut self, _activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
         Err(TransportError::new(

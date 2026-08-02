@@ -23,7 +23,7 @@ use crate::{
         direct::{DirectTapError, DirectTapInterruption},
         error_map::{
             map_command_error, map_enqueue_error, map_join_error, map_response_error,
-            map_worker_failure, unsupported_capability,
+            map_worker_failure,
         },
         lifecycle::LifecycleCommandError,
         status::{status_projection, status_projection_with_emitter},
@@ -464,11 +464,6 @@ fn public_error_mapping_preserves_categories_sources_and_redaction() {
         map_join_error(WorkerJoinError::Panicked).kind(),
         ErrorKind::WorkerFailed
     );
-    assert_eq!(
-        unsupported_capability("Bluetooth transport").kind(),
-        ErrorKind::UnsupportedCapability
-    );
-
     let transport = TransportError::with_source(
         TransportErrorKind::SourceTerminated,
         Arc::new(SentinelSource),

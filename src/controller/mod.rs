@@ -367,19 +367,9 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     where
         R: WorkerReporting<M>,
     {
-        #[cfg(feature = "bumble")]
-        {
-            self.open_with(runtime::open_bumble_runtime::<M, R>)
-        }
-        #[cfg(not(feature = "bumble"))]
-        {
-            Err(crate::runtime::error_map::unsupported_capability(
-                "Bluetooth transport",
-            ))
-        }
+        self.open_with(runtime::open_bumble_runtime::<M, R>)
     }
 
-    #[cfg(any(test, feature = "bumble"))]
     fn open_with(
         &mut self,
         open: impl FnOnce(
@@ -482,13 +472,6 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
         create::validate_target(self.validate()?, options)
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds cannot construct a successful profile runtime backend"
-        )
-    )]
     fn create_profile_with(
         self,
         options: CreateProfileOptions,
@@ -539,16 +522,8 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     where
         R: WorkerReporting<M>,
     {
-        #[cfg(feature = "bumble")]
-        {
-            let mut store = FileProfileStore;
-            self.create_profile_with(options, &mut store, runtime::create_bumble_runtime::<M, R>)
-        }
-        #[cfg(not(feature = "bumble"))]
-        {
-            let plan = self.validate_create_profile(options)?;
-            create::reject_unavailable_backend(plan)
-        }
+        let mut store = FileProfileStore;
+        self.create_profile_with(options, &mut store, runtime::create_bumble_runtime::<M, R>)
     }
 
     /// Builds a configured controller without opening its adapter or starting a worker.

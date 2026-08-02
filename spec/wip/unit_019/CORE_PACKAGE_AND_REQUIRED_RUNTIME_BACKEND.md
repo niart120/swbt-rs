@@ -94,7 +94,7 @@ fallback 分岐と `dead_code` 抑制を削除し、backend 非依存 build の�
 |---|---|---|---|---|
 | refactor-done | T01 `swbt-core` から model-valid input と profile 値を直接利用でき、`swbt` の既存 path が同一型を再公開する | behavior / compatibility | package integration | profile fixture と public contract test を core package へ移した |
 | refactor-done | T02 pure protocol の全 unit/fixture test が `swbt-core` で同じ bytes と error を返し、`swbt` runtime が一つの protocol 実装を利用する | regression / architecture | core unit / runtime build | raw protocol 面は rustdoc 非表示 |
-| todo | T03 default/no-default の `swbt` が常に Bumble backend を含み、不正 selector は `TransportOpen`、既存 profile target は `ProfileAlreadyExists` となる | behavior / package | public integration / Cargo graph | `bumble` cfg、fallback、dead-code 抑制を削除する |
+| refactor-done | T03 default/no-default の `swbt` が常に Bumble backend を含み、不正 selector は `TransportOpen`、既存 profile target は `ProfileAlreadyExists` となる | behavior / package | public integration / Cargo graph | `bumble` cfg、fallback、dead-code 抑制を削除した |
 | todo | T04 core/runtime/tool の feature metadata、CI、README、rustdoc、初期仕様、package archive が同じ package 境界を示す | regression / docs | metadata / docs / package | publish と version 更新は行わない |
 
 status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`deferred` を使う。
@@ -109,7 +109,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | red | T02 | `cargo test -p swbt-core --test protocol_runtime_support` は `swbt_core::__private::SwitchHidProtocol` が存在しない E0432 で失敗し、protocol実装がrootに残る境界を検出した |
 | green | T02 | protocol source、65 protocol unit tests、fixture audit 2件、fixtureをcoreへ移した。core全体は82 unit testsとcore integrationが成功し、root runtime 185 testsも同じengine経由で成功した |
 | refactor-done | T02 | root `src/protocol.rs` をprivate re-export bridgeだけにし、source二重化を避けた。coreの通常依存はserde/serde_jsonだけで、Bumble、rusb、tracing、atomic writer不在。core/root対象Clippy `-D warnings`が成功した |
-| pending | T03 | 未着手 |
+| red | T03 | no-defaultでproduction backendへ到達する公開testはactual `UnsupportedCapability` / expected `TransportOpen` で失敗した。直接依存graphにもBumble/rusb/tracingが存在しなかった |
+| green | T03 | Bumble/rusb/tracingを必須依存にし、no-default公開backend testは`TransportOpen`で成功した。default/no-defaultのroot全target testは各185 library passed/1 ignored、public runtime backend 4 passed。all-featureだけadapter実機5件をignoredで列挙した |
+| refactor-done | T03 | `bumble` feature、backend不在fallback test、77個のfeature-disabled `dead_code`抑制、全`cfg(feature = "bumble")`を削除した。tool manifestもfeature指定をやめ、workspace all-featureとroot no-default Clippy `-D warnings`が成功した |
 | pending | T04 | 未着手 |
 
 ## 7. 設計メモ
@@ -151,7 +153,8 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | `cargo test -p swbt-core --all-targets` | success | T01: 17 unit、37 integration passed、manual profile 1 ignored。protocolはT02前 |
 | `cargo tree -p swbt-core --edges normal` | success | T02: direct dependencyはserde/serde_jsonのみ。Bumble、rusb、tracing、atomic writerなし |
 | `cargo test -p swbt-rs --test core_reexports --all-features` | success | T01: crate root/module pathの同一型再公開 2 passed |
-| `cargo test -p swbt-rs --all-targets --no-default-features --locked` | pending | mandatory backend path |
+| `cargo test -p swbt-rs --all-targets --all-features` | success | T03: library 185 passed/1 ignored、integration成功、adapter実機5 ignored |
+| `cargo test -p swbt-rs --all-targets --no-default-features` | success | T03: library 185 passed/1 ignored、runtime backend 4 passed、他integration成功。adapter実機targetは0 tests |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | pending | workspace lint |
 | `cargo +1.87.0 test --workspace --all-targets --all-features --locked` | pending | MSRV |
 | `cargo test --doc --workspace --all-features --locked` | pending | public examples |

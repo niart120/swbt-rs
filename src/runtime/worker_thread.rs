@@ -32,13 +32,6 @@ const DROP_COMPLETION_TIMEOUT: Duration = Duration::from_millis(100);
 
 pub(crate) struct WorkerSpawnError {
     source: io::Error,
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not map worker spawn cleanup"
-        )
-    )]
     cleanup: Option<CleanupFailure>,
 }
 
@@ -48,13 +41,6 @@ impl WorkerSpawnError {
     }
 
     #[must_use]
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not map worker spawn errors"
-        )
-    )]
     pub(crate) fn into_parts(self) -> (io::Error, Option<CleanupFailure>) {
         (self.source, self.cleanup)
     }
@@ -81,13 +67,6 @@ impl StdError for WorkerSpawnError {
 }
 
 #[derive(Debug)]
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not observe worker failure causes"
-    )
-)]
 pub(crate) enum WorkerFailureCause {
     Core(WorkerCoreError),
     Wait(WorkerWaitError),
@@ -97,25 +76,11 @@ pub(crate) enum WorkerFailureCause {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not join controller workers"
-    )
-)]
 pub(crate) enum WorkerJoinError {
     Panicked,
 }
 
 #[derive(Debug)]
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not produce worker outcomes"
-    )
-)]
 pub(crate) enum WorkerThreadOutcome {
     Closed {
         result: Result<(), ExplicitCloseError<WorkerJoinError>>,
@@ -142,13 +107,6 @@ struct WorkerCompletion {
     delivery_error: Option<CommandDeliveryError>,
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not wait for worker completion"
-    )
-)]
 enum WorkerCompletionWait {
     Completed(WorkerCompletion),
     TimedOut,
@@ -156,13 +114,6 @@ enum WorkerCompletionWait {
 }
 
 trait WorkerCompletionWaiter: Send {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not wait for worker completion"
-        )
-    )]
     fn wait(
         &mut self,
         completion: &Receiver<WorkerCompletion>,
@@ -170,13 +121,6 @@ trait WorkerCompletionWaiter: Send {
     ) -> WorkerCompletionWait;
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not wait for worker completion"
-    )
-)]
 struct ChannelWorkerCompletionWaiter;
 
 impl WorkerCompletionWaiter for ChannelWorkerCompletionWaiter {
@@ -196,24 +140,10 @@ impl WorkerCompletionWaiter for ChannelWorkerCompletionWaiter {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShutdownState {
     Running,
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not request worker shutdown"
-        )
-    )]
     Requested(ShutdownRequest),
     Taken,
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not construct priority shutdown channels"
-    )
-)]
 pub(crate) struct PriorityShutdownClient {
     state: Arc<Mutex<ShutdownState>>,
     activity: ActivityNotifier,
@@ -223,13 +153,6 @@ pub(crate) struct PriorityShutdownReceiver {
     state: Arc<Mutex<ShutdownState>>,
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not construct priority shutdown channels"
-    )
-)]
 pub(crate) fn priority_shutdown_channel(
     activity: ActivityNotifier,
 ) -> (PriorityShutdownClient, PriorityShutdownReceiver) {
@@ -244,13 +167,6 @@ pub(crate) fn priority_shutdown_channel(
 }
 
 impl PriorityShutdownClient {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not request worker shutdown"
-        )
-    )]
     fn request(&self, request: ShutdownRequest) -> bool {
         let mut state = self
             .state
@@ -304,13 +220,6 @@ impl PriorityShutdown for PriorityShutdownReceiver {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not own spawned workers"
-    )
-)]
 pub(crate) struct WorkerThread {
     completion: Receiver<WorkerCompletion>,
     join: JoinHandle<()>,
@@ -322,13 +231,6 @@ impl WorkerThread {
         self.join.is_finished()
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not finish spawned workers"
-        )
-    )]
     pub(crate) fn finish(self) -> WorkerThreadOutcome {
         let Self { completion, join } = self;
         let Ok(completion) = completion.recv() else {
@@ -337,13 +239,6 @@ impl WorkerThread {
         finish_completed(completion, join)
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not own spawned workers"
-        )
-    )]
     fn finish_with_waiter(
         self,
         waiter: &mut dyn WorkerCompletionWaiter,
@@ -392,13 +287,6 @@ fn finish_disconnected(join: JoinHandle<()>) -> WorkerThreadOutcome {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not own controller workers"
-    )
-)]
 pub(crate) struct WorkerOwner<C> {
     commands: Option<CommandClient<C>>,
     shutdown: PriorityShutdownClient,
@@ -408,13 +296,6 @@ pub(crate) struct WorkerOwner<C> {
 }
 
 impl<C> WorkerOwner<C> {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not construct controller worker owners"
-        )
-    )]
     #[cfg_attr(
         test,
         allow(
@@ -436,13 +317,6 @@ impl<C> WorkerOwner<C> {
         }
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not deliver worker commands"
-        )
-    )]
     pub(crate) fn try_enqueue(&self, command: C) -> Result<CommandResponse, CommandEnqueueError> {
         self.commands
             .as_ref()
@@ -455,13 +329,6 @@ impl<C> WorkerOwner<C> {
         self.thread.as_ref().is_some_and(WorkerThread::is_finished)
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not close worker owners"
-        )
-    )]
     pub(crate) fn finish_explicit(mut self, mode: CloseMode) -> WorkerThreadOutcome {
         drop(self.commands.take());
         let _ = self.shutdown.request(ShutdownRequest::explicit(mode));
@@ -471,13 +338,6 @@ impl<C> WorkerOwner<C> {
             .finish()
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not finish terminal worker owners"
-        )
-    )]
     pub(crate) fn finish_terminal(mut self) -> WorkerThreadOutcome {
         drop(self.commands.take());
         self.thread
@@ -517,13 +377,6 @@ impl<C> Drop for WorkerOwner<C> {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not spawn controller workers"
-    )
-)]
 pub(crate) fn spawn_worker_thread<M, R, C, S, W>(
     mut worker: WorkerCore<M, R>,
     clock: C,

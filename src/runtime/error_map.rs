@@ -15,13 +15,6 @@ use crate::{
     },
 };
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not enqueue worker commands"
-    )
-)]
 pub(crate) fn map_enqueue_error(error: CommandEnqueueError) -> Error {
     match error {
         CommandEnqueueError::InvariantViolation => Error::new(
@@ -35,13 +28,6 @@ pub(crate) fn map_enqueue_error(error: CommandEnqueueError) -> Error {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not await worker responses"
-    )
-)]
 pub(crate) fn map_response_error(error: CommandResponseError) -> Error {
     match error {
         CommandResponseError::WorkerFailed => Error::new(
@@ -51,13 +37,6 @@ pub(crate) fn map_response_error(error: CommandResponseError) -> Error {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not deliver worker commands"
-    )
-)]
 pub(crate) fn map_command_error(error: WorkerCommandError) -> Error {
     match error {
         WorkerCommandError::Input(error) => error,
@@ -173,13 +152,6 @@ fn map_connection_readiness_error(command: ConnectionCommandKind, error: Readine
     Error::with_source(kind, message, error)
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not join controller workers"
-    )
-)]
 pub(crate) fn map_join_error(error: WorkerJoinError) -> Error {
     match error {
         WorkerJoinError::Panicked => {
@@ -188,13 +160,6 @@ pub(crate) fn map_join_error(error: WorkerJoinError) -> Error {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not observe worker outcomes"
-    )
-)]
 pub(crate) fn map_worker_failure(cause: WorkerFailureCause) -> Error {
     match cause {
         WorkerFailureCause::Core(error) => map_worker_core_error(error),
@@ -213,13 +178,6 @@ pub(crate) fn map_worker_failure(cause: WorkerFailureCause) -> Error {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not consume worker outcomes"
-    )
-)]
 pub(crate) fn map_worker_outcome(outcome: WorkerThreadOutcome) -> crate::Result<()> {
     match outcome {
         WorkerThreadOutcome::Closed {
@@ -311,14 +269,6 @@ fn map_worker_core_error(error: WorkerCoreError) -> Error {
             source,
         ),
     }
-}
-
-#[cfg(any(test, not(feature = "bumble")))]
-pub(crate) fn unsupported_capability(capability: &str) -> Error {
-    Error::new(
-        ErrorKind::UnsupportedCapability,
-        format!("{capability} is unavailable in this build"),
-    )
 }
 
 #[cfg(test)]

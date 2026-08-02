@@ -279,7 +279,6 @@ version = "0.1.0"
 dependencies = [
  "atomic-write-file",
  "rusb",
- "serde",
  "serde_json",
  "swbt-bumble-backend",
  "swbt-core",

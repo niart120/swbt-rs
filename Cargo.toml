@@ -36,19 +36,13 @@ path = "src/lib.rs"
 
 [features]
 default = []
-adapter-tests = ["bumble"]
-diagnostics-schema = ["dep:tracing"]
-bumble = [
-    "dep:swbt-bumble-backend",
-    "dep:rusb",
-    "dep:tracing",
-]
+adapter-tests = []
+diagnostics-schema = []
 
 [dependencies]
 atomic-write-file = "0.3.0"
-rusb = { version = "0.9.4", features = ["vendored"], optional = true }
-serde = { version = "1", features = ["derive"] }
+rusb = { version = "0.9.4", features = ["vendored"] }
 serde_json = "1"
 swbt-core = { version = "=0.1.0", path = "crates/swbt-core" }
-tracing = { version = "0.1", optional = true }
-swbt-bumble-backend = { version = "=0.1.1", optional = true }
+tracing = "0.1"
+swbt-bumble-backend = "=0.1.1"

@@ -10,7 +10,6 @@ use crate::error::{Error, ErrorKind};
 pub struct AdapterSelector(Box<str>);
 
 impl AdapterSelector {
-    #[cfg(any(test, feature = "bumble"))]
     pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
@@ -54,7 +53,6 @@ pub struct AdapterInfo {
 }
 
 impl AdapterInfo {
-    #[cfg(any(feature = "bumble", test))]
     fn new(
         selector: impl Into<AdapterSelector>,
         vendor_id: u16,
@@ -128,28 +126,14 @@ impl AdapterInfo {
 ///
 /// # Errors
 ///
-/// Returns [`ErrorKind::UnsupportedCapability`] when the crate was built
-/// without the `bumble` feature. Returns [`ErrorKind::AdapterDiscovery`] when
-/// the USB context or device list cannot be read.
+/// Returns [`ErrorKind::AdapterDiscovery`] when the USB context or device list
+/// cannot be read.
 pub fn list_adapters() -> crate::Result<Vec<AdapterInfo>> {
-    #[cfg(feature = "bumble")]
-    {
-        discover_with_probe(&mut RusbDescriptorProbe)
-    }
-
-    #[cfg(not(feature = "bumble"))]
-    {
-        Err(Error::new(
-            ErrorKind::UnsupportedCapability,
-            "USB adapter discovery is unavailable in this build",
-        ))
-    }
+    discover_with_probe(&mut RusbDescriptorProbe)
 }
 
-#[cfg(any(feature = "bumble", test))]
 const BLUETOOTH_HCI_CLASS: UsbClass = UsbClass::new(0xe0, 0x01, 0x01);
 
-#[cfg(any(feature = "bumble", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct UsbClass {
     class: u8,
@@ -157,7 +141,6 @@ struct UsbClass {
     protocol: u8,
 }
 
-#[cfg(any(feature = "bumble", test))]
 impl UsbClass {
     const fn new(class: u8, subclass: u8, protocol: u8) -> Self {
         Self {
@@ -168,7 +151,6 @@ impl UsbClass {
     }
 }
 
-#[cfg(any(feature = "bumble", test))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct UsbDescriptorRecord {
     vendor_id: u16,
@@ -180,7 +162,6 @@ struct UsbDescriptorRecord {
     interface_classes: Box<[UsbClass]>,
 }
 
-#[cfg(any(feature = "bumble", test))]
 impl UsbDescriptorRecord {
     fn new(
         vendor_id: u16,
@@ -209,14 +190,12 @@ impl UsbDescriptorRecord {
     }
 }
 
-#[cfg(any(feature = "bumble", test))]
 trait DescriptorProbe {
     type Error: std::error::Error + Send + Sync + 'static;
 
     fn descriptor_records(&mut self) -> Result<Vec<UsbDescriptorRecord>, Self::Error>;
 }
 
-#[cfg(any(feature = "bumble", test))]
 fn discover_with_probe(probe: &mut impl DescriptorProbe) -> crate::Result<Vec<AdapterInfo>> {
     let records = probe.descriptor_records().map_err(|source| {
         Error::with_source(
@@ -243,10 +222,8 @@ fn discover_with_probe(probe: &mut impl DescriptorProbe) -> crate::Result<Vec<Ad
         .collect())
 }
 
-#[cfg(feature = "bumble")]
 struct RusbDescriptorProbe;
 
-#[cfg(feature = "bumble")]
 impl DescriptorProbe for RusbDescriptorProbe {
     type Error = rusb::Error;
 
@@ -273,7 +250,6 @@ impl DescriptorProbe for RusbDescriptorProbe {
     }
 }
 
-#[cfg(feature = "bumble")]
 fn descriptor_record(device: rusb::Device<rusb::Context>) -> Option<UsbDescriptorRecord> {
     let descriptor = device.device_descriptor().ok()?;
     let device_class = UsbClass::new(
