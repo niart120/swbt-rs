@@ -38,7 +38,7 @@ use crate::{
     CreateProfileOptions,
 };
 
-use build::{ProfileReadPort, read_typed_profile};
+use build::{ProfileStore, read_typed_profile};
 #[cfg(test)]
 use config::ProfileConfig;
 use config::{BuilderConfig, ControllerConfig};
@@ -520,12 +520,11 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
         self
     }
 
-    fn validate_create_profile_target(
+    fn validate_create_profile(
         self,
         options: CreateProfileOptions,
-        target: &mut impl crate::profile::ProfileCreateTargetPort,
     ) -> crate::Result<CreateProfilePlan<M, R>> {
-        create::validate_target(self.validate()?, options, target)
+        create::validate_target(self.validate()?, options)
     }
 
     #[cfg_attr(
@@ -538,24 +537,26 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     fn create_profile_with(
         self,
         options: CreateProfileOptions,
-        store: &mut impl crate::profile::ProfileCreatePort,
+        store: &mut impl crate::profile::ProfileStore,
         open_and_pair: impl FnOnce(
             &ControllerConfig<M, R>,
             StatusPublisher<M>,
             Duration,
         ) -> crate::Result<ControllerRuntime<M, R>>,
     ) -> crate::Result<Controller<M, R>> {
-        let plan = self.validate_create_profile_target(options, store)?;
+        let plan = self.validate_create_profile(options)?;
         create::create_profile(plan, store, open_and_pair)
     }
 
     /// Attempts to create a new pairing profile and return a paired controller.
     ///
-    /// Builder settings, the required profile path, the requested identity,
-    /// and target existence are checked in that order. An existing target is
-    /// never replaced. With the `bumble` feature, a valid empty profile is
-    /// persisted before opening the selected adapter, then pairing waits for
-    /// normal-input readiness.
+    /// Builder settings, the required profile path, and the requested identity
+    /// are validated without inspecting the target. With the `bumble` feature,
+    /// one create-new attempt persists a valid empty profile without replacing
+    /// an existing file, directory, or symbolic link. Persistence completes
+    /// before the selected adapter is opened, then pairing waits for normal-input
+    /// readiness. Without `bumble`, the method returns an unsupported-capability
+    /// error before profile filesystem I/O.
     ///
     /// # Errors
     ///
@@ -563,8 +564,9 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     /// [`crate::ErrorKind::ProfilePathRequired`] when no target path was
     /// selected, [`crate::ErrorKind::UnsupportedCapability`] for an unsupported
     /// identity or unavailable Bluetooth transport,
-    /// [`crate::ErrorKind::ProfileAlreadyExists`] when the target already
-    /// exists, [`crate::ErrorKind::TransportOpen`] when the adapter cannot be
+    /// [`crate::ErrorKind::ProfileAlreadyExists`] when the feature-enabled
+    /// create-new attempt finds an existing target,
+    /// [`crate::ErrorKind::TransportOpen`] when the adapter cannot be
     /// opened and initialized,
     /// [`crate::ErrorKind::AdapterIdentityRecoveryRequired`] when an explicit
     /// identity write started but could not be verified, or a structured
@@ -588,8 +590,7 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
         }
         #[cfg(not(feature = "bumble"))]
         {
-            let mut store = FileProfileStore;
-            let plan = self.validate_create_profile_target(options, &mut store)?;
+            let plan = self.validate_create_profile(options)?;
             create::reject_unavailable_backend(plan)
         }
     }
@@ -615,7 +616,7 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
 
     fn build_with_profile_reader(
         self,
-        reader: &mut impl ProfileReadPort,
+        reader: &mut impl ProfileStore,
     ) -> crate::Result<Controller<M, R>> {
         let config = self
             .validate()?

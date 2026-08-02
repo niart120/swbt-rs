@@ -21,10 +21,7 @@ use crate::{
     diagnostics::LifecycleState,
     input::{InputState, Stick},
     model::ControllerModel,
-    profile::{
-        ControllerKind, ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState,
-        ProfileDocument, ProfileReadPort,
-    },
+    profile::{ControllerKind, ProfileDocument, ProfileStore},
     reporting::{Direct, Periodic, ReportingMode},
     runtime::{
         cleanup::{CleanupFailure, CleanupPhase},
@@ -151,7 +148,7 @@ where
         "key_store": { "namespaces": {} }
     });
     value["key_store"]["namespaces"][namespace] = serde_json::json!({
-        "98:B6:E9:11:22:33": {
+        "98:B6:E9:11:22:33/P": {
             "link_key": {
                 "authenticated": true,
                 "value": secret_key
@@ -2183,25 +2180,12 @@ struct MemoryProfileStore {
     bytes: Option<Vec<u8>>,
 }
 
-impl ProfileCreateTargetPort for MemoryProfileStore {
-    fn inspect(&mut self, _path: &Path) -> io::Result<ProfileCreateTargetState> {
-        Ok(if self.bytes.is_some() {
-            ProfileCreateTargetState::Existing
-        } else {
-            ProfileCreateTargetState::Absent
-        })
-    }
-}
-
-impl ProfileReadPort for MemoryProfileStore {
+impl ProfileStore for MemoryProfileStore {
     fn read(&mut self, _path: &Path) -> io::Result<Vec<u8>> {
         self.bytes
             .clone()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "profile is absent"))
     }
-}
-
-impl ProfileCreatePort for MemoryProfileStore {
     fn create_new(&mut self, _path: &Path, bytes: &[u8]) -> io::Result<()> {
         if self.bytes.is_some() {
             return Err(io::Error::new(
@@ -2210,6 +2194,14 @@ impl ProfileCreatePort for MemoryProfileStore {
             ));
         }
         self.bytes = Some(bytes.to_vec());
+        Ok(())
+    }
+
+    fn update(&mut self, _path: &Path, replacement: &[u8]) -> io::Result<()> {
+        if self.bytes.is_none() {
+            return Err(io::Error::new(io::ErrorKind::NotFound, "profile is absent"));
+        }
+        self.bytes = Some(replacement.to_vec());
         Ok(())
     }
 }

@@ -1,6 +1,9 @@
-use std::{fmt, marker::PhantomData};
+use std::{collections::BTreeMap, fmt, marker::PhantomData};
 
-use serde_json::{Map, Value};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+
+#[cfg(feature = "bumble")]
+use swbt_bumble_backend::ClassicBond;
 
 use crate::{
     error::{Error, ErrorKind},
@@ -9,31 +12,16 @@ use crate::{
 
 use super::{ControllerKind, LocalAddress, ProfileIdentity, ProfileIdentityKind, ProfileSummary};
 
-const PROFILE_FORMAT: &str = "swbt.profile";
 const PROFILE_SCHEMA_VERSION: u64 = 2;
-#[cfg_attr(
-    not(feature = "bumble"),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not adapt profile pairing keys"
-    )
-)]
-const KNOWN_PAIRING_KEY_FIELDS: [&str; 9] = [
-    "address_type",
-    "ltk",
-    "ltk_central",
-    "ltk_peripheral",
-    "irk",
-    "csrk",
-    "local_csrk",
-    "link_key",
-    "link_key_type",
-];
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ProfileDocument {
-    controller_kind: ControllerKind,
-    identity: ProfileIdentity,
-    value: Value,
+    controller_kind: DocumentControllerKind,
+    format: DocumentFormat,
+    identity: IdentityDocument,
+    key_store: KeyStoreDocument,
+    schema_version: u64,
 }
 
 impl ProfileDocument {
@@ -43,32 +31,24 @@ impl ProfileDocument {
     }
 
     pub(crate) fn empty<M: ControllerModel>(identity: ProfileIdentity) -> Self {
-        let identity_value = match identity {
-            ProfileIdentity::AdapterDefault => serde_json::json!({
-                "kind": "adapter-default"
-            }),
-            ProfileIdentity::LocalAddress(address) => serde_json::json!({
-                "kind": "exp-local-address",
-                "address": format_local_address(address)
-            }),
-        };
         Self {
-            controller_kind: M::KIND,
-            identity,
-            value: serde_json::json!({
-                "format": PROFILE_FORMAT,
-                "schema_version": PROFILE_SCHEMA_VERSION,
-                "controller_kind": M::KIND.profile_name(),
-                "identity": identity_value,
-                "key_store": {
-                    "namespaces": {}
-                }
-            }),
+            controller_kind: DocumentControllerKind::from(M::KIND),
+            format: DocumentFormat::SwbtProfile,
+            identity: IdentityDocument::from(identity),
+            key_store: KeyStoreDocument::default(),
+            schema_version: PROFILE_SCHEMA_VERSION,
         }
     }
 
     pub(crate) fn to_json_bytes(&self) -> crate::Result<Vec<u8>> {
-        let mut bytes = serde_json::to_vec_pretty(&self.value).map_err(|source| {
+        let value = serde_json::to_value(self).map_err(|source| {
+            Error::with_source(
+                ErrorKind::Internal,
+                "profile document could not be serialized",
+                source,
+            )
+        })?;
+        let mut bytes = serde_json::to_vec_pretty(&value).map_err(|source| {
             Error::with_source(
                 ErrorKind::Internal,
                 "profile document could not be serialized",
@@ -80,183 +60,67 @@ impl ProfileDocument {
     }
 
     pub(crate) fn parse_json(bytes: &[u8]) -> crate::Result<Self> {
-        let value = serde_json::from_slice::<Value>(bytes).map_err(|source| {
+        let document = serde_json::from_slice::<Self>(bytes).map_err(|source| {
             Error::with_source(
                 ErrorKind::InvalidProfile,
-                "profile document is not valid JSON",
+                "profile document is not valid schema v2 JSON",
                 source,
             )
         })?;
+        document.validate()?;
+        Ok(document)
+    }
 
-        let (controller_kind, profile_identity) = {
-            let object = value.as_object().ok_or_else(|| {
-                Error::new(
-                    ErrorKind::InvalidProfile,
-                    "profile document must be a JSON object",
-                )
-            })?;
-
-            if object.get("format").and_then(Value::as_str) != Some(PROFILE_FORMAT) {
-                return Err(Error::new(
-                    ErrorKind::InvalidProfile,
-                    "profile format must be swbt.profile",
-                ));
-            }
-            if object.get("schema_version").and_then(Value::as_u64) != Some(PROFILE_SCHEMA_VERSION)
-            {
-                return Err(Error::new(
-                    ErrorKind::InvalidProfile,
-                    "profile schema version must be 2",
-                ));
-            }
-
-            let kind_name = object
-                .get("controller_kind")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    Error::new(
-                        ErrorKind::InvalidProfile,
-                        "profile controller_kind must be a supported string",
-                    )
-                })?;
-            let controller_kind = ControllerKind::ALL
-                .iter()
-                .copied()
-                .find(|kind| kind.profile_name() == kind_name)
-                .ok_or_else(|| {
-                    Error::new(
-                        ErrorKind::InvalidProfile,
-                        "profile controller_kind must be a supported string",
-                    )
-                })?;
-
-            let identity = object
-                .get("identity")
-                .and_then(Value::as_object)
-                .ok_or_else(|| {
-                    Error::new(
-                        ErrorKind::InvalidProfile,
-                        "profile identity must be a JSON object",
-                    )
-                })?;
-            let profile_identity = match identity.get("kind").and_then(Value::as_str) {
-                Some("adapter-default") if !identity.contains_key("address") => {
-                    ProfileIdentity::AdapterDefault
-                }
-                Some("exp-local-address") => {
-                    let address =
-                        identity
-                            .get("address")
-                            .and_then(Value::as_str)
-                            .ok_or_else(|| {
-                                Error::new(
-                                    ErrorKind::InvalidProfile,
-                                    "profile identity address must be a string",
-                                )
-                            })?;
-                    let address = LocalAddress::parse(address).map_err(|source| {
-                        Error::with_source(
-                            ErrorKind::InvalidProfile,
-                            "profile identity address is invalid",
-                            source,
-                        )
-                    })?;
-                    ProfileIdentity::LocalAddress(address)
-                }
-                _ => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidProfile,
-                        "profile identity variant is invalid",
-                    ));
-                }
-            };
-
-            let key_store = object
-                .get("key_store")
-                .and_then(Value::as_object)
-                .ok_or_else(|| {
-                    Error::new(
-                        ErrorKind::InvalidProfile,
-                        "profile key_store must be a JSON object",
-                    )
-                })?;
-            let namespaces = key_store
-                .get("namespaces")
-                .and_then(Value::as_object)
-                .ok_or_else(|| {
-                    invalid_profile("profile key_store namespaces must be a JSON object")
-                })?;
-            validate_namespaces(namespaces)?;
-
-            (controller_kind, profile_identity)
-        };
-
-        Ok(Self {
-            controller_kind,
-            identity: profile_identity,
-            value,
-        })
+    fn validate(&self) -> crate::Result<()> {
+        if self.schema_version != PROFILE_SCHEMA_VERSION {
+            return Err(invalid_profile("profile schema version must be 2"));
+        }
+        if self
+            .key_store
+            .namespaces
+            .values()
+            .any(|peers| peers.len() > 1)
+        {
+            return Err(invalid_profile(
+                "profile key-store namespace must contain at most one current peer",
+            ));
+        }
+        Ok(())
     }
 
     #[cfg(test)]
     pub(crate) const fn controller_kind(&self) -> ControllerKind {
-        self.controller_kind
+        self.controller_kind.as_public()
     }
 
     pub(super) fn summary(&self) -> ProfileSummary {
-        let identity_kind = match self.identity {
-            ProfileIdentity::AdapterDefault => ProfileIdentityKind::AdapterDefault,
-            ProfileIdentity::LocalAddress(_) => ProfileIdentityKind::LocalAddress,
-        };
-        let namespaces = self
-            .namespaces()
-            .expect("validated profile has key-store namespaces");
-        let bond_count = namespaces
-            .values()
-            .map(|peers| {
-                peers
-                    .as_object()
-                    .expect("validated profile namespace contains peer objects")
-                    .len()
-            })
-            .sum();
         ProfileSummary::new(
             PROFILE_SCHEMA_VERSION,
-            self.controller_kind,
-            identity_kind,
-            namespaces.len(),
-            bond_count,
+            self.controller_kind.as_public(),
+            self.identity.kind(),
+            self.key_store.namespaces.len(),
+            self.key_store.namespaces.values().map(BTreeMap::len).sum(),
         )
-    }
-
-    fn field_count(&self) -> usize {
-        self.value.as_object().map_or(0, serde_json::Map::len)
     }
 }
 
-#[cfg_attr(
-    not(feature = "bumble"),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not adapt profile pairing keys"
-    )
-)]
+#[cfg(feature = "bumble")]
 impl ProfileDocument {
-    fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<Value> {
-        self.namespaces()
-            .and_then(|namespaces| namespaces.get(namespace))
-            .and_then(Value::as_object)
+    fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<ClassicBond> {
+        self.key_store
+            .namespaces
+            .get(namespace)
             .and_then(|peers| peers.get(peer))
-            .cloned()
+            .map(ClassicPairingKeysDocument::to_backend_bond)
     }
 
-    fn all_pairing_keys(&self, namespace: &str) -> Vec<(String, Value)> {
-        self.namespaces()
-            .and_then(|namespaces| namespaces.get(namespace))
-            .and_then(Value::as_object)
+    fn all_pairing_keys(&self, namespace: &str) -> Vec<(String, ClassicBond)> {
+        self.key_store
+            .namespaces
+            .get(namespace)
             .into_iter()
-            .flat_map(|peers| peers.iter())
-            .map(|(peer, keys)| (peer.clone(), keys.clone()))
+            .flat_map(BTreeMap::iter)
+            .map(|(peer, keys)| (peer.to_string(), keys.to_backend_bond()))
             .collect()
     }
 
@@ -264,183 +128,288 @@ impl ProfileDocument {
         &mut self,
         namespace: &str,
         peer: &str,
-        replacement: Value,
+        replacement: ClassicBond,
     ) -> crate::Result<()> {
-        if !is_bluetooth_address(namespace) || !is_classic_peer_name(peer) {
-            return Err(invalid_profile(
-                "profile key-store update address is invalid",
-            ));
-        }
-        validate_pairing_keys(&replacement)?;
-        let mut replacement = replacement.as_object().cloned().ok_or_else(|| {
-            invalid_profile("profile key-store update must contain a pairing-key object")
-        })?;
-        let peers = self.namespace_mut(namespace)?;
-        let existing_peer = if peers.contains_key(peer) {
-            Some(peer.to_owned())
-        } else {
-            peer.strip_suffix("/P")
-                .filter(|legacy_peer| peers.contains_key(*legacy_peer))
-                .map(str::to_owned)
-        };
-
-        if let Some(existing_peer) = existing_peer {
-            let mut existing = peers
-                .remove(&existing_peer)
-                .and_then(|value| value.as_object().cloned())
-                .ok_or_else(internal_profile_shape_error)?;
-            for field in KNOWN_PAIRING_KEY_FIELDS {
-                existing.remove(field);
-            }
-            existing.append(&mut replacement);
-            peers.clear();
-            peers.insert(peer.to_owned(), Value::Object(existing));
-        } else {
-            peers.clear();
-            peers.insert(peer.to_owned(), Value::Object(replacement));
-        }
+        let namespace = BluetoothAddressKey::parse(namespace)?;
+        let peer = ClassicPeerKey::parse(peer)?;
+        let peers = self.key_store.namespaces.entry(namespace).or_default();
+        peers.clear();
+        peers.insert(
+            peer,
+            ClassicPairingKeysDocument::from_backend_bond(&replacement),
+        );
         Ok(())
-    }
-
-    fn namespaces(&self) -> Option<&Map<String, Value>> {
-        self.value
-            .as_object()
-            .and_then(|document| document.get("key_store"))
-            .and_then(Value::as_object)
-            .and_then(|key_store| key_store.get("namespaces"))
-            .and_then(Value::as_object)
-    }
-
-    fn namespaces_mut(&mut self) -> crate::Result<Option<&mut Map<String, Value>>> {
-        let namespaces = self
-            .value
-            .as_object_mut()
-            .and_then(|document| document.get_mut("key_store"))
-            .and_then(Value::as_object_mut)
-            .and_then(|key_store| key_store.get_mut("namespaces"));
-        match namespaces {
-            Some(Value::Object(namespaces)) => Ok(Some(namespaces)),
-            Some(_) => Err(internal_profile_shape_error()),
-            None => Ok(None),
-        }
-    }
-
-    fn namespace_mut(&mut self, namespace: &str) -> crate::Result<&mut Map<String, Value>> {
-        let namespaces = self
-            .namespaces_mut()?
-            .ok_or_else(internal_profile_shape_error)?;
-        let peers = namespaces
-            .entry(namespace.to_owned())
-            .or_insert_with(|| Value::Object(Map::new()));
-        peers
-            .as_object_mut()
-            .ok_or_else(internal_profile_shape_error)
     }
 }
 
-fn validate_namespaces(namespaces: &serde_json::Map<String, Value>) -> crate::Result<()> {
-    for (namespace, peers) in namespaces {
-        if !is_bluetooth_address(namespace) {
+#[derive(Clone, Copy, Deserialize, Serialize)]
+enum DocumentFormat {
+    #[serde(rename = "swbt.profile")]
+    SwbtProfile,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+enum DocumentControllerKind {
+    #[serde(rename = "pro")]
+    Pro,
+    #[serde(rename = "joycon_l")]
+    JoyConL,
+    #[serde(rename = "joycon_r")]
+    JoyConR,
+}
+
+impl DocumentControllerKind {
+    const fn as_public(self) -> ControllerKind {
+        match self {
+            Self::Pro => ControllerKind::Pro,
+            Self::JoyConL => ControllerKind::JoyConL,
+            Self::JoyConR => ControllerKind::JoyConR,
+        }
+    }
+}
+
+impl From<ControllerKind> for DocumentControllerKind {
+    fn from(value: ControllerKind) -> Self {
+        match value {
+            ControllerKind::Pro => Self::Pro,
+            ControllerKind::JoyConL => Self::JoyConL,
+            ControllerKind::JoyConR => Self::JoyConR,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind")]
+enum IdentityDocument {
+    #[serde(rename = "adapter-default")]
+    AdapterDefault(AdapterDefaultIdentityDocument),
+    #[serde(rename = "exp-local-address")]
+    LocalAddress(LocalAddressIdentityDocument),
+}
+
+impl IdentityDocument {
+    const fn as_public(&self) -> ProfileIdentity {
+        match self {
+            Self::AdapterDefault(_) => ProfileIdentity::AdapterDefault,
+            Self::LocalAddress(identity) => ProfileIdentity::LocalAddress(identity.address.0),
+        }
+    }
+
+    const fn kind(&self) -> ProfileIdentityKind {
+        match self {
+            Self::AdapterDefault(_) => ProfileIdentityKind::AdapterDefault,
+            Self::LocalAddress(_) => ProfileIdentityKind::LocalAddress,
+        }
+    }
+}
+
+impl From<ProfileIdentity> for IdentityDocument {
+    fn from(value: ProfileIdentity) -> Self {
+        match value {
+            ProfileIdentity::AdapterDefault => {
+                Self::AdapterDefault(AdapterDefaultIdentityDocument {})
+            }
+            ProfileIdentity::LocalAddress(address) => {
+                Self::LocalAddress(LocalAddressIdentityDocument {
+                    address: LocalAddressDocument(address),
+                })
+            }
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AdapterDefaultIdentityDocument {}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct LocalAddressIdentityDocument {
+    address: LocalAddressDocument,
+}
+
+struct LocalAddressDocument(LocalAddress);
+
+impl Serialize for LocalAddressDocument {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format_local_address(self.0))
+    }
+}
+
+impl<'de> Deserialize<'de> for LocalAddressDocument {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        LocalAddress::parse(&value)
+            .map(Self)
+            .map_err(|_| de::Error::custom("profile identity address is invalid"))
+    }
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct KeyStoreDocument {
+    namespaces: BTreeMap<BluetoothAddressKey, BTreeMap<ClassicPeerKey, ClassicPairingKeysDocument>>,
+}
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+struct BluetoothAddressKey(String);
+
+impl BluetoothAddressKey {
+    fn parse(value: &str) -> crate::Result<Self> {
+        if !is_bluetooth_address(value) {
             return Err(invalid_profile(
                 "profile key-store namespace must be a Bluetooth address",
             ));
         }
-        let peers = peers.as_object().ok_or_else(|| {
-            invalid_profile("profile key-store namespace value must be a JSON object")
-        })?;
-        if peers.len() > 1 {
-            return Err(invalid_profile(
-                "profile key-store namespace must contain at most one current peer",
-            ));
-        }
-        for (peer, keys) in peers {
-            if !is_classic_peer_name(peer) {
-                return Err(invalid_profile(
-                    "profile key-store peer name must be a Bluetooth address",
-                ));
-            }
-            validate_pairing_keys(keys)?;
-        }
+        Ok(Self(value.to_ascii_uppercase()))
     }
-    Ok(())
 }
 
-fn validate_pairing_keys(keys: &Value) -> crate::Result<()> {
-    let keys = keys
-        .as_object()
-        .ok_or_else(|| invalid_profile("profile pairing keys must be a JSON object"))?;
-
-    for field in ["address_type", "link_key_type"] {
-        if let Some(value) = keys.get(field) {
-            if !is_unsigned_integer_at_most(value, u64::from(u8::MAX)) {
-                return Err(invalid_profile(
-                    "profile pairing key numeric field must be an unsigned byte",
-                ));
-            }
-        }
+impl fmt::Display for BluetoothAddressKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
     }
-    for field in [
-        "ltk",
-        "ltk_central",
-        "ltk_peripheral",
-        "irk",
-        "csrk",
-        "local_csrk",
-        "link_key",
-    ] {
-        if let Some(value) = keys.get(field) {
-            validate_key(value)?;
-        }
-    }
-    Ok(())
 }
 
-fn validate_key(key: &Value) -> crate::Result<()> {
-    let key = key
-        .as_object()
-        .ok_or_else(|| invalid_profile("profile key field must be a JSON object"))?;
-    let value = key
-        .get("value")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid_profile("profile key value must be a hexadecimal string"))?;
-    if !is_even_hex(value) {
-        return Err(invalid_profile(
-            "profile key value must be an even-length hexadecimal string",
-        ));
+impl std::borrow::Borrow<str> for BluetoothAddressKey {
+    fn borrow(&self) -> &str {
+        &self.0
     }
-    if key
-        .get("authenticated")
-        .is_some_and(|value| !value.is_boolean())
+}
+
+impl Serialize for BluetoothAddressKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
     {
-        return Err(invalid_profile(
-            "profile key authenticated field must be a boolean",
-        ));
+        serializer.serialize_str(&self.0)
     }
-    if let Some(value) = key.get("ediv") {
-        if !is_unsigned_integer_at_most(value, u64::from(u16::MAX)) {
+}
+
+impl<'de> Deserialize<'de> for BluetoothAddressKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(|_| {
+            de::Error::custom("profile key-store namespace must be a Bluetooth address")
+        })
+    }
+}
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+struct ClassicPeerKey(String);
+
+impl ClassicPeerKey {
+    fn parse(value: &str) -> crate::Result<Self> {
+        let address = value.strip_suffix("/P").ok_or_else(|| {
+            invalid_profile("profile key-store peer name must be a public Bluetooth address")
+        })?;
+        if !is_bluetooth_address(address) {
             return Err(invalid_profile(
-                "profile key ediv field must be an unsigned 16-bit integer",
+                "profile key-store peer name must be a public Bluetooth address",
             ));
         }
+        Ok(Self(format!("{}/P", address.to_ascii_uppercase())))
     }
-    if let Some(value) = key.get("rand") {
-        let value = value
-            .as_str()
-            .ok_or_else(|| invalid_profile("profile key rand field must be hexadecimal"))?;
-        if !is_even_hex(value) {
-            return Err(invalid_profile(
-                "profile key rand field must be even-length hexadecimal",
-            ));
+}
+
+impl fmt::Display for ClassicPeerKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::borrow::Borrow<str> for ClassicPeerKey {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Serialize for ClassicPeerKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for ClassicPeerKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(|_| {
+            de::Error::custom("profile key-store peer name must be a public Bluetooth address")
+        })
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ClassicPairingKeysDocument {
+    link_key: LinkKeyDocument,
+    link_key_type: u8,
+}
+
+#[cfg(feature = "bumble")]
+impl ClassicPairingKeysDocument {
+    fn to_backend_bond(&self) -> ClassicBond {
+        ClassicBond::new(
+            self.link_key.value.0,
+            self.link_key_type,
+            self.link_key.authenticated,
+        )
+    }
+
+    fn from_backend_bond(value: &ClassicBond) -> Self {
+        Self {
+            link_key: LinkKeyDocument {
+                authenticated: value.authenticated(),
+                value: LinkKeyBytes(*value.link_key()),
+            },
+            link_key_type: value.link_key_type(),
         }
     }
-    if let Some(value) = key.get("sign_counter") {
-        if !is_unsigned_integer_at_most(value, u64::from(u32::MAX)) {
-            return Err(invalid_profile(
-                "profile key sign_counter field must be an unsigned 32-bit integer",
-            ));
-        }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct LinkKeyDocument {
+    authenticated: bool,
+    value: LinkKeyBytes,
+}
+
+struct LinkKeyBytes([u8; 16]);
+
+impl Serialize for LinkKeyBytes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&encode_hex(&self.0))
     }
-    Ok(())
+}
+
+impl<'de> Deserialize<'de> for LinkKeyBytes {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        decode_link_key(&value)
+            .map(Self)
+            .map_err(|_| de::Error::custom("profile link_key value must be 16-byte hexadecimal"))
+    }
 }
 
 fn is_bluetooth_address(value: &str) -> bool {
@@ -455,57 +424,50 @@ fn is_bluetooth_address(value: &str) -> bool {
             .all(|(index, byte)| matches!(index, 2 | 5 | 8 | 11 | 14) || byte.is_ascii_hexdigit())
 }
 
-fn is_classic_peer_name(value: &str) -> bool {
-    is_bluetooth_address(value) || value.strip_suffix("/P").is_some_and(is_bluetooth_address)
+fn encode_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
 }
 
-fn is_even_hex(value: &str) -> bool {
-    !value.is_empty()
-        && value.len().is_multiple_of(2)
-        && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-fn is_unsigned_integer_at_most(value: &Value, maximum: u64) -> bool {
-    value.as_u64().is_some_and(|value| value <= maximum)
+fn decode_link_key(value: &str) -> Result<[u8; 16], ()> {
+    if value.len() != 32 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(());
+    }
+    let mut decoded = [0_u8; 16];
+    for (output, pair) in decoded.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
+        let pair = std::str::from_utf8(pair).map_err(|_| ())?;
+        *output = u8::from_str_radix(pair, 16).map_err(|_| ())?;
+    }
+    Ok(decoded)
 }
 
 fn invalid_profile(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidProfile, message)
 }
 
-#[cfg_attr(
-    not(feature = "bumble"),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not adapt profile pairing keys"
-    )
-)]
-fn internal_profile_shape_error() -> Error {
-    Error::new(
-        ErrorKind::Internal,
-        "validated profile document shape changed unexpectedly",
-    )
-}
-
 impl fmt::Debug for ProfileDocument {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ProfileDocument")
-            .field("format", &PROFILE_FORMAT)
-            .field("schema_version", &PROFILE_SCHEMA_VERSION)
-            .field("controller_kind", &self.controller_kind)
+            .field("format", &"swbt.profile")
+            .field("schema_version", &self.schema_version)
+            .field("controller_kind", &self.controller_kind.as_public())
             .field("identity", &Redacted)
             .field("key_store", &Redacted)
-            .field("field_count", &self.field_count())
             .finish()
     }
 }
 
 /// A validated schema v2 pairing profile for one controller model.
 ///
-/// The type retains unknown JSON fields so that reading and writing a profile
-/// does not discard extensions created by another compatible implementation.
-/// Its [`Debug`](fmt::Debug) representation does not expose the raw document or
+/// The accepted document is the strict Classic pairing subset emitted by
+/// swbt-python 0.6.0. Unknown fields and non-Classic key material are rejected.
+/// Its [`Debug`](fmt::Debug) representation does not expose identity or
 /// pairing-key values.
 pub struct PairingProfile<M: ControllerModel> {
     document: ProfileDocument,
@@ -525,7 +487,7 @@ impl<M: ControllerModel> PairingProfile<M> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::InvalidProfile`] when the document is not valid
-    /// schema v2 JSON or contains an invalid identity or key-store shape.
+    /// JSON in the supported swbt-python 0.6.0 Classic profile shape.
     /// Returns [`ErrorKind::ProfileControllerMismatch`] when the document is
     /// for a controller model other than `M`.
     pub fn from_json(bytes: &[u8]) -> crate::Result<Self> {
@@ -534,12 +496,12 @@ impl<M: ControllerModel> PairingProfile<M> {
 
     /// Serializes the complete profile as deterministic UTF-8 JSON.
     ///
-    /// Object keys are sorted, indentation is two spaces, and the output ends
-    /// with one newline. Unknown fields retained during parsing are included.
+    /// Object keys are sorted, indentation is two spaces, Bluetooth addresses
+    /// are uppercase, and the output ends with one newline.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::Internal`] if the retained JSON document cannot be
+    /// Returns [`ErrorKind::Internal`] if the validated profile cannot be
     /// serialized.
     pub fn to_json_bytes(&self) -> crate::Result<Vec<u8>> {
         self.document.to_json_bytes()
@@ -559,7 +521,7 @@ impl<M: ControllerModel> PairingProfile<M> {
         )
     )]
     pub(crate) const fn identity(&self) -> ProfileIdentity {
-        self.document.identity
+        self.document.identity.as_public()
     }
 }
 
@@ -571,19 +533,13 @@ fn format_local_address(address: LocalAddress) -> String {
     )
 }
 
-#[cfg_attr(
-    not(feature = "bumble"),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not adapt profile pairing keys"
-    )
-)]
+#[cfg(feature = "bumble")]
 impl<M: ControllerModel> PairingProfile<M> {
-    pub(crate) fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<Value> {
+    pub(crate) fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<ClassicBond> {
         self.document.pairing_keys(namespace, peer)
     }
 
-    pub(crate) fn all_pairing_keys(&self, namespace: &str) -> Vec<(String, Value)> {
+    pub(crate) fn all_pairing_keys(&self, namespace: &str) -> Vec<(String, ClassicBond)> {
         self.document.all_pairing_keys(namespace)
     }
 
@@ -591,7 +547,7 @@ impl<M: ControllerModel> PairingProfile<M> {
         &mut self,
         namespace: &str,
         peer: &str,
-        replacement: Value,
+        replacement: ClassicBond,
     ) -> crate::Result<()> {
         self.document
             .replace_pairing_keys(namespace, peer, replacement)
@@ -602,7 +558,7 @@ impl<M: ControllerModel> TryFrom<ProfileDocument> for PairingProfile<M> {
     type Error = Error;
 
     fn try_from(document: ProfileDocument) -> Result<Self, Self::Error> {
-        if document.controller_kind != M::KIND {
+        if document.controller_kind.as_public() != M::KIND {
             return Err(Error::new(
                 ErrorKind::ProfileControllerMismatch,
                 "profile controller kind does not match the requested model",
@@ -622,7 +578,6 @@ impl<M: ControllerModel> fmt::Debug for PairingProfile<M> {
             .debug_struct("PairingProfile")
             .field("controller_kind", &M::KIND)
             .field("document", &Redacted)
-            .field("field_count", &self.document.field_count())
             .finish()
     }
 }

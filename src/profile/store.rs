@@ -1,32 +1,23 @@
 use std::{
     ffi::OsString,
     fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use atomic_write_file::AtomicWriteFile;
-use fs2::FileExt as _;
 
 const TEMP_CREATE_ATTEMPTS: usize = 128;
 static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) struct FileProfileStore;
 
-impl ProfileCreateTargetPort for FileProfileStore {
-    fn inspect(&mut self, path: &Path) -> io::Result<ProfileCreateTargetState> {
-        inspect_target(path)
-    }
-}
-
-impl ProfileReadPort for FileProfileStore {
+impl ProfileStore for FileProfileStore {
     fn read(&mut self, path: &Path) -> io::Result<Vec<u8>> {
         fs::read(path)
     }
-}
 
-impl ProfileCreatePort for FileProfileStore {
     fn create_new(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()> {
         let parent = usable_parent(path);
         fs::create_dir_all(parent)?;
@@ -55,27 +46,12 @@ impl ProfileCreatePort for FileProfileStore {
         }
         publish
     }
-}
-
-impl ProfileUpdatePort for FileProfileStore {
-    fn update(&mut self, path: &Path, expected: &[u8], replacement: &[u8]) -> io::Result<()> {
+    fn update(&mut self, path: &Path, replacement: &[u8]) -> io::Result<()> {
         let metadata = fs::symlink_metadata(path)?;
         if !metadata.file_type().is_file() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "profile update target must be a regular file",
-            ));
-        }
-
-        let mut locked = OpenOptions::new().read(true).write(true).open(path)?;
-        try_lock_exclusive(&locked)?;
-        locked.seek(SeekFrom::Start(0))?;
-        let mut current = Vec::new();
-        locked.read_to_end(&mut current)?;
-        if current != expected {
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "profile changed before the update lock was acquired",
             ));
         }
 
@@ -88,75 +64,24 @@ impl ProfileUpdatePort for FileProfileStore {
     }
 }
 
-pub(crate) trait ProfileReadPort {
+pub(crate) trait ProfileStore {
     fn read(&mut self, path: &Path) -> io::Result<Vec<u8>>;
-}
 
-/// Snapshot of a profile creation target before an atomic create-new attempt.
-///
-/// `Absent` does not reserve the path. The create-new operation must still use
-/// no-replace semantics and map a concurrent conflict to `ProfileAlreadyExists`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ProfileCreateTargetState {
-    Absent,
-    Existing,
-}
-
-pub(crate) trait ProfileCreateTargetPort {
-    /// Inspects the target without creating, replacing, or reserving it.
-    fn inspect(&mut self, path: &Path) -> io::Result<ProfileCreateTargetState>;
-}
-
-pub(crate) trait ProfileCreatePort: ProfileCreateTargetPort {
     /// Creates a new profile without replacing an existing target.
     ///
     /// An existing target must be reported as [`io::ErrorKind::AlreadyExists`].
     fn create_new(&mut self, path: &Path, bytes: &[u8]) -> io::Result<()>;
-}
-
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not persist pairing-key updates"
-    )
-)]
-pub(crate) trait ProfileUpdatePort: ProfileReadPort {
-    /// Replaces an existing profile if it still has the expected complete bytes.
+    /// Atomically replaces an existing regular profile for its single live writer.
     ///
-    /// Lock contention and a stale expected document are reported as
-    /// [`io::ErrorKind::WouldBlock`].
-    fn update(&mut self, path: &Path, expected: &[u8], replacement: &[u8]) -> io::Result<()>;
-}
-
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not persist pairing-key updates"
-    )
-)]
-fn try_lock_exclusive(file: &File) -> io::Result<()> {
-    file.try_lock_exclusive().map_err(|source| {
-        if source.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
-            io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "profile update lock is already held",
-            )
-        } else {
-            source
-        }
-    })
-}
-
-fn inspect_target(path: &Path) -> io::Result<ProfileCreateTargetState> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => Ok(ProfileCreateTargetState::Existing),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => {
-            Ok(ProfileCreateTargetState::Absent)
-        }
-        Err(source) => Err(source),
-    }
+    /// Multiple processes or controllers updating the same path are unsupported.
+    #[cfg_attr(
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not persist pairing-key updates"
+        )
+    )]
+    fn update(&mut self, path: &Path, replacement: &[u8]) -> io::Result<()>;
 }
 
 fn usable_parent(path: &Path) -> &Path {
@@ -210,24 +135,19 @@ fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::{
-        fs::{self, OpenOptions},
+        fs,
         io::{self, Write},
         path::{Path, PathBuf},
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use atomic_write_file::AtomicWriteFile;
-    use fs2::FileExt as _;
-
     use crate::{
         model,
         profile::{PairingProfile, ProfileDocument},
     };
+    use atomic_write_file::AtomicWriteFile;
 
-    use super::{
-        FileProfileStore, ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState,
-        ProfileReadPort, ProfileUpdatePort,
-    };
+    use super::{FileProfileStore, ProfileStore};
 
     static NEXT_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
@@ -240,10 +160,6 @@ mod tests {
             .expect("serialize empty Pro profile");
         let mut store = FileProfileStore;
 
-        assert_eq!(
-            store.inspect(&target).expect("inspect absent target"),
-            ProfileCreateTargetState::Absent
-        );
         store
             .create_new(&target, &expected)
             .expect("create profile through production store");
@@ -265,10 +181,6 @@ mod tests {
         let file_target = temp.path().join("racing.json");
         let competitor = b"competitor-owned bytes";
 
-        assert_eq!(
-            store.inspect(&file_target).expect("inspect absent target"),
-            ProfileCreateTargetState::Absent
-        );
         fs::write(&file_target, competitor).expect("create racing target");
         let error = store
             .create_new(&file_target, b"replacement")
@@ -316,10 +228,6 @@ mod tests {
         }
         let mut store = FileProfileStore;
 
-        assert_eq!(
-            store.inspect(&target).expect("inspect symlink target"),
-            ProfileCreateTargetState::Existing
-        );
         let error = store
             .create_new(&target, b"replacement")
             .expect_err("create-new must not replace a dangling symlink");
@@ -339,26 +247,19 @@ mod tests {
     }
 
     #[test]
-    fn file_profile_store_replaces_only_the_expected_complete_document() {
+    fn file_profile_store_replaces_an_existing_complete_document_for_one_writer() {
         let temp = TempDirectory::new("update");
         let target = temp.path().join("pro.json");
         let old = valid_profile_bytes("old");
         let new = valid_profile_bytes("new");
-        let competitor = valid_profile_bytes("competitor");
         let mut store = FileProfileStore;
         store
             .create_new(&target, &old)
             .expect("create original profile");
 
-        let error = store
-            .update(&target, &competitor, &new)
-            .expect_err("stale writer must not replace the current profile");
-        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
-        assert_eq!(store.read(&target).expect("read current profile"), old);
-
         store
-            .update(&target, &old, &new)
-            .expect("replace matching profile");
+            .update(&target, &new)
+            .expect("replace current profile");
         assert_eq!(store.read(&target).expect("read updated profile"), new);
         PairingProfile::<model::Pro>::try_from(
             ProfileDocument::parse_json(&new).expect("updated profile remains valid"),
@@ -369,36 +270,6 @@ mod tests {
             ["pro.json"],
             "successful update must remove the same-directory temporary file"
         );
-    }
-
-    #[test]
-    fn file_profile_store_rejects_lock_contention_without_waiting_or_mutating() {
-        let temp = TempDirectory::new("contention");
-        let target = temp.path().join("pro.json");
-        let old = valid_profile_bytes("old");
-        let new = valid_profile_bytes("new");
-        let mut store = FileProfileStore;
-        store
-            .create_new(&target, &old)
-            .expect("create original profile");
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&target)
-            .expect("open target for test lock");
-        lock.try_lock_exclusive().expect("hold exclusive test lock");
-
-        let error = store
-            .update(&target, &old, &new)
-            .expect_err("contended update must fail immediately");
-
-        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
-        drop(lock);
-        assert_eq!(store.read(&target).expect("read unchanged profile"), old);
-        store
-            .update(&target, &old, &new)
-            .expect("update must work after the lock is released");
-        assert_eq!(store.read(&target).expect("read updated profile"), new);
     }
 
     #[test]
@@ -430,7 +301,7 @@ mod tests {
         .expect("old profile remains Pro-typed");
 
         store
-            .update(&target, &old, &new)
+            .update(&target, &new)
             .expect("complete later replacement");
         let after_commit = store.read(&target).expect("read new profile");
         assert_eq!(after_commit, new);
@@ -446,6 +317,12 @@ mod tests {
     }
 
     fn valid_profile_bytes(marker: &str) -> Vec<u8> {
+        let key_byte = match marker {
+            "old" => "11",
+            "new" => "22",
+            "competitor" => "33",
+            _ => panic!("unsupported test marker"),
+        };
         let value = serde_json::json!({
             "format": "swbt.profile",
             "schema_version": 2,
@@ -454,10 +331,17 @@ mod tests {
                 "kind": "adapter-default"
             },
             "key_store": {
-                "namespaces": {}
-            },
-            "future_extension": {
-                "marker": marker
+                "namespaces": {
+                    "02:12:34:56:78:9A": {
+                        "98:B6:E9:11:22:33/P": {
+                            "link_key": {
+                                "authenticated": true,
+                                "value": key_byte.repeat(16)
+                            },
+                            "link_key_type": 4
+                        }
+                    }
+                }
             }
         });
         ProfileDocument::parse_json(value.to_string().as_bytes())

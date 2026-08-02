@@ -16,10 +16,5 @@ pub use colors::{ControllerColors, Rgb24};
 pub use document::PairingProfile;
 pub(crate) use document::ProfileDocument;
 pub use identity::{LocalAddress, ProfileIdentity};
-#[cfg(feature = "bumble")]
-pub(crate) use store::ProfileUpdatePort;
-pub(crate) use store::{
-    FileProfileStore, ProfileCreatePort, ProfileCreateTargetPort, ProfileCreateTargetState,
-    ProfileReadPort,
-};
+pub(crate) use store::{FileProfileStore, ProfileStore};
 pub use summary::{ProfileIdentityKind, ProfileSummary, inspect_profile};

@@ -63,10 +63,13 @@ all/default test、license/SBOM、Windows限定構成のrollback rehearsalまで
   Windows 11 25H2、CSR8510 A10、Switch 2 system version 22.5.0
   （ユーザ報告）で実機 pairing、保存鍵からの reconnect、Periodic/Direct 入力を確認しています。
   他の OS、adapter、system version と長時間の信頼性は未検証です。
-- `bumble` feature の `create_profile()` は既存 target を置換せず、valid empty envelope を
-  USB open より先に保存してから pairing と NX readiness を待ちます。feature 無効時は file を
-  作らず `ErrorKind::UnsupportedCapability` を返します。pairing key は profile 全体を
-  atomic update して保存します。保存鍵を使う active/incoming reconnect は virtual Classic
+- `bumble` feature の `create_profile()` はtargetを事前検査せず、create-newの一回で既存targetを
+  置換せずにvalid empty envelopeをUSB openより先に保存し、pairingとNX readinessを待ちます。
+  feature無効時はprofile pathへ触れず`ErrorKind::UnsupportedCapability`を返します。profileは
+  swbt-python 0.6.0のClassic pairing形状だけを受け付け、unknown field、旧Rustのraw peer名、
+  LE key fieldを拒否します。pairing keyの更新は一つのlive writerがprofile全体をatomic replace
+  して保存します。同一pathの複数process/controllerによる同時更新は非対応です。保存鍵を使う
+  active/incoming reconnectはvirtual Classic
   packet path で同一 session の Ready まで検査済みです。実機では同じ Pro profile から
   active reconnect した Periodic 2件と Direct 1件が Ready、入力、neutral、close、adapter
   reopen、profile 完全一致まで成功しました。このうち Periodic 1件はユーザが Switch 2 を
@@ -237,7 +240,7 @@ git diff --check
 ```
 
 `cargo tree -p swbt-rs --no-default-features --edges normal --locked` の直接依存は
-`atomic-write-file`、`fs2`、`serde_json` で、`tracing`、Bumble、`rusb` を含みません。selected Miri は nightly の
+`atomic-write-file`、`serde`、`serde_json` で、`tracing`、Bumble、`rusb` を含みません。selected Miri は nightly の
 `miri` component を導入した環境で次の command を実行します。
 
 ```powershell

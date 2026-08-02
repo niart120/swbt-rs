@@ -15,7 +15,7 @@ use crate::{
     profile::{ControllerColors, ControllerKind, Rgb24},
 };
 
-use super::{ProController, ProfileConfig, build::ProfileReadPort};
+use super::{ProController, ProfileConfig, build::ProfileStore};
 
 #[derive(Debug, PartialEq, Eq)]
 enum BuildEvent {
@@ -43,12 +43,20 @@ impl FakeProfileReader {
     }
 }
 
-impl ProfileReadPort for FakeProfileReader {
+impl ProfileStore for FakeProfileReader {
     fn read(&mut self, path: &Path) -> io::Result<Vec<u8>> {
         self.events.push(BuildEvent::Read(path.to_owned()));
         self.reads
             .pop_front()
             .expect("unexpected extra profile read")
+    }
+
+    fn create_new(&mut self, _path: &Path, _bytes: &[u8]) -> io::Result<()> {
+        panic!("build test must not create a profile")
+    }
+
+    fn update(&mut self, _path: &Path, _replacement: &[u8]) -> io::Result<()> {
+        panic!("build test must not update a profile")
     }
 }
 

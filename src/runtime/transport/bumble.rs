@@ -144,7 +144,7 @@ impl TransportPort for BumbleTransportPort {
         let options = backend_open_options(&self.selector, &self.config, self.identity, activity)?;
         let bonds: Box<dyn backend::BondStore> = self.profile_key_store.as_ref().map_or_else(
             || Box::new(VolatileBondStore::default()) as _,
-            |factory| Box::new(factory.create()) as _,
+            ProfileKeyStoreFactory::create,
         );
         let session = self.opener.open(options, bonds)?;
         let capabilities = session.capabilities()?;

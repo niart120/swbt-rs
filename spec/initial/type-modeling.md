@@ -395,8 +395,9 @@ builderは`ControllerKind`、button capability、reporting modeを値として�
 
 `create_profile()`:
 
-- path必須、target不存在を要求
+- path必須。target existenceは事前検査しない
 - valid empty envelopeをadapter open前にcreate-new
+- create-new競合だけを`ProfileAlreadyExists`にする
 - typed controllerをopenしてpairing
 - success時Ready controllerを返す
 - failure時envelopeを残し内部resourceをcleanup
@@ -411,7 +412,9 @@ pub struct PairingProfile<M: ControllerModel> {
 }
 ```
 
-JSON parserは`ControllerKind`を読み、`M::KIND`と照合してtyped profileへ変換する。
+JSON parserはswbt-python 0.6.0のstrict Classic pairing形状を型付きserde DTOへ読み、
+`ControllerKind`を`M::KIND`と照合してtyped profileへ変換する。unknown field、旧Rustのraw peer名、
+`address_type`、LE key fieldは拒否する。
 
 `PairingProfile<model::Pro>`をJoy-Conへ渡すAPIは作らない。raw inspectionとCLIだけが`ControllerKind`を直接扱う。
 

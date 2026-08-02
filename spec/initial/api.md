@@ -153,7 +153,7 @@ impl<M: ControllerModel> ControllerBuilder<M, reporting::Periodic> {
 新規 profile 作成は builder を消費する複合操作とする。
 
 ```text
-validate builder and target path
+validate builder and required target path
   → create valid empty PairingProfile<M> envelope
   → construct Controller<M, R>
   → open adapter / worker
@@ -164,12 +164,13 @@ validate builder and target path
 規則:
 
 - `profile_path` は必須
-- path が既に存在する場合は `ProfileAlreadyExists`
+- target existenceは事前検査せず、create-new競合を`ProfileAlreadyExists`にする
 - envelope を adapter open より先に原子的に作成する
 - pairing に失敗しても envelope は残す
 - 失敗時は内部 controller を `close_without_neutral()` 相当で cleanup し、controller object は返さない
 - 成功時に返す controller は `Ready`
 - `ProfileIdentity::LocalAddress` は対応 gate 完了まで `UnsupportedCapability`
+- `bumble` feature無効時はprofile filesystem I/Oより先に`UnsupportedCapability`
 
 `Controller<M, R>` 自体には `create_profile()` method を生やさない。
 

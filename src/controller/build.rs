@@ -6,10 +6,10 @@ use crate::{
     profile::{PairingProfile, ProfileDocument},
 };
 
-pub(super) use crate::profile::ProfileReadPort;
+pub(super) use crate::profile::ProfileStore;
 
 pub(super) fn read_typed_profile<M: ControllerModel>(
-    reader: &mut impl ProfileReadPort,
+    reader: &mut impl ProfileStore,
     path: &Path,
 ) -> crate::Result<PairingProfile<M>> {
     let bytes = reader.read(path).map_err(|source| {

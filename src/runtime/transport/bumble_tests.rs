@@ -26,6 +26,7 @@ use super::{
 
 const LOCAL_NAMESPACE: &str = "00:1B:DC:F9:9F:7D";
 const PROFILE_PEER: &str = "11:22:33:44:55:66";
+const PROFILE_PUBLIC_PEER: &str = "11:22:33:44:55:66/P";
 
 #[test]
 fn backend_error_kinds_preserve_the_transport_contract() {
@@ -418,8 +419,7 @@ fn profile_bytes() -> Vec<u8> {
         "key_store": {
             "namespaces": {
                 LOCAL_NAMESPACE: {
-                    PROFILE_PEER: {
-                        "address_type": 0,
+                    PROFILE_PUBLIC_PEER: {
                         "link_key": {
                             "authenticated": true,
                             "value": "A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1"

@@ -217,7 +217,7 @@ Proはdual sticks、Joy-Con Lはleft only、Joy-Con Rはright onlyというdomai
 - malformed UTF-8 / JSON
 - address validation
 - multiple peer rejection
-- key parse
+- strict Classic key parseとunknown/legacy/LE field rejection
 - secret-safe `Debug`
 - deterministic JSON
 - `PairingProfile<M>`のkind mismatch
@@ -237,7 +237,7 @@ Proはdual sticks、Joy-Con Lはleft only、Joy-Con Rはright onlyというdomai
 fake filesystemとfake transportを使い、順序をevent logで検査する。
 
 ```text
-profile_validate_target
+profile_plan
 profile_create_empty
 profile_configure_typed
 transport_open
@@ -249,7 +249,8 @@ return_controller
 検証:
 
 - profile path未指定は`ProfilePathRequired`
-- target existingは`ProfileAlreadyExists`、上書きなし
+- targetを事前検査せず、create-new競合は`ProfileAlreadyExists`、上書きなし
+- feature無効時はtarget filesystem I/Oなしで`UnsupportedCapability`
 - invalid identityはtransport open前に失敗
 - empty envelope persistenceがtransport openより先
 - 同じcreate呼出しでは保存後のprofile readを行わず、保存bytesとruntime configが同じ型付きprofileから作られる
@@ -269,11 +270,11 @@ explicit local addressが未対応の間は、`UnsupportedCapability`を返しad
 - temp create / write / flush / sync failure
 - create-new race
 - atomic replace failure
-- lock contention
 - orphan temp cleanup
 - Windows rename semantics
 
 自動backup testは作らない。更新中断では旧または新fileのどちらかがvalidであることを検査する。
+同一pathの複数writerは非対応のため、lock contentionとstale-writer検出をtest対象にしない。
 
 ## 7. Golden differential tests
 

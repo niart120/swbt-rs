@@ -62,10 +62,12 @@ fn profile_json() -> &'static str {
   "key_store": {
     "namespaces": {
       "02:12:34:56:78:9A": {
-        "AA:BB:CC:DD:EE:FF": {
+        "AA:BB:CC:DD:EE:FF/P": {
           "link_key": {
-            "value": "7045EC0E7A7045EC"
-          }
+            "authenticated": true,
+            "value": "7045EC0E7A7045EC7045EC0E7A7045EC"
+          },
+          "link_key_type": 4
         }
       }
     }
