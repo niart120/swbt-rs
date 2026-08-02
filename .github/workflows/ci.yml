@@ -28,22 +28,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.87.0
-      - run: cargo check --all-targets --all-features --locked
+      - run: cargo check --workspace --all-targets --all-features --locked
 
   check-stable:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --all-targets --all-features --locked
+      - run: cargo check --workspace --all-targets --all-features --locked
 
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --all-targets --all-features --locked
-      - run: cargo test --all-targets --all-features --locked
+      - run: cargo check --workspace --all-targets --all-features --locked
+      - run: cargo test --workspace --all-targets --all-features --locked
 
   clippy:
     runs-on: ubuntu-latest
@@ -52,14 +52,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --all-targets --all-features --locked
+      - run: cargo test --workspace --all-targets --all-features --locked
 
   protocol-pure:
     runs-on: ubuntu-latest
@@ -67,12 +67,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: >-
-          cargo test --lib protocol:: --no-default-features --locked
-      - run: cargo build --no-default-features --locked
+          cargo test -p swbt-rs --lib protocol:: --no-default-features --locked
+      - run: cargo build -p swbt-rs --no-default-features --locked
       - name: Verify Bumble-free dependency graph
         shell: bash
         run: |
-          dependency_tree="$(cargo tree --no-default-features --edges normal --locked)"
+          dependency_tree="$(cargo tree -p swbt-rs --no-default-features --edges normal --locked)"
           if grep -q 'bumble v' <<<"${dependency_tree}"; then
             echo 'Bumble must not be present without the bumble feature.'
             exit 1
@@ -85,8 +85,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --doc --all-features --locked
-      - run: cargo doc --no-deps --all-features --locked
+      - run: cargo test --doc --workspace --all-features --locked
+      - run: cargo doc --no-deps --workspace --all-features --locked
 
   dependency-policy:
     runs-on: ubuntu-latest

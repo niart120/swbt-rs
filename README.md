@@ -14,6 +14,10 @@ address まで実装済みです。Cargo package は library target `swbt` を�
 model-valid input、crate 内部の Switch HID protocol と runtime、公開 controller builder、
 descriptor-only adapter discovery を実装しています。
 
+repository は公開 package `swbt-rs` と、`publish = false` の検証用 package `swbt-probe`、
+`swbt-hardware-runner` からなる Cargo workspace です。crates.io archive に検証用 package は
+含まれません。
+
 `swbt-rs` 0.1.0 は crates.io の初回公開版です。`bumble` feature は crates.io の
 `swbt-bumble-backend = "=0.1.1"` を使い、clean `cargo package --locked`、展開archiveのMSRV offline
 all/default test、license/SBOM、Windows限定構成のrollback rehearsalまで確認済みです。
@@ -100,8 +104,7 @@ permission/claim に失敗する、実行中に unplug した、Python backend �
 
 ## Pro Periodic 実機 runner
 
-M5 の実機確認には
-[`examples/pro_periodic_hardware.rs`](examples/pro_periodic_hardware.rs) を使います。Switch の
+M5 の実機確認には、repository checkout に含まれる `swbt-hardware-runner pro-periodic` を使います。Switch の
 「持ちかた／順番を変える」画面を開き、WinUSB driver を割り当てた CSR8510 A10 を接続してから
 実行します。次の例は run 1、pair timeout 60 秒です。profile path は実行前に存在していては
 いけません。
@@ -110,7 +113,7 @@ M5 の実機確認には
 $runStamp = Get-Date -Format yyyyMMdd-HHmmss
 $profilePath = Join-Path $env:TEMP "swbt-m5-$runStamp-run-01.json"
 $evidencePath = Join-Path $env:TEMP "swbt-m5-$runStamp-run-01.ndjson"
-cargo run --locked --example pro_periodic_hardware --features bumble -- `
+cargo run -p swbt-hardware-runner --locked -- pro-periodic `
   --adapter usb:0a12:0001 `
   --profile $profilePath `
   --pair-timeout-secs 60 `
@@ -126,15 +129,14 @@ command 成功は Switch UI の変化を証明しないため、`ui_observed` �
 
 ## Pro profile reconnect / Direct 実機 runner
 
-M6 の既存 Pro profile からの再接続には
-[`examples/pro_profile_hardware.rs`](examples/pro_profile_hardware.rs) を使います。`--profile` には
+M6 の既存 Pro profile からの再接続には `swbt-hardware-runner pro-profile` を使います。`--profile` には
 schema v2 の既存 profile を指定します。runner は実行前後の byte 完全一致を成功条件として
 検査します。次の例は Direct reconnect、timeout 60秒です。
 
 ```powershell
 $profilePath = Join-Path $env:TEMP 'existing-swbt-pro-profile.json'
 $evidencePath = Join-Path $env:TEMP 'swbt-m6-direct-run-01.ndjson'
-cargo run --locked --example pro_profile_hardware --features bumble -- `
+cargo run -p swbt-hardware-runner --locked -- pro-profile `
   --adapter usb:0a12:0001 `
   --profile $profilePath `
   --mode direct `
@@ -155,8 +157,7 @@ Ready 後の500 ms idle で user input report が0件であることも検査し
 
 ## Joy-Con L/R実機runner
 
-M7のJoy-Con確認には
-[`examples/joycon_profile_hardware.rs`](examples/joycon_profile_hardware.rs) を使います。fresh Pairは
+M7のJoy-Con確認には `swbt-hardware-runner joycon-profile` を使います。fresh Pairは
 Periodicだけを受け付け、Directは同じmodelの既存schema v2 profileからreconnectします。次の例は
 Joy-Con Rのfresh Periodic Pairです。profile pathは実行前に存在していてはいけません。
 
@@ -164,7 +165,7 @@ Joy-Con Rのfresh Periodic Pairです。profile pathは実行前に存在して�
 $runStamp = Get-Date -Format yyyyMMdd-HHmmss
 $profilePath = Join-Path $env:TEMP "swbt-m7-joycon-r-$runStamp.json"
 $evidencePath = Join-Path $env:TEMP "swbt-m7-joycon-r-$runStamp.ndjson"
-cargo run --locked --example joycon_profile_hardware --features bumble -- `
+cargo run -p swbt-hardware-runner --locked -- joycon-profile `
   --adapter usb:0a12:0001 `
   --profile $profilePath `
   --model right `
@@ -183,23 +184,25 @@ peer address、key materialは出力しません。UI結果は別recordにしま
 
 ## diagnosticsとswbt-probe
 
-runtimeは`swbt::diagnostics` targetへschema `swbt.diagnostics` version 1の`tracing` eventを出します。
+`diagnostics-schema` featureを有効にしたruntimeは、`swbt::diagnostics` targetへschema
+`swbt.diagnostics` version 1の`tracing` eventを出します。
 session、lifecycle、report mode、committed IMU mode、subcommand、transport受理数、切断理由、分類済み
 worker failureを記録し、profile path、Bluetooth address、link key、USB serial、raw packet、error source
 chainは安定fieldへ含めません。受理数はtransportがreportを受理した回数であり、無線到達やSwitch画面の
 変化を証明しません。
 
-`probe` featureは`bumble`を含み、`swbt-probe` binaryを有効にします。主な入口は次のとおりです。
+`swbt-probe` は repository checkout 専用の `publish = false` package で、`bumble` と
+`diagnostics-schema` を有効にします。主な入口は次のとおりです。
 
 ```powershell
-cargo run --locked --features probe --bin swbt-probe -- adapters
-cargo run --locked --features probe --bin swbt-probe -- open --adapter usb:0
-cargo run --locked --features probe --bin swbt-probe -- profile inspect .\profile.json
-cargo run --locked --features probe --bin swbt-probe -- profile verify .\profile.json
-cargo run --locked --features probe --bin swbt-probe -- pair --controller pro --profile .\new-profile.json --trace .\pair-trace.ndjson
+cargo run -p swbt-probe --locked -- adapters
+cargo run -p swbt-probe --locked -- open --adapter usb:0
+cargo run -p swbt-probe --locked -- profile inspect .\profile.json
+cargo run -p swbt-probe --locked -- profile verify .\profile.json
+cargo run -p swbt-probe --locked -- pair --controller pro --profile .\new-profile.json --trace .\pair-trace.ndjson
 $localAddress = Read-Host 'locally administered address (XX:XX:XX:XX:XX:XX)'
-cargo run --locked --features probe --bin swbt-probe -- pair --controller pro --profile .\new-local-profile.json --trace .\local-pair-trace.ndjson --local-address $localAddress
-cargo run --locked --features probe --bin swbt-probe -- reconnect --controller pro --profile .\profile.json --trace .\reconnect-trace.ndjson
+cargo run -p swbt-probe --locked -- pair --controller pro --profile .\new-local-profile.json --trace .\local-pair-trace.ndjson --local-address $localAddress
+cargo run -p swbt-probe --locked -- reconnect --controller pro --profile .\profile.json --trace .\reconnect-trace.ndjson
 ```
 
 `pair`のprofileと全接続commandのtraceはcreate-newで、既存fileを上書きしません。controllerは
@@ -223,18 +226,18 @@ MSRV は Rust 1.87 です。現在のローカル確認は次の command で実�
 
 ```powershell
 cargo fmt --all --check
-cargo check --all-targets --all-features --locked
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo test --all-targets --all-features --locked
-cargo test --lib protocol:: --no-default-features --locked
-cargo tree --no-default-features --edges normal --locked
-cargo test --doc --all-features --locked
-cargo build --all-features --locked
+cargo check --workspace --all-targets --all-features --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-targets --all-features --locked
+cargo test -p swbt-rs --lib protocol:: --no-default-features --locked
+cargo tree -p swbt-rs --no-default-features --edges normal --locked
+cargo test --doc -p swbt-rs --all-features --locked
+cargo build -p swbt-rs --all-features --locked
 git diff --check
 ```
 
-`cargo tree --no-default-features --edges normal --locked` の直接依存は `atomic-write-file`、
-`fs2`、`serde_json`、`tracing` で、Bumble と `rusb` を含みません。selected Miri は nightly の
+`cargo tree -p swbt-rs --no-default-features --edges normal --locked` の直接依存は
+`atomic-write-file`、`fs2`、`serde_json` で、`tracing`、Bumble、`rusb` を含みません。selected Miri は nightly の
 `miri` component を導入した環境で次の command を実行します。
 
 ```powershell

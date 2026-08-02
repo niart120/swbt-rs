@@ -71,22 +71,22 @@ clean checkout で次を実行する。
 
 ```powershell
 cargo fmt --all --check
-cargo +1.87.0 check --all-targets --all-features --locked
-cargo check --all-targets --all-features --locked
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo test --all-targets --all-features --locked
-cargo test --all-targets --locked
-cargo test --lib protocol:: --no-default-features --locked
-cargo test --doc --all-features --locked
-cargo build --all-features --locked
-cargo build --no-default-features --locked
+cargo +1.87.0 check --workspace --all-targets --all-features --locked
+cargo check --workspace --all-targets --all-features --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-targets --all-features --locked
+cargo test -p swbt-rs --all-targets --locked
+cargo test -p swbt-rs --lib protocol:: --no-default-features --locked
+cargo test --doc -p swbt-rs --all-features --locked
+cargo build -p swbt-rs --all-features --locked
+cargo build -p swbt-rs --no-default-features --locked
 cargo deny --locked check
-cargo package --locked --list
-cargo package --locked
+cargo package -p swbt-rs --locked --list
+cargo package -p swbt-rs --locked
 git diff --check
 ```
 
-`cargo package --locked --list` では `src/`、`docs/`、`examples/`、`tests/` と公開 root file だけを
+`cargo package -p swbt-rs --locked --list` では `src/`、`docs/`、`examples/`、`tests/` と公開 root file だけを
 含むことを確認する。`.agents/`、`.codex/`、`.github/`、`spec/`、`tools/`、実機 trace、raw profile、
 秘密鍵を含めない。
 
