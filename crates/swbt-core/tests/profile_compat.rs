@@ -104,7 +104,7 @@ fn typed_profile_rejects_unknown_extensions() {
 }
 
 #[test]
-fn typed_profile_normalizes_bluetooth_addresses_to_uppercase() {
+fn typed_profile_normalizes_lowercase_namespace_to_uppercase() {
     let mut input = python_profile_fixtures()
         .into_iter()
         .next()
@@ -115,20 +115,12 @@ fn typed_profile_normalizes_bluetooth_addresses_to_uppercase() {
     let peers = namespaces
         .remove("00:11:22:33:44:55")
         .expect("fixture namespace must exist");
-    let mut peers = peers
-        .as_object()
-        .expect("fixture peers must be an object")
-        .clone();
-    let keys = peers
-        .remove("98:B6:E9:11:22:33/P")
-        .expect("fixture peer must exist");
-    peers.insert("98:b6:e9:11:22:33/P".to_owned(), keys);
-    namespaces.insert("aa:bb:cc:dd:ee:ff".to_owned(), Value::Object(peers));
+    namespaces.insert("aa:bb:cc:dd:ee:ff".to_owned(), peers);
 
     let profile = PairingProfile::<model::Pro>::from_json(
-        &serde_json::to_vec(&input).expect("serialize lowercase profile"),
+        &serde_json::to_vec(&input).expect("serialize lowercase namespace profile"),
     )
-    .expect("lowercase Bluetooth addresses must parse");
+    .expect("lowercase Bluetooth namespace must parse");
     let output: Value = serde_json::from_slice(
         &profile
             .to_json_bytes()
@@ -138,6 +130,37 @@ fn typed_profile_normalizes_bluetooth_addresses_to_uppercase() {
 
     assert!(
         output["key_store"]["namespaces"]["AA:BB:CC:DD:EE:FF"]["98:B6:E9:11:22:33/P"].is_object()
+    );
+}
+
+#[test]
+fn typed_profile_normalizes_lowercase_peer_to_uppercase() {
+    let mut input = python_profile_fixtures()
+        .into_iter()
+        .next()
+        .expect("fixture must retain the Pro case");
+    let peers = input["key_store"]["namespaces"]["00:11:22:33:44:55"]
+        .as_object_mut()
+        .expect("fixture peers must be an object");
+    let keys = peers
+        .remove("98:B6:E9:11:22:33/P")
+        .expect("fixture peer must exist");
+    peers.insert("98:b6:e9:11:22:33/P".to_owned(), keys);
+
+    let profile = PairingProfile::<model::Pro>::from_json(
+        &serde_json::to_vec(&input).expect("serialize lowercase peer profile"),
+    )
+    .expect("lowercase Bluetooth peer must parse");
+    let output: Value = serde_json::from_slice(
+        &profile
+            .to_json_bytes()
+            .expect("normalized profile must serialize"),
+    )
+    .expect("normalized profile must remain JSON");
+
+    assert!(
+        output["key_store"]["namespaces"]["00:11:22:33:44:55"]["98:B6:E9:11:22:33/P"]
+            .is_object()
     );
 }
 
