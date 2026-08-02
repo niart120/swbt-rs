@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     controller::input::{press_candidate, release_candidate, tap_plan},
-    diagnostics::event::WorkerFailureCategory,
+    diagnostics::{LifecycleState, event::WorkerFailureCategory},
     error::Error,
     input::{Button, InputState},
     model::ControllerModel,
@@ -24,9 +24,7 @@ use crate::{
             begin_tap as begin_direct_tap, send_candidate as send_direct,
         },
         handshake::{Handshake, HandshakeError, HandshakeProgress},
-        lifecycle::{
-            LifecycleAction, LifecycleCommandError, LifecycleState, LifecycleStateMachine,
-        },
+        lifecycle::{LifecycleCommandError, LifecycleStateMachine},
         output::{
             OutputHandling, OutputHandlingContext, OutputHandlingError, OutputObservation,
             handle_output,
@@ -640,11 +638,7 @@ where
         observe_output: Box<dyn FnMut(OutputObservation) + Send + 'static>,
         status: StatusPublisher<M>,
     ) -> Self {
-        let mut lifecycle = LifecycleStateMachine::new();
-        let open = lifecycle.request_open();
-        debug_assert_eq!(open, Ok(LifecycleAction::OpenTransport));
-        let opened = lifecycle.complete_open();
-        debug_assert_eq!(opened, LifecycleAction::Opened);
+        let lifecycle = LifecycleStateMachine::new();
         status.set_lifecycle(LifecycleState::Open);
         Self {
             lifecycle,
@@ -1110,8 +1104,7 @@ where
                 self.connection = Some(connection);
             }
             Ok(ReadinessProgress::Ready(ready)) => {
-                if ready.session_id() != connection.session_id || !self.lifecycle.mark_ready(ready)
-                {
+                if ready.session_id() != connection.session_id || !self.lifecycle.mark_ready() {
                     self.connection = Some(connection);
                     return Err(WorkerCoreError::InvalidLifecycle);
                 }
@@ -1187,7 +1180,7 @@ where
         if let Some(session_id) = self.sessions.current() {
             self.sessions.end_current(session_id);
         }
-        self.status.close(self.lifecycle.state());
+        self.status.close(LifecycleState::Closed);
         WorkerStep::Closed {
             completion,
             interrupted,
@@ -2015,6 +2008,7 @@ mod tests {
     };
 
     use crate::{
+        diagnostics::LifecycleState,
         input::{InputState, ProButton},
         model::{ButtonKind, Pro},
         protocol::SwitchHidProtocol,
@@ -2023,7 +2017,6 @@ mod tests {
             cleanup::{CleanupPhase, CloseMode},
             command::{CommandEnqueueError, command_channel},
             direct::{DirectTapError, DirectTapInterruption},
-            lifecycle::LifecycleState,
             output::{OutputHandlingError, OutputObservation},
             periodic::PeriodicError,
             readiness::ReadinessError,
@@ -2546,7 +2539,7 @@ mod tests {
         ));
         assert_eq!(commands.polls(), 0);
         assert_eq!(commands.remaining(), 1);
-        assert_eq!(harness.worker.lifecycle_state(), LifecycleState::Closed);
+        assert_eq!(harness.worker.lifecycle_state(), LifecycleState::Closing);
         assert_eq!(harness.worker.input_snapshot(), pressed);
         assert_eq!(
             harness.worker.sender_timer(),
@@ -2603,7 +2596,7 @@ mod tests {
         assert!(!error.to_string().contains("sensitive"));
         assert_eq!(commands.remaining(), 0);
         assert_eq!(harness.worker.sender_timer(), timer_before);
-        assert_eq!(harness.worker.lifecycle_state(), LifecycleState::Closed);
+        assert_eq!(harness.worker.lifecycle_state(), LifecycleState::Closing);
         assert_eq!(
             *lock(&harness.trace),
             [
@@ -2645,7 +2638,7 @@ mod tests {
             failure.source_error().kind(),
             TransportErrorKind::SourceTerminated
         );
-        assert_eq!(worker.lifecycle_state(), LifecycleState::Closed);
+        assert_eq!(worker.lifecycle_state(), LifecycleState::Closing);
         let status = status_reader.status();
         assert_eq!(status.lifecycle, LifecycleState::Closed);
         assert!(!status.connected);
@@ -2848,7 +2841,7 @@ mod tests {
         assert!(completion.performed());
         assert!(interrupted.is_none());
         assert_eq!(harness.worker.sender_timer(), timer_before.wrapping_add(1));
-        assert_eq!(harness.worker.lifecycle_state(), LifecycleState::Closed);
+        assert_eq!(harness.worker.lifecycle_state(), LifecycleState::Closing);
         assert_eq!(
             *lock(&harness.trace),
             [
@@ -3423,7 +3416,7 @@ mod tests {
         assert!(!error.to_string().contains("sensitive"));
         assert_eq!(progress.due_actions, 0);
         assert_eq!(harness.worker.sender_timer(), timer_before);
-        assert_eq!(harness.worker.lifecycle_state(), LifecycleState::Closed);
+        assert_eq!(harness.worker.lifecycle_state(), LifecycleState::Closing);
         assert_eq!(
             *lock(&harness.trace),
             [

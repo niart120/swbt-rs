@@ -91,13 +91,21 @@ connection command error を実際の実行経路に合わせて縮小する。�
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | T01 open 済み transport から始まる worker が公開 `Open→Connecting→Ready→Open→Closing→Closed` を維持し、failure cleanup 後の公開 status は `Failed` のままになる | regression / characterization | runtime unit / integration | internal `Configured`、`opening`、同一 worker reopen を除去する |
+| refactor-done | T01 open 済み transport から始まる worker が公開 `Open→Connecting→Ready→Open→Closing→Closed` を維持し、failure cleanup 後の公開 status は `Failed` のままになる | regression / characterization | runtime unit / integration | internal `Configured`、`opening`、同一 worker reopen を除去した |
 | todo | T02 session ID が `u64::MAX` の次に 1 へ wrap し、wrap 前 session の event を current session event として受理しない | edge | runtime unit | `SessionError` と上位 error variant を除去する |
 | todo | T03 表現不能な caller timeout は transport 副作用前に `InvalidInput` となり、長時間稼働を模した clock projection は専用 overflow errorなしで monotonic timestamp を飽和する | edge / regression | controller/runtime unit | clock/deadline errorを共通 helper と入力境界へ集約する |
 | todo | T04 pair/reconnect が共通 connection failure を通っても no-bond、timeout、pre-ready disconnect、protocol/worker failure の公開 `ErrorKind` と source を維持する | regression | runtime/error unit / integration | PairingError/ReconnectError の重複を除去する |
 | todo | T05 公開接続面が `pair`、`reconnect`、`connect -> Result<ConnectionPath, Error>` に一本化され、README、rustdoc、初期仕様、移行記述、package archive が同じ API を示す | behavior / regression | public API / docs / package | compile-fail fixture は追加せず、残す API の integration test、rustdoc、package gateで確認する |
 
 status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`deferred` を使う。
+
+### 6.1 TDD cycle evidence
+
+| phase | item | evidence |
+|---|---|---|
+| red | T01 | live worker が論理 open を再演せず `Open` から始まる test を追加した。focused test は actual `Configured` / expected `Open` で失敗した |
+| green | T01 | private `RuntimeState` を live worker の5状態へ縮小し、constructor は `Open` から開始した。lifecycle 5件、runtime 120件、公開 controller runtime 30件が成功した |
+| refactor-done | T01 | internal lifecycle と公開 `LifecycleState` projection を分離した。通常 cleanup は status に `Closing→Closed` を記録し、failure cleanup は既存 `Failed` projection を上書きしない。all-feature library Clippy、fmt、diff check が成功した |
 
 ## 7. 設計メモ
 
@@ -133,9 +141,10 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 
 | command | result | notes |
 |---|---|---|
-| `cargo test -p swbt-rs --lib runtime::lifecycle --all-features --locked` | not run | T01 |
+| `cargo test -p swbt-rs --lib runtime::lifecycle --all-features --locked` | success | T01: 5 passed |
+| `cargo test -p swbt-rs --lib runtime:: --all-features --locked` | success | T01: 120 passed |
 | `cargo test -p swbt-rs --lib runtime::session --all-features --locked` | not run | T02 |
-| `cargo test -p swbt-rs --lib controller::runtime_tests --all-features --locked` | not run | T03-T05 |
+| `cargo test -p swbt-rs --lib controller::runtime_tests --all-features --locked` | success | T01 baseline: 30 passed。T03-T05 後に再実行する |
 | `cargo test -p swbt-rs --lib runtime::error_map --all-features --locked` | not run | T04 |
 | `cargo fmt --all --check` | not run | final gate |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | final gate |

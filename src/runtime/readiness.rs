@@ -258,12 +258,13 @@ mod tests {
     use std::time::Duration;
 
     use crate::{
+        diagnostics::LifecycleState,
         model::Pro,
         protocol::SwitchHidProtocol,
         runtime::{
             connection::ObservedSubcommands,
             handshake::{Handshake, HandshakeProgress},
-            lifecycle::{LifecycleAction, LifecycleState, LifecycleStateMachine},
+            lifecycle::LifecycleStateMachine,
             output::{OutputHandling, OutputHandlingContext, OutputHandlingError, handle_output},
             periodic::{AutomaticInput, PeriodicPolicy},
             readiness::{ReadinessError, ReadinessGate, ReadinessProgress, ReadinessWait},
@@ -428,7 +429,7 @@ mod tests {
             ReadinessProgress::Pending(wait) => panic!("unexpected pending state: {wait:?}"),
         };
         assert_eq!(ready.session_id(), session_id);
-        assert!(lifecycle.mark_ready(ready));
+        assert!(lifecycle.mark_ready());
         assert_eq!(lifecycle.state(), LifecycleState::Ready);
         assert_eq!(periodic.next_deadline(), Some(Duration::from_millis(448)));
         assert_eq!(
@@ -643,7 +644,7 @@ mod tests {
         };
         assert_eq!(ready.session_id(), current);
         assert!(current_handshake.is_none());
-        assert!(lifecycle.mark_ready(ready));
+        assert!(lifecycle.mark_ready());
         assert_eq!(lifecycle.state(), LifecycleState::Ready);
         assert_eq!(harness.sender.timer(), 3);
         assert_eq!(
@@ -964,8 +965,6 @@ mod tests {
 
     fn connecting_lifecycle() -> LifecycleStateMachine {
         let mut lifecycle = LifecycleStateMachine::new();
-        assert_eq!(lifecycle.request_open(), Ok(LifecycleAction::OpenTransport));
-        assert_eq!(lifecycle.complete_open(), LifecycleAction::Opened);
         assert!(lifecycle.begin_connection());
         assert_eq!(lifecycle.state(), LifecycleState::Connecting);
         lifecycle
