@@ -174,7 +174,7 @@ scenario subcommandを残す理由は、三つの証跡schema、pair／reconnect
 | 展開archiveのdefault/all-feature buildとtest（`--offline`） | success | default 253 passed / 1 ignored、all-feature 269 passed / 1 ignored。実機test 5件とprofile compatibility 1件はignore。両feature構成のbuild成功 |
 | `cargo deny --locked check` | not run | local環境に`cargo-deny`が未導入。CIのdependency-policy jobは更新対象外で、remote CIは未実行 |
 | `git diff main...HEAD --check` | success | whitespace errorなし |
-| Windows実機でのpair/reconnect、Periodic/Direct、neutral close、profile、adapter reopen | not run | 実機I/Oはユーザの明示承認後に実行する |
+| Windows実機でのPeriodic reconnect 2件とfresh pairing 1件 | failed | 2026-08-02。保存鍵付きPro profile 2件はどちらも`NoBond`で接続前に停止し、外部SHA-256比較でprofile不変。fresh pairingは120秒で`ConnectionTimeout`。失敗後の176-byte空profileは型検査に成功し、adapter reopen、closed lifecycle、neutral snapshotを確認。Ready、入力送信、neutral closeの実機経路とSwitch UIは未到達 |
 
 ## 10. 先送り事項
 
