@@ -144,9 +144,11 @@ domain validationし、内部mutation後のshape再検証を不要にする。
 | `src/runtime/transport/profile_key_store.rs` | modify | typed Classic key projectionとsingle-writer commit |
 | `tests/profile_compat.rs` | modify | Python canonical compatibilityとreject境界 |
 | `tests/backend_unavailable_contract.rs` | modify | feature無効時のfilesystem非接触 |
+| `tools/swbt-probe/tests/probe_cli.rs` | modify | profile inspect / verify用fixtureのcanonical化 |
+| `tools/swbt-hardware-runner/src/scenarios/pro_profile.rs` | modify | stale-bond用fixtureのcanonical化 |
 | `src/lib.rs` | modify | profileとconcurrencyの公開契約 |
 | `spec/initial/*.md` | modify | schema/persistence/testingのIntent Delta反映 |
-| `spec/wip/unit_017/PROFILE_MODEL_AND_STORE_SIMPLIFICATION.md` | new | 作業仕様とTDD記録 |
+| `spec/complete/unit_017/PROFILE_MODEL_AND_STORE_SIMPLIFICATION.md` | new | 完了仕様とTDD記録 |
 
 ## 9. 検証
 
@@ -154,17 +156,24 @@ domain validationし、内部mutation後のshape再検証を不要にする。
 |---|---|---|
 | `cargo test -p swbt-rs --all-features --locked profile` | success | 着手前baseline。focused unit/integrationとPython fixtureが成功、manual cross-language writer 1件ignored |
 | `cargo clippy -p swbt-rs --all-targets --all-features --locked -- -D warnings` | success | 着手前baseline |
-| docs-quality-review | success | source、対象範囲、Intent Delta、参照先、未実行gate、仮テキスト残りを確認 |
-| `cargo test -p swbt-rs --all-features --locked <item filter>` | not run | 各TDD itemで記録する |
-| `cargo test --workspace --all-targets --all-features --locked` | not run | completion gate |
-| `cargo test -p swbt-rs --all-targets --no-default-features --locked` | not run | feature無効contract |
-| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | completion gate |
-| `rustup run 1.87.0 cargo check --workspace --all-targets --all-features --locked` | not run | MSRV gate |
-| `cargo build --workspace --all-features --locked` | not run | Cargo dependency/public behavior変更gate |
-| `cargo package -p swbt-rs --locked` | not run | publishable package smoke。publishは行わない |
-| `cargo fmt --all --check` | not run | completion gate |
-| `git diff --check` | not run | completion gate |
-| Windows real-device reconnect | not run | software変更後、利用可能なhardwareと安全なprofile copyがある場合だけ実行する |
+| itemごとのfocused `cargo test` | success | T01 strict rejection、T02 single-writer store、T03 create orderingとfeature無効filesystem非接触をRED/GREENで確認 |
+| `cargo test --workspace --all-targets --all-features --locked` | success | 初回にtoolの旧fixture 1件を検出してcanonical化。再実行はworkspace全target成功。本体262 passed / 1 manual ignored、profile互換5 passed / 1 manual ignored、実機adapter 5 ignored |
+| `cargo test -p swbt-rs --all-targets --no-default-features --locked` | success | 本体248 passed / 1 manual ignored。backend-unavailable 6件を含む全integration成功 |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | workspace 3 packageにwarningなし |
+| `cargo clippy -p swbt-rs --all-targets --no-default-features --locked -- -D warnings` | success | feature無効境界にwarningなし |
+| `rustup run 1.87.0 cargo check --workspace --all-targets --all-features --locked` | success | declared MSRVでworkspace 3 package成功 |
+| `cargo build --workspace --all-features --locked` | success | Cargo dependency変更後の全feature build成功 |
+| `cargo package -p swbt-rs --locked` | success | 113 files、1.2 MiBをpackageし、展開crateのcompile成功。publishは未実行 |
+| `cargo test --doc -p swbt-rs --all-features --locked` | success | crate doctest 1件成功 |
+| `cargo doc -p swbt-rs --all-features --no-deps --locked` | success | public rustdoc生成成功 |
+| `cargo tree -p swbt-rs --no-default-features --edges normal --depth 1 --locked` | success | 直接依存は`atomic-write-file`、`serde`、`serde_json`。`fs2`なし |
+| `cargo fmt --all --check` | success | workspace format差分なし |
+| `git diff main...HEAD --check` | success | whitespace errorなし |
+| docs-quality-review | success | README、crate rustdoc、`spec/initial`、完了仕様の契約一致と旧文言・仮テキスト残りなしを確認 |
+| rust-api-boundary-review | success | 公開signature追加なし。既存`PairingProfile`の受理範囲と`create_profile`のerror順序を明記し、DTO/store traitはcrate-privateを維持。unsafe/async変更なし |
+| agentic-self-review | success | requirement/scope/TDD/diff/gateを照合し、未解決findingなし |
+| Rust writer → pinned Python reader | not run | repositoryのmanual testはignored。Rust側はpinned Python fixtureのread/canonical writeを検査したが、Python interpreterによる再読込は未実行 |
+| Windows real-device reconnect | not run | 実機I/Oは対象コードの検証に必須ではなく、安全な専用profile copyを伴う実行指示がないため未実行 |
 
 ## 10. 先送り事項
 
@@ -174,13 +183,13 @@ domain validationし、内部mutation後のshape再検証を不要にする。
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test Listを更新した
-- [ ] T01-T03をitem単位でRED/GREEN/refactor/commitした
-- [ ] Python 0.6.0 Classic profileだけをcanonical contractにした
-- [ ] unknown/legacy/LE profileを秘密値非表示で拒否した
-- [ ] single-writer persistenceからlock/CASを削除した
-- [ ] target事前inspectを削除した
-- [ ] public docsと`spec/initial`を更新した
-- [ ] default/all-feature/MSRV/package gateを記録した
-- [ ] hardware実行結果または未実行理由を記録した
-- [ ] self-reviewを完了した
-- [ ] `spec/complete/unit_017`へ移動した
+- [x] T01-T03をitem単位でRED/GREEN/refactor/commitした
+- [x] Python 0.6.0 Classic profileだけをcanonical contractにした
+- [x] unknown/legacy/LE profileを秘密値非表示で拒否した
+- [x] single-writer persistenceからlock/CASを削除した
+- [x] target事前inspectを削除した
+- [x] public docsと`spec/initial`を更新した
+- [x] default/all-feature/MSRV/package gateを記録した
+- [x] hardware実行結果または未実行理由を記録した
+- [x] self-reviewを完了した
+- [x] `spec/complete/unit_017`へ移動した
