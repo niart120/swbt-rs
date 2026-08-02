@@ -158,31 +158,34 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | `cargo test -p swbt-rs --test core_reexports --all-features` | success | T01: crate root/module pathの同一型再公開 2 passed |
 | `cargo test -p swbt-rs --all-targets --all-features` | success | T03: library 185 passed/1 ignored、integration成功、adapter実機5 ignored |
 | `cargo test -p swbt-rs --all-targets --no-default-features` | success | T03: library 185 passed/1 ignored、runtime backend 4 passed、他integration成功。adapter実機targetは0 tests |
-| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | pending | workspace lint |
-| `cargo +1.87.0 test --workspace --all-targets --all-features --locked` | pending | MSRV |
+| `cargo test --workspace --all-targets --all-features --locked` | success | stable workspace。core/runtime/tool全target成功、実機5件とmanual timing 1件ignored |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | core/runtime/toolをwarningなしで検査 |
+| `cargo +1.87.0 test --workspace --all-targets --all-features --locked` | success | MSRVでstableと同じworkspace test成功 |
 | `cargo test --doc --workspace --all-features --locked` | success | core/root crate example各1件passed、tool 0件 |
 | `cargo rustdoc -p swbt-core --locked -- -D warnings` | success | backend非依存の公開値とhidden runtime supportを検査 |
 | `cargo rustdoc -p swbt-rs --all-features --locked -- -D warnings` | success | core同一型再公開とmandatory backend説明を検査 |
-| `cargo build --workspace --all-features --locked` | pending | libraryとtool package |
-| `cargo package -p swbt-core --locked --allow-dirty` | success | MIT本文を含む56 files、287.9 KiB、55.8 KiB compressed、archive verify成功 |
-| `cargo package -p swbt-rs --locked --allow-dirty` | expected failure | crates.ioに`swbt-core` 0.1.0が未公開のため解決不能。`--no-verify`も同じ段階で失敗 |
-| `cargo package -p swbt-rs --allow-dirty --list` | success | root packageの収録対象を確認。archive生成/verifyはcore公開後に再実行 |
-| `cargo fmt --all -- --check` | pending | workspace formatting |
-| `git diff --check` | pending | branch差分 |
+| `cargo build --workspace --all-features --locked` | success | libraryとtool package |
+| `cargo package -p swbt-core --locked` | success | clean treeでMIT本文を含む56 files、287.9 KiB、55.8 KiB compressed、archive verify成功 |
+| `cargo package -p swbt-rs --locked` | expected failure | crates.ioに`swbt-core` 0.1.0が未公開のため解決不能。`--no-verify`も同じ段階で失敗 |
+| `cargo package -p swbt-rs --list` | success | root packageの収録対象を確認。archive生成/verifyはcore公開後に再実行 |
+| `cargo deny check --locked` | not run | localにcargo-denyが未導入。CIのdependency-policy jobで検査する |
+| `cargo fmt --all -- --check` | success | workspace formatting |
+| `git diff --check main...HEAD` | success | whitespace errorなし |
 | hardware / USB / Switch UI | not run | package/feature境界変更であり対象外 |
 
 ## 10. 先送り事項
 
 - package version更新と `swbt-core`→`swbt-rs` の順の crates.io publishはrelease work-unitで行う。
 - raw protocol APIの安定公開、backend trait package、別backend選択は要求が具体化した後に設計する。
+- root package archive/verificationは`swbt-core`のregistry公開後に再実行する。
 
 ## 11. チェックリスト
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test List を作成した
-- [ ] 各 TDD item を個別に検証・commitした
-- [ ] 検証結果または未実行理由を記録した
-- [ ] package / release / public API gateを記録した
-- [ ] `rust-api-boundary-review`、`rustdoc-style`、`docs-quality-review` を完了した
-- [ ] `agentic-self-review` を完了した
-- [ ] 完了条件を満たして `spec/complete/unit_019` へ移動した
+- [x] 各 TDD item を個別に検証・commitした
+- [x] 検証結果または未実行理由を記録した
+- [x] package / release / public API gateを記録した
+- [x] `rust-api-boundary-review`、`rustdoc-style`、`docs-quality-review` を完了した
+- [x] `agentic-self-review` を完了した
+- [x] 完了条件を満たして `spec/complete/unit_019` へ移動した
