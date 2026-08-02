@@ -103,7 +103,7 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | `tools/check-workspace.ps1` | delete | Cargo manifestと重複する固定workspace検査を削除 |
 | `AGENTS.md` | modify | 通常gateのworkspace対象を明示 |
 | `spec/initial/QUALITY_GATES.md` | modify | local gateのworkspace対象、all-targets、lock条件を明示 |
-| `spec/wip/unit_020/WORKSPACE_GATE_SINGLE_SOURCE.md` | new / modify | Intent Delta、TDD状態、検証結果を記録 |
+| `spec/complete/unit_020/WORKSPACE_GATE_SINGLE_SOURCE.md` | new / modify | Intent Delta、TDD状態、検証結果を記録 |
 
 ## 9. 検証
 
@@ -112,15 +112,17 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | CI command契約のPowerShell assertion | success | T01 redはrepo-local script未呼出しで失敗。greenはscript呼出しとinline実装不在を確認 |
 | `pwsh -NoProfile -File ./tools/check-library-features.ps1` | success | `core/runtime package boundary passed` |
 | local gate command契約、旧script不在、operational参照のPowerShell assertion | success | redは旧scriptと暗黙gateを検出。greenは両文書のcommand、file不在、参照不在を確認 |
-| `cargo fmt --all --check` | not run | workspace formatting |
-| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | workspace static gate |
-| `cargo test --workspace --all-targets --all-features --locked` | not run | workspace test gate |
-| `cargo build --workspace --all-features --locked` | not run | CI/package変更に対するbuild gate |
-| `cargo package -p swbt-core --locked` | not run | 公開core archive gate |
-| `cargo package -p swbt-rs --locked` | not run | 公開runtime archive gate |
-| `git diff --check` | not run | whitespace gate |
-| docs-quality-review | not run | 対象文書の役割、事実、仮テキスト、参照を確認する |
-| agentic-self-review | not run | requirements、scope、gate、未検証事項を確認する |
+| `cargo fmt --all --check` | success | workspace formatting |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | core、runtime、toolをwarningなしで検査 |
+| `cargo test --workspace --all-targets --all-features --locked` | success | 全非ignored testが成功。manual profile 1件、timing 1件、実機adapter 5件はignored |
+| `cargo build --workspace --all-features --locked` | success | core、runtime、toolをbuild |
+| `cargo package -p swbt-core --locked` | success | 56 files、287.9 KiB。archive verification成功 |
+| `cargo package -p swbt-rs --locked` | expected failure | crates.ioに`swbt-core 0.1.0`が未公開のためregistry解決で停止。unit_019から継続するrelease境界 |
+| `cargo package -p swbt-rs --locked --list` | success | root公開対象だけを列挙し、`.github`、`spec`、`tools`を含まない |
+| `git diff main...HEAD --check` | success | whitespace errorなし |
+| docs-quality-review | success | 文書の役割、事実、仮テキスト、repo内参照、歴史的参照の保持を確認。指摘なし |
+| agentic-self-review | success | requirementsとdiffが一致。scope外変更なし。remote CIはPR作成後に確認する |
+| GitHub Actions | not run | branch pushとPR作成前 |
 
 ## 10. 先送り事項
 
@@ -133,6 +135,6 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 - [x] CIの依存境界検査をrepo-local scriptへ一本化した
 - [x] workspace構成の固定検査を削除した
 - [x] 通常gateがworkspace全体を明示的に対象とする
-- [ ] 検証結果または未実行理由を記録した
+- [x] 検証結果または未実行理由を記録した
 - [x] CI/package変更に必要なbuild/package gateを記録した
-- [ ] docs-quality-reviewとagentic-self-reviewを完了した
+- [x] docs-quality-reviewとagentic-self-reviewを完了した
