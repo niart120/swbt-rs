@@ -4,7 +4,7 @@ use swbt_bumble_backend::{AddressKind, BluetoothAddress, BondStore, BondStoreErr
 
 use crate::{
     model::ControllerModel,
-    profile::{FileProfileStore, PairingProfile, ProfileStore},
+    profile::{FileProfileStore, PairingProfile, ProfileStore, StoredClassicBond},
 };
 
 pub(crate) struct ProfileKeyStoreFactory {
@@ -79,7 +79,9 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
         let namespace = self.namespace(BondStoreError::LoadFailed)?;
         let profile = self.read_profile(BondStoreError::LoadFailed)?;
         let public_peer = format_public_peer(peer);
-        Ok(profile.pairing_keys(namespace, &public_peer))
+        Ok(profile
+            .pairing_keys(namespace, &public_peer)
+            .map(to_backend_bond))
     }
 
     fn load_all(&self) -> Result<Vec<(BluetoothAddress, ClassicBond)>, BondStoreError> {
@@ -92,7 +94,7 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
                 let raw_peer = peer.strip_suffix("/P").ok_or(BondStoreError::ListFailed)?;
                 let peer = BluetoothAddress::parse(raw_peer, AddressKind::Public)
                     .map_err(|_| BondStoreError::ListFailed)?;
-                Ok((peer, value))
+                Ok((peer, to_backend_bond(value)))
             })
             .collect()
     }
@@ -101,7 +103,15 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
         let namespace = self.namespace(BondStoreError::UpsertFailed)?.to_owned();
         let mut profile = self.read_profile(BondStoreError::UpsertFailed)?;
         profile
-            .replace_pairing_keys(&namespace, &format_public_peer(peer), bond)
+            .replace_pairing_keys(
+                &namespace,
+                &format_public_peer(peer),
+                StoredClassicBond::new(
+                    *bond.link_key(),
+                    bond.link_key_type(),
+                    bond.authenticated(),
+                ),
+            )
             .map_err(|_| BondStoreError::UpsertFailed)?;
         self.commit(&profile)
     }
@@ -128,6 +138,14 @@ fn format_address(address: BluetoothAddress) -> String {
 
 fn format_public_peer(address: BluetoothAddress) -> String {
     format!("{}/P", format_address(address))
+}
+
+fn to_backend_bond(value: StoredClassicBond) -> ClassicBond {
+    ClassicBond::new(
+        *value.link_key(),
+        value.link_key_type(),
+        value.authenticated(),
+    )
 }
 
 struct Redacted;

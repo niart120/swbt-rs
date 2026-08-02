@@ -7,9 +7,9 @@ mod sealed {
     pub trait Sealed {}
 }
 
-use hid::{
-    HidSdpPolicySpec, JOYCON_HID_SDP_POLICY, PRO_HID_SDP_POLICY, SWITCH_HID_REPORT_DESCRIPTOR,
-};
+#[doc(hidden)]
+pub use hid::HidSdpPolicySpec;
+use hid::{JOYCON_HID_SDP_POLICY, PRO_HID_SDP_POLICY, SWITCH_HID_REPORT_DESCRIPTOR};
 
 /// Model-independent logical button identity.
 ///
@@ -86,39 +86,42 @@ impl ButtonKind {
     ];
 }
 
+#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ButtonWirePosition {
-    pub(crate) byte_index: usize,
-    pub(crate) mask: u8,
+pub struct ButtonWirePosition {
+    pub byte_index: usize,
+    pub mask: u8,
 }
 
 impl ButtonWirePosition {
-    pub(crate) const fn new(byte_index: usize, mask: u8) -> Self {
+    pub const fn new(byte_index: usize, mask: u8) -> Self {
         Self { byte_index, mask }
     }
 }
 
+#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SensorCalibration {
-    pub(crate) zero_raw: [i16; 3],
-    pub(crate) reference_raw: [i16; 3],
+pub struct SensorCalibration {
+    pub zero_raw: [i16; 3],
+    pub reference_raw: [i16; 3],
 }
 
+#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ModelProtocolSpec {
-    pub(crate) local_name: &'static str,
-    pub(crate) class_of_device: u32,
-    pub(crate) device_type: u8,
-    pub(crate) device_info_tail: [u8; 2],
-    pub(crate) battery_connection: u8,
-    pub(crate) vibrator_input: u8,
-    pub(crate) pairing_trigger_buttons: &'static [ButtonKind],
-    pub(crate) accepted_imu_modes: &'static [u8],
-    pub(crate) default_colors: ControllerColors,
-    pub(crate) accelerometer_calibration: SensorCalibration,
-    pub(crate) gyroscope_calibration: SensorCalibration,
-    pub(crate) hid_report_descriptor: &'static [u8],
-    pub(crate) hid_sdp_policy: HidSdpPolicySpec,
+pub struct ModelProtocolSpec {
+    pub local_name: &'static str,
+    pub class_of_device: u32,
+    pub device_type: u8,
+    pub device_info_tail: [u8; 2],
+    pub battery_connection: u8,
+    pub vibrator_input: u8,
+    pub pairing_trigger_buttons: &'static [ButtonKind],
+    pub accepted_imu_modes: &'static [u8],
+    pub default_colors: ControllerColors,
+    pub accelerometer_calibration: SensorCalibration,
+    pub gyroscope_calibration: SensorCalibration,
+    pub hid_report_descriptor: &'static [u8],
+    pub hid_sdp_policy: HidSdpPolicySpec,
 }
 
 impl ModelProtocolSpec {
@@ -164,7 +167,8 @@ pub struct ModelSpec {
     has_right_stick: bool,
     supported_buttons: &'static [ButtonKind],
     button_wire_mapping: &'static [(ButtonKind, ButtonWirePosition)],
-    pub(crate) protocol: &'static ModelProtocolSpec,
+    #[doc(hidden)]
+    pub protocol: &'static ModelProtocolSpec,
 }
 
 impl ModelSpec {
@@ -411,7 +415,8 @@ macro_rules! controller_models {
     };
 }
 
-pub(crate) fn button_wire_position(
+#[doc(hidden)]
+pub fn button_wire_position(
     controller: ControllerKind,
     button: ButtonKind,
 ) -> Option<ButtonWirePosition> {

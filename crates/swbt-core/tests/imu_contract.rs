@@ -1,4 +1,4 @@
-use swbt::{ImuFrame, ImuSamples};
+use swbt_core::{ImuFrame, ImuSamples};
 
 #[test]
 fn imu_frame_preserves_signed_six_axis_boundaries() {
@@ -78,7 +78,10 @@ fn physical_imu_conversion_rejects_non_finite_and_i16_overflow() {
         ImuFrame::gyro_rate(f64::NEG_INFINITY, 0.0, 0.0),
         ImuFrame::gyro_rate(10_000.0, 0.0, 0.0),
     ] {
-        assert_eq!(result.unwrap_err().kind(), swbt::ErrorKind::InvalidInput);
+        assert_eq!(
+            result.unwrap_err().kind(),
+            swbt_core::ErrorKind::InvalidInput
+        );
     }
 }
 

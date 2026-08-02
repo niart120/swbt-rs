@@ -1,5 +1,5 @@
-use swbt::model::{HasDualSticks, HasLeftStick, HasRightStick, JoyConL, JoyConR, Pro};
-use swbt::{ErrorKind, Stick};
+use swbt_core::model::{HasDualSticks, HasLeftStick, HasRightStick, JoyConL, JoyConR, Pro};
+use swbt_core::{ErrorKind, Stick};
 
 fn assert_left_stick<M: HasLeftStick>() {}
 fn assert_right_stick<M: HasRightStick>() {}

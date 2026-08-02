@@ -1,22 +1,23 @@
+#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct HidSdpPolicySpec {
-    pub(crate) service_name: Option<&'static str>,
-    pub(crate) service_description: Option<&'static str>,
-    pub(crate) provider_name: Option<&'static str>,
-    pub(crate) device_release_number: Option<u16>,
-    pub(crate) bluetooth_profile_version: u16,
-    pub(crate) parser_version: u16,
-    pub(crate) device_subclass: u8,
-    pub(crate) country_code: u8,
-    pub(crate) virtual_cable: bool,
-    pub(crate) reconnect_initiate: bool,
-    pub(crate) remote_wake: Option<bool>,
-    pub(crate) profile_version: u16,
-    pub(crate) supervision_timeout: u16,
-    pub(crate) normally_connectable: bool,
-    pub(crate) boot_device: bool,
-    pub(crate) ssr_host_max_latency: u16,
-    pub(crate) ssr_host_min_timeout: u16,
+pub struct HidSdpPolicySpec {
+    pub service_name: Option<&'static str>,
+    pub service_description: Option<&'static str>,
+    pub provider_name: Option<&'static str>,
+    pub device_release_number: Option<u16>,
+    pub bluetooth_profile_version: u16,
+    pub parser_version: u16,
+    pub device_subclass: u8,
+    pub country_code: u8,
+    pub virtual_cable: bool,
+    pub reconnect_initiate: bool,
+    pub remote_wake: Option<bool>,
+    pub profile_version: u16,
+    pub supervision_timeout: u16,
+    pub normally_connectable: bool,
+    pub boot_device: bool,
+    pub ssr_host_max_latency: u16,
+    pub ssr_host_min_timeout: u16,
 }
 
 pub(crate) const PRO_HID_SDP_POLICY: HidSdpPolicySpec = HidSdpPolicySpec {

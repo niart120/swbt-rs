@@ -2,9 +2,6 @@ use std::{collections::BTreeMap, fmt, marker::PhantomData};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-#[cfg(feature = "bumble")]
-use swbt_bumble_backend::ClassicBond;
-
 use crate::{
     error::{Error, ErrorKind},
     model::ControllerModel,
@@ -14,9 +11,52 @@ use super::{ControllerKind, LocalAddress, ProfileIdentity, ProfileIdentityKind, 
 
 const PROFILE_SCHEMA_VERSION: u64 = 2;
 
+/// Backend-independent Classic pairing material used by the runtime adapter.
+#[doc(hidden)]
+#[derive(Clone, PartialEq, Eq)]
+pub struct StoredClassicBond {
+    link_key: [u8; 16],
+    link_key_type: u8,
+    authenticated: bool,
+}
+
+impl StoredClassicBond {
+    pub const fn new(link_key: [u8; 16], link_key_type: u8, authenticated: bool) -> Self {
+        Self {
+            link_key,
+            link_key_type,
+            authenticated,
+        }
+    }
+
+    pub const fn link_key(&self) -> &[u8; 16] {
+        &self.link_key
+    }
+
+    pub const fn link_key_type(&self) -> u8 {
+        self.link_key_type
+    }
+
+    pub const fn authenticated(&self) -> bool {
+        self.authenticated
+    }
+}
+
+impl fmt::Debug for StoredClassicBond {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StoredClassicBond")
+            .field("link_key", &"<redacted>")
+            .field("link_key_type", &self.link_key_type)
+            .field("authenticated", &self.authenticated)
+            .finish()
+    }
+}
+
+#[doc(hidden)]
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ProfileDocument {
+pub struct ProfileDocument {
     controller_kind: DocumentControllerKind,
     format: DocumentFormat,
     identity: IdentityDocument,
@@ -25,12 +65,11 @@ pub(crate) struct ProfileDocument {
 }
 
 impl ProfileDocument {
-    #[cfg(test)]
-    pub(crate) fn empty_adapter_default<M: ControllerModel>() -> Self {
+    pub fn empty_adapter_default<M: ControllerModel>() -> Self {
         Self::empty::<M>(ProfileIdentity::AdapterDefault)
     }
 
-    pub(crate) fn empty<M: ControllerModel>(identity: ProfileIdentity) -> Self {
+    pub fn empty<M: ControllerModel>(identity: ProfileIdentity) -> Self {
         Self {
             controller_kind: DocumentControllerKind::from(M::KIND),
             format: DocumentFormat::SwbtProfile,
@@ -40,7 +79,7 @@ impl ProfileDocument {
         }
     }
 
-    pub(crate) fn to_json_bytes(&self) -> crate::Result<Vec<u8>> {
+    pub fn to_json_bytes(&self) -> crate::Result<Vec<u8>> {
         let value = serde_json::to_value(self).map_err(|source| {
             Error::with_source(
                 ErrorKind::Internal,
@@ -59,7 +98,7 @@ impl ProfileDocument {
         Ok(bytes)
     }
 
-    pub(crate) fn parse_json(bytes: &[u8]) -> crate::Result<Self> {
+    pub fn parse_json(bytes: &[u8]) -> crate::Result<Self> {
         let document = serde_json::from_slice::<Self>(bytes).map_err(|source| {
             Error::with_source(
                 ErrorKind::InvalidProfile,
@@ -88,8 +127,7 @@ impl ProfileDocument {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) const fn controller_kind(&self) -> ControllerKind {
+    pub const fn controller_kind(&self) -> ControllerKind {
         self.controller_kind.as_public()
     }
 
@@ -104,23 +142,22 @@ impl ProfileDocument {
     }
 }
 
-#[cfg(feature = "bumble")]
 impl ProfileDocument {
-    fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<ClassicBond> {
+    fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<StoredClassicBond> {
         self.key_store
             .namespaces
             .get(namespace)
             .and_then(|peers| peers.get(peer))
-            .map(ClassicPairingKeysDocument::to_backend_bond)
+            .map(ClassicPairingKeysDocument::to_stored_bond)
     }
 
-    fn all_pairing_keys(&self, namespace: &str) -> Vec<(String, ClassicBond)> {
+    fn all_pairing_keys(&self, namespace: &str) -> Vec<(String, StoredClassicBond)> {
         self.key_store
             .namespaces
             .get(namespace)
             .into_iter()
             .flat_map(BTreeMap::iter)
-            .map(|(peer, keys)| (peer.to_string(), keys.to_backend_bond()))
+            .map(|(peer, keys)| (peer.to_string(), keys.to_stored_bond()))
             .collect()
     }
 
@@ -128,7 +165,7 @@ impl ProfileDocument {
         &mut self,
         namespace: &str,
         peer: &str,
-        replacement: ClassicBond,
+        replacement: StoredClassicBond,
     ) -> crate::Result<()> {
         let namespace = BluetoothAddressKey::parse(namespace)?;
         let peer = ClassicPeerKey::parse(peer)?;
@@ -136,7 +173,7 @@ impl ProfileDocument {
         peers.clear();
         peers.insert(
             peer,
-            ClassicPairingKeysDocument::from_backend_bond(&replacement),
+            ClassicPairingKeysDocument::from_stored_bond(&replacement),
         );
         Ok(())
     }
@@ -361,17 +398,16 @@ struct ClassicPairingKeysDocument {
     link_key_type: u8,
 }
 
-#[cfg(feature = "bumble")]
 impl ClassicPairingKeysDocument {
-    fn to_backend_bond(&self) -> ClassicBond {
-        ClassicBond::new(
+    fn to_stored_bond(&self) -> StoredClassicBond {
+        StoredClassicBond::new(
             self.link_key.value.0,
             self.link_key_type,
             self.link_key.authenticated,
         )
     }
 
-    fn from_backend_bond(value: &ClassicBond) -> Self {
+    fn from_stored_bond(value: &StoredClassicBond) -> Self {
         Self {
             link_key: LinkKeyDocument {
                 authenticated: value.authenticated(),
@@ -475,7 +511,8 @@ pub struct PairingProfile<M: ControllerModel> {
 }
 
 impl<M: ControllerModel> PairingProfile<M> {
-    pub(crate) fn empty(identity: ProfileIdentity) -> Self {
+    #[doc(hidden)]
+    pub fn empty(identity: ProfileIdentity) -> Self {
         Self {
             document: ProfileDocument::empty::<M>(identity),
             _model: PhantomData,
@@ -513,14 +550,8 @@ impl<M: ControllerModel> PairingProfile<M> {
         M::KIND
     }
 
-    #[cfg_attr(
-        not(feature = "bumble"),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not project identity into a transport"
-        )
-    )]
-    pub(crate) const fn identity(&self) -> ProfileIdentity {
+    #[doc(hidden)]
+    pub const fn identity(&self) -> ProfileIdentity {
         self.document.identity.as_public()
     }
 }
@@ -533,21 +564,23 @@ fn format_local_address(address: LocalAddress) -> String {
     )
 }
 
-#[cfg(feature = "bumble")]
 impl<M: ControllerModel> PairingProfile<M> {
-    pub(crate) fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<ClassicBond> {
+    #[doc(hidden)]
+    pub fn pairing_keys(&self, namespace: &str, peer: &str) -> Option<StoredClassicBond> {
         self.document.pairing_keys(namespace, peer)
     }
 
-    pub(crate) fn all_pairing_keys(&self, namespace: &str) -> Vec<(String, ClassicBond)> {
+    #[doc(hidden)]
+    pub fn all_pairing_keys(&self, namespace: &str) -> Vec<(String, StoredClassicBond)> {
         self.document.all_pairing_keys(namespace)
     }
 
-    pub(crate) fn replace_pairing_keys(
+    #[doc(hidden)]
+    pub fn replace_pairing_keys(
         &mut self,
         namespace: &str,
         peer: &str,
-        replacement: ClassicBond,
+        replacement: StoredClassicBond,
     ) -> crate::Result<()> {
         self.document
             .replace_pairing_keys(namespace, peer, replacement)

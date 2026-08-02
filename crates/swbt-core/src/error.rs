@@ -60,7 +60,8 @@ pub struct Error {
 }
 
 impl Error {
-    pub(crate) fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+    #[doc(hidden)]
+    pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self {
             kind,
             message: message.into(),
@@ -69,7 +70,8 @@ impl Error {
         }
     }
 
-    pub(crate) fn with_source(
+    #[doc(hidden)]
+    pub fn with_source(
         kind: ErrorKind,
         message: impl Into<String>,
         source: impl StdError + Send + Sync + 'static,
@@ -98,7 +100,8 @@ impl Error {
         self.related.as_deref()
     }
 
-    pub(crate) fn with_related(mut self, related: Error) -> Error {
+    #[doc(hidden)]
+    pub fn with_related(mut self, related: Error) -> Error {
         let mut tail = &mut self.related;
         while let Some(error) = tail {
             tail = &mut error.related;

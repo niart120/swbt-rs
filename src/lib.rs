@@ -59,9 +59,7 @@ mod adapter;
 mod connection;
 pub mod controller;
 mod diagnostics;
-pub mod error;
-pub mod input;
-pub mod model;
+pub use swbt_core::{error, input, model};
 pub mod profile;
 mod protocol;
 pub mod reporting;
@@ -74,14 +72,11 @@ pub use controller::{
     JoyConR, ProController,
 };
 pub use diagnostics::{GamepadStatus, LifecycleState};
-pub use error::{Error, ErrorKind, Result};
-pub use input::{
-    Button, ButtonKind, ImuFrame, ImuSamples, InputState, JoyConLButton, JoyConLInputState,
-    JoyConRButton, JoyConRInputState, ProButton, ProInputState, Stick,
-};
-pub use model::{ControllerModel, HasDualSticks, HasLeftStick, HasRightStick};
-pub use profile::{
-    ControllerColors, ControllerKind, LocalAddress, PairingProfile, ProfileIdentity,
-    ProfileIdentityKind, ProfileSummary, Rgb24, inspect_profile,
-};
 pub use reporting::{ReportingKind, ReportingMode};
+pub use swbt_core::{
+    Button, ButtonKind, ControllerColors, ControllerKind, ControllerModel, Error, ErrorKind,
+    HasDualSticks, HasLeftStick, HasRightStick, ImuFrame, ImuSamples, InputState, JoyConLButton,
+    JoyConLInputState, JoyConRButton, JoyConRInputState, LocalAddress, PairingProfile, ProButton,
+    ProInputState, ProfileIdentity, ProfileIdentityKind, ProfileSummary, Result, Rgb24, Stick,
+    inspect_profile,
+};

@@ -51,7 +51,8 @@ impl<M: ControllerModel> InputState<M> {
         &self.imu_frames
     }
 
-    pub(crate) const fn wire_sticks(&self) -> (Stick, Stick) {
+    #[doc(hidden)]
+    pub const fn wire_sticks(&self) -> (Stick, Stick) {
         (self.left_stick, self.right_stick)
     }
 }

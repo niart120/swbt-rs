@@ -2,7 +2,7 @@ use std::{fs, io, path::Path};
 
 use crate::error::{Error, ErrorKind};
 
-use super::{ControllerKind, ProfileDocument};
+use super::{ControllerKind, document::ProfileDocument};
 
 /// Address-free identity category reported by dynamic profile inspection.
 #[non_exhaustive]

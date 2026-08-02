@@ -92,7 +92,7 @@ fallback 分岐と `dead_code` 抑制を削除し、backend 非依存 build の�
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| todo | T01 `swbt-core` から model-valid input と profile 値を直接利用でき、`swbt` の既存 path が同一型を再公開する | behavior / compatibility | package integration | profile fixture と public contract test を core package へ移す |
+| refactor-done | T01 `swbt-core` から model-valid input と profile 値を直接利用でき、`swbt` の既存 path が同一型を再公開する | behavior / compatibility | package integration | profile fixture と public contract test を core package へ移した |
 | todo | T02 pure protocol の全 unit/fixture test が `swbt-core` で同じ bytes と error を返し、`swbt` runtime が一つの protocol 実装を利用する | regression / architecture | core unit / runtime build | raw protocol 面は rustdoc 非表示 |
 | todo | T03 default/no-default の `swbt` が常に Bumble backend を含み、不正 selector は `TransportOpen`、既存 profile target は `ProfileAlreadyExists` となる | behavior / package | public integration / Cargo graph | `bumble` cfg、fallback、dead-code 抑制を削除する |
 | todo | T04 core/runtime/tool の feature metadata、CI、README、rustdoc、初期仕様、package archive が同じ package 境界を示す | regression / docs | metadata / docs / package | publish と version 更新は行わない |
@@ -103,7 +103,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 
 | phase | item | evidence |
 |---|---|---|
-| pending | T01 | 未着手 |
+| red | T01 | `cargo test -p swbt-core --test public_values` は `ButtonKind`、`PairingProfile`、`ProInputState` 等が `swbt_core` に存在しない E0432/E0433 で失敗した |
+| green | T01 | error/model/input/profile valueと対応fixture/testを `swbt-core` へ移した。core 17 unit tests、37 integration tests成功、profile manual gate 1件ignored。`swbt` の同一型再公開test 2件も成功した |
+| refactor-done | T01 | runtimeだけの reporting/controller assertionをroot integration testへ残し、core profileのbond値をbackend型から分離した。core/runtime対象Clippy `-D warnings`、fmt、diff checkが成功した |
 | pending | T02 | 未着手 |
 | pending | T03 | 未着手 |
 | pending | T04 | 未着手 |
@@ -144,9 +146,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 
 | command | result | notes |
 |---|---|---|
-| `cargo test -p swbt-core --all-targets --locked` | pending | core public/profile/protocol |
+| `cargo test -p swbt-core --all-targets` | success | T01: 17 unit、37 integration passed、manual profile 1 ignored。protocolはT02前 |
 | `cargo tree -p swbt-core --edges normal --locked` | pending | backend/runtime dependency不在 |
-| `cargo test -p swbt-rs --all-targets --all-features --locked` | pending | runtime互換再公開と全feature |
+| `cargo test -p swbt-rs --test core_reexports --all-features` | success | T01: crate root/module pathの同一型再公開 2 passed |
 | `cargo test -p swbt-rs --all-targets --no-default-features --locked` | pending | mandatory backend path |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | pending | workspace lint |
 | `cargo +1.87.0 test --workspace --all-targets --all-features --locked` | pending | MSRV |
@@ -175,4 +177,3 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 - [ ] `rust-api-boundary-review`、`rustdoc-style`、`docs-quality-review` を完了した
 - [ ] `agentic-self-review` を完了した
 - [ ] 完了条件を満たして `spec/complete/unit_019` へ移動した
-

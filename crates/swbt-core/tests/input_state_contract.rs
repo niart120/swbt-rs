@@ -1,4 +1,4 @@
-use swbt::{
+use swbt_core::{
     ButtonKind, ImuFrame, JoyConLButton, JoyConLInputState, JoyConRButton, JoyConRInputState,
     ProButton, ProInputState, Stick,
 };

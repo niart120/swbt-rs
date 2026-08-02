@@ -7,7 +7,7 @@ use crate::{
     model::{self, ControllerModel},
 };
 
-use super::{ControllerKind, PairingProfile, ProfileDocument};
+use super::{ControllerKind, PairingProfile, document::ProfileDocument};
 
 const SECRET_SENTINEL: &str = "KNOWN_PROFILE_SECRET_7E3C1A";
 

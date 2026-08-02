@@ -3,7 +3,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use swbt::{ControllerKind, ErrorKind, ProfileIdentityKind, ProfileSummary, inspect_profile};
+use swbt_core::{ControllerKind, ErrorKind, ProfileIdentityKind, ProfileSummary, inspect_profile};
 
 static NEXT_PATH: AtomicU64 = AtomicU64::new(0);
 

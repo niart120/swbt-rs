@@ -1,4 +1,4 @@
-use swbt::{ControllerColors, ErrorKind, Rgb24};
+use swbt_core::{ControllerColors, ErrorKind, Rgb24};
 
 #[test]
 fn rgb24_preserves_components_and_rejects_larger_integers() {

@@ -1,7 +1,7 @@
 use std::{env, fs, path::PathBuf};
 
 use serde_json::{Value, json};
-use swbt::{ErrorKind, PairingProfile, model};
+use swbt_core::{ErrorKind, PairingProfile, model};
 
 const PROFILE_FIXTURE_IDS: [&str; 6] = [
     "adapter_default_with_classic_link_key",
