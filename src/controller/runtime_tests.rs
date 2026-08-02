@@ -14,9 +14,9 @@ use std::{
 };
 
 use crate::{
-    ConnectOptions, ConnectionPath, ConnectionStatus, CreateProfileOptions, DirectJoyConL,
-    DirectJoyConR, DirectProController, Error, ErrorKind, JoyConL, JoyConLButton, JoyConR,
-    JoyConRButton, ProButton, ProController, ProfileIdentity,
+    ConnectOptions, ConnectionPath, CreateProfileOptions, DirectJoyConL, DirectJoyConR,
+    DirectProController, Error, ErrorKind, JoyConL, JoyConLButton, JoyConR, JoyConRButton,
+    ProButton, ProController, ProfileIdentity,
     controller::Controller,
     diagnostics::LifecycleState,
     input::{InputState, Stick},
@@ -560,69 +560,6 @@ fn public_connect_reconnects_first_and_pairs_only_when_no_bond_is_allowed() {
     stale
         .close_without_neutral()
         .expect("close stale-bond runtime");
-}
-
-#[test]
-fn public_try_connection_methods_return_only_recoverable_outcomes() {
-    for (script, expected_status) in [
-        (PublicPairScript::NoBond, ConnectionStatus::NoBond),
-        (PublicPairScript::Timeout, ConnectionStatus::TimedOut),
-        (PublicPairScript::Disconnect, ConnectionStatus::Failed),
-    ] {
-        let (mut controller, _control, _operations) = open_public_connection_controller([script]);
-        let result = controller
-            .try_reconnect(PAIR_TIMEOUT)
-            .expect("recoverable reconnect becomes a result");
-        assert_eq!(result.status, expected_status);
-        assert_eq!(result.path, None);
-        assert!(result.message.is_some());
-        controller
-            .close_without_neutral()
-            .expect("close recoverable try-reconnect runtime");
-    }
-
-    let (mut ready, _control, _operations) =
-        open_public_connection_controller([PublicPairScript::Ready]);
-    let result = ready
-        .try_reconnect(PAIR_TIMEOUT)
-        .expect("ready reconnect result");
-    assert_eq!(result.status, ConnectionStatus::Connected);
-    assert_eq!(result.path, Some(ConnectionPath::Reconnected));
-    assert_eq!(result.message, None);
-    ready
-        .close_without_neutral()
-        .expect("close ready try-reconnect runtime");
-
-    let (mut fallback, _control, operations) =
-        open_public_connection_controller([PublicPairScript::NoBond, PublicPairScript::Ready]);
-    let result = fallback
-        .try_connect(ConnectOptions {
-            timeout: PAIR_TIMEOUT,
-            allow_pairing: true,
-        })
-        .expect("try-connect may explicitly pair after NoBond");
-    assert_eq!(result.status, ConnectionStatus::Connected);
-    assert_eq!(result.path, Some(ConnectionPath::Paired));
-    assert_eq!(
-        *lock(&operations),
-        [
-            PublicConnectionOperation::Reconnect,
-            PublicConnectionOperation::Pair
-        ]
-    );
-    fallback
-        .close_without_neutral()
-        .expect("close fallback try-connect runtime");
-
-    let (mut terminal, _control, _operations) =
-        open_public_connection_controller([PublicPairScript::InvalidKeyStore]);
-    assert_eq!(
-        terminal
-            .try_reconnect(PAIR_TIMEOUT)
-            .expect_err("terminal profile failure remains an error")
-            .kind(),
-        ErrorKind::InvalidKeyStore
-    );
 }
 
 #[test]

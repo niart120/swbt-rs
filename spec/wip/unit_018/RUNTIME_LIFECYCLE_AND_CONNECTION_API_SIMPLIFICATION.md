@@ -95,7 +95,7 @@ connection command error を実際の実行経路に合わせて縮小する。�
 | refactor-done | T02 session ID が `u64::MAX` の次に 1 へ wrap し、wrap 前 session の event を current session event として受理しない | edge | runtime unit | `SessionError` と上位 error variant を除去した |
 | refactor-done | T03 表現不能な caller timeout は transport 副作用前に `InvalidInput` となり、長時間稼働を模した clock projection は専用 overflow errorなしで monotonic timestamp を飽和する | edge / regression | controller/runtime unit | clock/deadline errorを共通 helper と入力境界へ集約した |
 | refactor-done | T04 pair/reconnect が共通 connection failure を通っても no-bond、timeout、pre-ready disconnect、protocol/worker failure の公開 `ErrorKind` と source を維持する | regression | runtime/error unit / integration | PairingError/ReconnectError の重複を除去した |
-| todo | T05 公開接続面が `pair`、`reconnect`、`connect -> Result<ConnectionPath, Error>` に一本化され、README、rustdoc、初期仕様、移行記述、package archive が同じ API を示す | behavior / regression | public API / docs / package | compile-fail fixture は追加せず、残す API の integration test、rustdoc、package gateで確認する |
+| refactor-done | T05 公開接続面が `pair`、`reconnect`、`connect -> Result<ConnectionPath, Error>` に一本化され、README、rustdoc、初期仕様、移行記述、package archive が同じ API を示す | behavior / regression | public API / docs / package | compile-fail fixture は追加せず、残す API の integration test、rustdoc、package gateで確認した |
 
 status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`deferred` を使う。
 
@@ -115,6 +115,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | red | T04 | pair 開始時の内部 `NoBond` を reconnect 専用の公開 `NoBond` にしない test を追加した。focused test は actual `NoBond` / expected `WorkerFailed` で失敗した |
 | green | T04 | command 種別を保持する共通 `ConnectionCommandError` で pair の `NoBond` を `WorkerFailed`、reconnect の `NoBond` を `NoBond` に分類した。双方の source chain と readiness error 分類を確認した |
 | refactor-done | T04 | `PairingError`、`ReconnectError`、`ConnectionAttemptFailure` を単一の `ConnectionCommandFailure` へ統合し、error mapper の pair/reconnect 重複を一つの context-aware mapper に置き換えた。error-map 9件、worker 37件、controller runtime 31件、all-feature library Clippy が成功した |
+| red | T05 | 公開面 audit で crate root、controller、README、初期 API 仕様に `try_connect` / `try_reconnect` / `ConnectionResult` / `ConnectionStatus` が残り、package の公開 API として構築される状態を確認した。testing 方針に従い compile-fail fixture は追加しない |
+| green | T05 | 4つの公開要素と変換 helper を削除した。残る public controller integration 30件、library 267件、doctest 1件が成功し、生成 rustdoc に削除対象名がないことを確認した |
+| refactor-done | T05 | README、公開 rustdoc、初期 API / architecture / migration、CHANGELOG を `Error::kind()` による回復判断へ揃えた。`cargo package --allow-dirty` は114 filesを検証し、展開 source の削除対象名は削除記録を除いて0件だった |
 
 ## 7. 設計メモ
 
@@ -161,6 +164,11 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | `cargo test -p swbt-rs --lib runtime::error_map --all-features --locked` | success | T04: 9 passed。RED は pair NoBond が actual `NoBond` / expected `WorkerFailed` |
 | `cargo test -p swbt-rs --lib runtime::worker --all-features --locked` | success | T04: 37 passed |
 | `cargo test -p swbt-rs --lib controller::runtime_tests --all-features --locked` | success | T04: 31 passed |
+| `cargo test -p swbt-rs --lib controller::runtime_tests --all-features --locked` | success | T05: 30 passed。削除後も pair/reconnect/connect の成功・回復可能 error・terminal error を検査 |
+| `cargo test -p swbt-rs --lib --all-features --locked` | success | T05: 267 passed, 1 ignored |
+| `cargo test -p swbt-rs --doc --all-features --locked` | success | T05: 1 passed |
+| `cargo rustdoc -p swbt-rs --all-features --locked -- -D warnings` | success | T05: public rustdoc warning 0 |
+| `cargo package -p swbt-rs --locked --allow-dirty` | success | T05: 114 files、1.2 MiB、verify build success |
 | `cargo fmt --all --check` | not run | final gate |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | final gate |
 | `cargo clippy -p swbt-rs --all-targets --no-default-features --locked -- -D warnings` | not run | final gate |

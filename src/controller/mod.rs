@@ -33,10 +33,7 @@ use crate::runtime::{
     status::{StatusPublisher, StatusReader, status_projection},
     worker::{CommonCommand, DirectCommand, PeriodicCommand, WorkerReporting},
 };
-use crate::{
-    AdapterSelector, ConnectOptions, ConnectionPath, ConnectionResult, ConnectionStatus,
-    CreateProfileOptions,
-};
+use crate::{AdapterSelector, ConnectOptions, ConnectionPath, CreateProfileOptions};
 
 use build::{ProfileStore, read_typed_profile};
 #[cfg(test)]
@@ -194,6 +191,8 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::TransportClosed`] when no runtime is open.
+    /// A timeout above `u64::MAX` nanoseconds returns
+    /// [`ErrorKind::InvalidInput`] before transport side effects.
     /// Timeout, disconnect, transport, protocol, and worker failures are
     /// returned as structured [`crate::Error`] values.
     pub fn pair(&mut self, timeout: Duration) -> crate::Result<()> {
@@ -209,6 +208,8 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::TransportClosed`] when no runtime is open,
+    /// [`ErrorKind::InvalidInput`] when `timeout` exceeds `u64::MAX`
+    /// nanoseconds,
     /// [`ErrorKind::NoBond`] when the profile has no usable Classic bond,
     /// [`ErrorKind::ConnectionTimeout`] when readiness misses `timeout`, and
     /// [`ErrorKind::ConnectionFailed`] when the stored-key connection ends
@@ -229,7 +230,8 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     ///
     /// Returns the reconnect or pairing error when the selected path does not
     /// reach readiness. A missing bond remains [`ErrorKind::NoBond`] when
-    /// pairing is disabled.
+    /// pairing is disabled. A timeout above `u64::MAX` nanoseconds returns
+    /// [`ErrorKind::InvalidInput`] before either connection path starts.
     pub fn connect(&mut self, options: ConnectOptions) -> crate::Result<ConnectionPath> {
         match self.reconnect(options.timeout) {
             Ok(()) => Ok(ConnectionPath::Reconnected),
@@ -239,28 +241,6 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
             }
             Err(error) => Err(error),
         }
-    }
-
-    /// Attempts stored-key reconnect and returns recoverable connection
-    /// outcomes as data.
-    ///
-    /// No-bond, timeout, and pre-readiness disconnect become a
-    /// [`ConnectionResult`]. Profile corruption, protocol inconsistency,
-    /// shutdown, and worker failures remain errors.
-    pub fn try_reconnect(&mut self, timeout: Duration) -> crate::Result<ConnectionResult> {
-        recoverable_connection_result(
-            self.reconnect(timeout)
-                .map(|()| ConnectionPath::Reconnected),
-        )
-    }
-
-    /// Runs [`Self::connect`] and returns recoverable connection outcomes as
-    /// data.
-    ///
-    /// Profile corruption, protocol inconsistency, shutdown, and worker
-    /// failures remain errors.
-    pub fn try_connect(&mut self, options: ConnectOptions) -> crate::Result<ConnectionResult> {
-        recoverable_connection_result(self.connect(options))
     }
 
     /// Presses one or more model-valid buttons.
@@ -425,31 +405,6 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
     }
 }
 
-fn recoverable_connection_result(
-    result: crate::Result<ConnectionPath>,
-) -> crate::Result<ConnectionResult> {
-    match result {
-        Ok(path) => Ok(ConnectionResult {
-            status: ConnectionStatus::Connected,
-            path: Some(path),
-            message: None,
-        }),
-        Err(error) => {
-            let status = match error.kind() {
-                ErrorKind::NoBond => ConnectionStatus::NoBond,
-                ErrorKind::ConnectionTimeout => ConnectionStatus::TimedOut,
-                ErrorKind::ConnectionFailed => ConnectionStatus::Failed,
-                _ => return Err(error),
-            };
-            Ok(ConnectionResult {
-                status,
-                path: None,
-                message: Some(error.to_string()),
-            })
-        }
-    }
-}
-
 impl<M: ControllerModel> Controller<M, reporting::Periodic> {
     /// Replaces the committed input used by periodic reporting.
     ///
@@ -560,7 +515,8 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ErrorKind::InvalidInput`] for invalid builder settings,
+    /// Returns [`crate::ErrorKind::InvalidInput`] for invalid builder settings
+    /// or a pairing timeout above `u64::MAX` nanoseconds,
     /// [`crate::ErrorKind::ProfilePathRequired`] when no target path was
     /// selected, [`crate::ErrorKind::UnsupportedCapability`] for an unsupported
     /// identity or unavailable Bluetooth transport,

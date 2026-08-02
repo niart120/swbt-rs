@@ -54,9 +54,9 @@ all/default test、license/SBOM、Windows限定構成のrollback rehearsalまで
   timeout と Ready 前の disconnect は成功に変換しません。
 - `reconnect()` は profile の保存済み Classic bond 1件を使い、失敗時に bond を削除したり
   fresh pairing へ切り替えたりしません。`connect()` は `NoBond` かつ
-  `allow_pairing = true` の場合だけ `pair()` へ進みます。`try_reconnect()` と
-  `try_connect()` は no-bond、timeout、Ready 前 disconnect を値として返し、profile、
-  protocol、worker の失敗は error のまま返します。
+  `allow_pairing = true` の場合だけ `pair()` へ進みます。no-bond、timeout、Ready 前 disconnect は
+  それぞれ `ErrorKind::NoBond`、`ErrorKind::ConnectionTimeout`、`ErrorKind::ConnectionFailed` として
+  返るため、接続失敗の回復判断は `Error::kind()` で行います。
 - model 固有 HID descriptor と SDP record、Classic pairing window、NoInputNoOutput SSP
   policy、SDP/HID control/interrupt session は backend の scripted Classic peer で検査しています。
   production USB runtime の poll/send/cleanup に同じ公開 session 境界を接続し、
