@@ -12,6 +12,9 @@
   library dependency graph は `tracing` を含まず、`GamepadStatus` は引き続き利用できる。
 - 公開 `ErrorKind::Trace` を削除し、trace の作成・subscriber・書き込み失敗を `swbt-probe`
   内部 error へ移した。この削除は source 非互換なので、次の公開版は 0.2.0 以降とする。
+- `try_reconnect()`、`try_connect()`、`ConnectionResult`、`ConnectionStatus` を削除した。
+  接続成功は `reconnect()` / `connect()` の戻り値、回復判断可能な失敗は `Error::kind()` の
+  `NoBond`、`ConnectionTimeout`、`ConnectionFailed` で扱う。この削除も source 非互換である。
 
 ## 0.1.0 - 2026-08-02
 

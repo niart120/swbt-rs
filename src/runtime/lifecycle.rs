@@ -1,11 +1,7 @@
-use crate::runtime::readiness::ReadySession;
-
-pub(crate) use crate::diagnostics::LifecycleState;
+use crate::diagnostics::LifecycleState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LifecycleAction {
-    OpenTransport,
-    Opened,
     BeginCleanup,
     Closed,
     None,
@@ -17,149 +13,93 @@ pub(crate) enum LifecycleCommandError {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeState {
+    Open,
+    Connecting,
+    Ready,
+    Closing,
+    Failed,
+}
+
 pub(crate) struct LifecycleStateMachine {
-    state: LifecycleState,
-    opening: bool,
+    state: RuntimeState,
 }
 
 impl LifecycleStateMachine {
     pub(crate) const fn new() -> Self {
         Self {
-            state: LifecycleState::Configured,
-            opening: false,
+            state: RuntimeState::Open,
         }
     }
 
     #[must_use]
     pub(crate) const fn state(&self) -> LifecycleState {
-        self.state
-    }
-
-    pub(crate) fn request_open(&mut self) -> Result<LifecycleAction, LifecycleCommandError> {
         match self.state {
-            LifecycleState::Configured | LifecycleState::Closed => {
-                if self.opening {
-                    Ok(LifecycleAction::None)
-                } else {
-                    self.opening = true;
-                    Ok(LifecycleAction::OpenTransport)
-                }
-            }
-            LifecycleState::Open | LifecycleState::Connecting | LifecycleState::Ready => {
-                Ok(LifecycleAction::None)
-            }
-            LifecycleState::Closing => Err(LifecycleCommandError::Shutdown),
-            LifecycleState::Failed => Err(LifecycleCommandError::Failed),
-        }
-    }
-
-    pub(crate) fn complete_open(&mut self) -> LifecycleAction {
-        match self.state {
-            LifecycleState::Configured | LifecycleState::Closed if self.opening => {
-                self.opening = false;
-                self.state = LifecycleState::Open;
-                LifecycleAction::Opened
-            }
-            LifecycleState::Configured | LifecycleState::Closed => LifecycleAction::None,
-            LifecycleState::Open
-            | LifecycleState::Connecting
-            | LifecycleState::Ready
-            | LifecycleState::Closing
-            | LifecycleState::Failed => LifecycleAction::None,
+            RuntimeState::Open => LifecycleState::Open,
+            RuntimeState::Connecting => LifecycleState::Connecting,
+            RuntimeState::Ready => LifecycleState::Ready,
+            RuntimeState::Closing => LifecycleState::Closing,
+            RuntimeState::Failed => LifecycleState::Failed,
         }
     }
 
     pub(crate) fn mark_failed(&mut self) {
-        self.opening = false;
-        self.state = LifecycleState::Failed;
+        self.state = RuntimeState::Failed;
     }
 
     pub(crate) fn begin_connection(&mut self) -> bool {
-        if self.state != LifecycleState::Open {
+        if self.state != RuntimeState::Open {
             return false;
         }
-        self.state = LifecycleState::Connecting;
+        self.state = RuntimeState::Connecting;
         true
     }
 
-    pub(crate) fn mark_ready(&mut self, _ready: ReadySession) -> bool {
-        if self.state != LifecycleState::Connecting {
+    pub(crate) fn mark_ready(&mut self) -> bool {
+        if self.state != RuntimeState::Connecting {
             return false;
         }
-        self.state = LifecycleState::Ready;
+        self.state = RuntimeState::Ready;
         true
     }
 
     pub(crate) fn mark_connection_ended(&mut self) -> bool {
-        if !matches!(
-            self.state,
-            LifecycleState::Connecting | LifecycleState::Ready
-        ) {
+        if !matches!(self.state, RuntimeState::Connecting | RuntimeState::Ready) {
             return false;
         }
-        self.state = LifecycleState::Open;
+        self.state = RuntimeState::Open;
         true
     }
 
     pub(crate) fn request_close(&mut self) -> LifecycleAction {
         match self.state {
-            LifecycleState::Configured => {
-                if self.opening {
-                    self.opening = false;
-                    self.state = LifecycleState::Closing;
-                    LifecycleAction::BeginCleanup
-                } else {
-                    self.state = LifecycleState::Closed;
-                    LifecycleAction::Closed
-                }
-            }
-            LifecycleState::Closed => {
-                if self.opening {
-                    self.opening = false;
-                    self.state = LifecycleState::Closing;
-                    LifecycleAction::BeginCleanup
-                } else {
-                    LifecycleAction::None
-                }
-            }
-            LifecycleState::Open
-            | LifecycleState::Connecting
-            | LifecycleState::Ready
-            | LifecycleState::Failed => {
-                self.opening = false;
-                self.state = LifecycleState::Closing;
+            RuntimeState::Open
+            | RuntimeState::Connecting
+            | RuntimeState::Ready
+            | RuntimeState::Failed => {
+                self.state = RuntimeState::Closing;
                 LifecycleAction::BeginCleanup
             }
-            LifecycleState::Closing => LifecycleAction::None,
+            RuntimeState::Closing => LifecycleAction::None,
         }
     }
 
-    pub(crate) fn complete_close(&mut self) -> LifecycleAction {
+    pub(crate) const fn complete_close(&self) -> LifecycleAction {
         match self.state {
-            LifecycleState::Closing => {
-                self.opening = false;
-                self.state = LifecycleState::Closed;
-                LifecycleAction::Closed
-            }
-            LifecycleState::Configured
-            | LifecycleState::Open
-            | LifecycleState::Connecting
-            | LifecycleState::Ready
-            | LifecycleState::Closed
-            | LifecycleState::Failed => LifecycleAction::None,
+            RuntimeState::Closing => LifecycleAction::Closed,
+            RuntimeState::Open
+            | RuntimeState::Connecting
+            | RuntimeState::Ready
+            | RuntimeState::Failed => LifecycleAction::None,
         }
     }
 
     pub(crate) fn ensure_input_command(&self) -> Result<(), LifecycleCommandError> {
         match self.state {
-            LifecycleState::Closing | LifecycleState::Closed => {
-                Err(LifecycleCommandError::Shutdown)
-            }
-            LifecycleState::Failed => Err(LifecycleCommandError::Failed),
-            LifecycleState::Configured
-            | LifecycleState::Open
-            | LifecycleState::Connecting
-            | LifecycleState::Ready => Ok(()),
+            RuntimeState::Closing => Err(LifecycleCommandError::Shutdown),
+            RuntimeState::Failed => Err(LifecycleCommandError::Failed),
+            RuntimeState::Open | RuntimeState::Connecting | RuntimeState::Ready => Ok(()),
         }
     }
 }
@@ -172,42 +112,37 @@ impl Default for LifecycleStateMachine {
 
 #[cfg(test)]
 mod tests {
-    use super::{LifecycleAction, LifecycleCommandError, LifecycleState, LifecycleStateMachine};
+    use crate::diagnostics::LifecycleState;
+
+    use super::{LifecycleAction, LifecycleCommandError, LifecycleStateMachine, RuntimeState};
 
     #[test]
-    fn open_close_and_reopen_follow_idempotent_transitions() {
-        let mut lifecycle = LifecycleStateMachine::new();
+    fn live_worker_lifecycle_starts_open_without_replaying_transport_open() {
+        let lifecycle = LifecycleStateMachine::new();
 
-        assert_eq!(lifecycle.state(), LifecycleState::Configured);
-        assert_eq!(lifecycle.request_open(), Ok(LifecycleAction::OpenTransport));
-        assert_eq!(lifecycle.state(), LifecycleState::Configured);
-        assert_eq!(lifecycle.request_open(), Ok(LifecycleAction::None));
-        assert_eq!(lifecycle.complete_open(), LifecycleAction::Opened);
         assert_eq!(lifecycle.state(), LifecycleState::Open);
-        assert_eq!(lifecycle.request_open(), Ok(LifecycleAction::None));
-        assert_eq!(lifecycle.state(), LifecycleState::Open);
-
-        assert_eq!(lifecycle.request_close(), LifecycleAction::BeginCleanup);
-        assert_eq!(lifecycle.state(), LifecycleState::Closing);
-        assert_eq!(lifecycle.request_close(), LifecycleAction::None);
-        assert_eq!(lifecycle.state(), LifecycleState::Closing);
-
-        assert_eq!(lifecycle.complete_close(), LifecycleAction::Closed);
-        assert_eq!(lifecycle.state(), LifecycleState::Closed);
-        assert_eq!(lifecycle.complete_close(), LifecycleAction::None);
-        assert_eq!(lifecycle.request_close(), LifecycleAction::None);
-
-        assert_eq!(lifecycle.request_open(), Ok(LifecycleAction::OpenTransport));
-        assert_eq!(lifecycle.state(), LifecycleState::Closed);
-        assert_eq!(lifecycle.complete_open(), LifecycleAction::Opened);
-        assert_eq!(lifecycle.state(), LifecycleState::Open);
+        lifecycle
+            .ensure_input_command()
+            .expect("an open worker accepts input commands");
     }
 
     #[test]
-    fn commands_after_close_begins_are_shutdown_until_reopen() {
+    fn connection_transitions_return_a_live_worker_to_open() {
         let mut lifecycle = LifecycleStateMachine::new();
-        lifecycle.request_open().expect("initial open");
-        lifecycle.complete_open();
+
+        assert!(lifecycle.begin_connection());
+        assert_eq!(lifecycle.state(), LifecycleState::Connecting);
+        assert!(!lifecycle.begin_connection());
+        assert!(lifecycle.mark_ready());
+        assert_eq!(lifecycle.state(), LifecycleState::Ready);
+        assert!(lifecycle.mark_connection_ended());
+        assert_eq!(lifecycle.state(), LifecycleState::Open);
+        assert!(!lifecycle.mark_connection_ended());
+    }
+
+    #[test]
+    fn commands_after_close_begins_remain_shutdown_for_the_terminal_worker() {
+        let mut lifecycle = LifecycleStateMachine::new();
         lifecycle
             .ensure_input_command()
             .expect("input before close begins");
@@ -217,55 +152,25 @@ mod tests {
             lifecycle.ensure_input_command(),
             Err(LifecycleCommandError::Shutdown)
         );
-        assert_eq!(
-            lifecycle.request_open(),
-            Err(LifecycleCommandError::Shutdown)
-        );
+        assert_eq!(lifecycle.request_close(), LifecycleAction::None);
 
         assert_eq!(lifecycle.complete_close(), LifecycleAction::Closed);
         assert_eq!(
             lifecycle.ensure_input_command(),
             Err(LifecycleCommandError::Shutdown)
         );
-
-        assert_eq!(lifecycle.request_open(), Ok(LifecycleAction::OpenTransport));
-        assert_eq!(
-            lifecycle.ensure_input_command(),
-            Err(LifecycleCommandError::Shutdown)
-        );
-        assert_eq!(lifecycle.complete_open(), LifecycleAction::Opened);
-        lifecycle
-            .ensure_input_command()
-            .expect("input after reopen");
+        assert_eq!(LifecycleStateMachine::new().state(), LifecycleState::Open);
     }
 
     #[test]
     fn every_live_state_begins_cleanup_once_before_closing() {
         for state in [
-            LifecycleState::Open,
-            LifecycleState::Connecting,
-            LifecycleState::Ready,
-            LifecycleState::Failed,
+            RuntimeState::Open,
+            RuntimeState::Connecting,
+            RuntimeState::Ready,
+            RuntimeState::Failed,
         ] {
-            let mut lifecycle = LifecycleStateMachine {
-                state,
-                opening: false,
-            };
-
-            if matches!(
-                state,
-                LifecycleState::Open | LifecycleState::Connecting | LifecycleState::Ready
-            ) {
-                assert_eq!(
-                    lifecycle.request_open(),
-                    Ok(LifecycleAction::None),
-                    "repeated open from {state:?}"
-                );
-                assert_eq!(lifecycle.state(), state);
-            } else {
-                assert_eq!(lifecycle.request_open(), Err(LifecycleCommandError::Failed));
-                assert_eq!(lifecycle.state(), LifecycleState::Failed);
-            }
+            let mut lifecycle = LifecycleStateMachine { state };
 
             assert_eq!(
                 lifecycle.request_close(),
@@ -279,11 +184,20 @@ mod tests {
             );
             assert_eq!(lifecycle.request_close(), LifecycleAction::None);
             assert_eq!(lifecycle.complete_close(), LifecycleAction::Closed);
-            assert_eq!(lifecycle.state(), LifecycleState::Closed);
         }
+    }
 
-        let mut configured = LifecycleStateMachine::new();
-        assert_eq!(configured.request_close(), LifecycleAction::Closed);
-        assert_eq!(configured.state(), LifecycleState::Closed);
+    #[test]
+    fn failed_worker_rejects_commands_before_cleanup() {
+        let mut lifecycle = LifecycleStateMachine::new();
+        lifecycle.mark_failed();
+
+        assert_eq!(lifecycle.state(), LifecycleState::Failed);
+        assert_eq!(
+            lifecycle.ensure_input_command(),
+            Err(LifecycleCommandError::Failed)
+        );
+        assert_eq!(lifecycle.request_close(), LifecycleAction::BeginCleanup);
+        assert_eq!(lifecycle.state(), LifecycleState::Closing);
     }
 }

@@ -1,6 +1,7 @@
 use std::{error::Error as StdError, fmt, time::Duration};
 
 use crate::{
+    diagnostics::LifecycleState,
     input::InputState,
     model::ControllerModel,
     protocol::SwitchHidProtocol,
@@ -156,7 +157,7 @@ impl CleanupSequence {
         let completed = lifecycle.complete_close();
         debug_assert_eq!(completed, LifecycleAction::Closed);
         if let Some(status) = status {
-            status.close(lifecycle.state());
+            status.close(LifecycleState::Closed);
         }
         CloseCompletion {
             performed: true,
@@ -218,6 +219,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::{
+        diagnostics::LifecycleState,
         input::InputState,
         model::Pro,
         protocol::{OutputReport, SwitchHidProtocol, parse_output_report},
@@ -225,7 +227,7 @@ mod tests {
             cleanup::{
                 CleanupContext, CleanupPhase, CleanupSequence, CloseMode, ExplicitCloseError,
             },
-            lifecycle::{LifecycleAction, LifecycleState, LifecycleStateMachine},
+            lifecycle::LifecycleStateMachine,
             sender::ReportSender,
             transport::{
                 ActivityNotifier, SendAcceptance, TransportCapabilities, TransportError,
@@ -259,7 +261,7 @@ mod tests {
             });
 
         assert!(completion.performed());
-        assert_eq!(lifecycle.state(), LifecycleState::Closed);
+        assert_eq!(lifecycle.state(), LifecycleState::Closing);
         transport.trace.push(Trace::CompletionObserved);
         completion
             .finish_with_join(|| {
@@ -329,7 +331,7 @@ mod tests {
             })
             .expect("cleanup and join succeed");
 
-        assert_eq!(lifecycle.state(), LifecycleState::Closed);
+        assert_eq!(lifecycle.state(), LifecycleState::Closing);
         assert_eq!(sender.timer(), 1);
         assert_eq!(
             transport.trace,
@@ -369,7 +371,7 @@ mod tests {
             })
             .expect("cleanup and join succeed");
 
-        assert_eq!(lifecycle.state(), LifecycleState::Closed);
+        assert_eq!(lifecycle.state(), LifecycleState::Closing);
         assert_eq!(sender.timer(), 0);
         assert_eq!(
             transport.trace,
@@ -470,7 +472,7 @@ mod tests {
                 (None, None) => result.expect(case.name),
                 _ => panic!("{}: invalid failure expectation", case.name),
             }
-            assert_eq!(lifecycle.state(), LifecycleState::Closed, "{}", case.name);
+            assert_eq!(lifecycle.state(), LifecycleState::Closing, "{}", case.name);
             assert_eq!(
                 transport.trace,
                 [
@@ -522,7 +524,7 @@ mod tests {
             TransportErrorKind::SendRejected
         );
         assert_eq!(join, "join failed");
-        assert_eq!(lifecycle.state(), LifecycleState::Closed);
+        assert_eq!(lifecycle.state(), LifecycleState::Closing);
         assert_eq!(
             transport.trace,
             [
@@ -709,10 +711,7 @@ mod tests {
     }
 
     fn open_lifecycle() -> LifecycleStateMachine {
-        let mut lifecycle = LifecycleStateMachine::new();
-        assert_eq!(lifecycle.request_open(), Ok(LifecycleAction::OpenTransport));
-        assert_eq!(lifecycle.complete_open(), LifecycleAction::Opened);
-        lifecycle
+        LifecycleStateMachine::new()
     }
 
     fn subcommand_report(subcommand_id: u8, payload: &[u8]) -> Vec<u8> {

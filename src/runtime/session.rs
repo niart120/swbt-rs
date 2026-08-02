@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, fmt, num::NonZeroU64};
+use std::num::NonZeroU64;
 
 use crate::{
     model::ControllerModel,
@@ -22,21 +22,6 @@ impl ConnectionSessionId {
         self.0
     }
 }
-
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum SessionError {
-    IdExhausted,
-}
-
-impl fmt::Display for SessionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::IdExhausted => formatter.write_str("connection session ID exhausted"),
-        }
-    }
-}
-
-impl StdError for SessionError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SessionEvent {
@@ -68,11 +53,11 @@ impl ConnectionSessions {
         reporting: &mut PeriodicPolicy,
         observed: &mut ObservedSubcommands,
         input: &mut InputStateStore<M>,
-    ) -> Result<ConnectionSessionId, SessionError> {
-        let next = self.prepare_next()?;
+    ) -> ConnectionSessionId {
+        let next = self.prepare_next();
         reporting.reset_for_new_session();
         self.commit(next, sender, observed, input);
-        Ok(next)
+        next
     }
 
     pub(crate) fn begin_direct<M: ControllerModel>(
@@ -80,20 +65,15 @@ impl ConnectionSessions {
         sender: &mut ReportSender<M>,
         observed: &mut ObservedSubcommands,
         input: &mut InputStateStore<M>,
-    ) -> Result<ConnectionSessionId, SessionError> {
-        let next = self.prepare_next()?;
+    ) -> ConnectionSessionId {
+        let next = self.prepare_next();
         self.commit(next, sender, observed, input);
-        Ok(next)
+        next
     }
 
-    fn prepare_next(&self) -> Result<ConnectionSessionId, SessionError> {
-        let next = self
-            .last_issued
-            .checked_add(1)
-            .and_then(NonZeroU64::new)
-            .map(ConnectionSessionId)
-            .ok_or(SessionError::IdExhausted)?;
-        Ok(next)
+    fn prepare_next(&self) -> ConnectionSessionId {
+        let next = NonZeroU64::new(self.last_issued.wrapping_add(1)).unwrap_or(NonZeroU64::MIN);
+        ConnectionSessionId(next)
     }
 
     fn commit<M: ControllerModel>(
@@ -137,7 +117,7 @@ impl Default for ConnectionSessions {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{num::NonZeroU64, time::Duration};
 
     use crate::{
         input::{InputState, ProButton},
@@ -160,7 +140,7 @@ mod tests {
         },
     };
 
-    use super::ConnectionSessions;
+    use super::{ConnectionSessionId, ConnectionSessions};
 
     const DEVICE_INFO_ADDRESS: [u8; 6] = [0x00, 0x1b, 0xdc, 0xf9, 0x9f, 0x7d];
     const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
@@ -186,9 +166,7 @@ mod tests {
         input.commit(pressed_state(ButtonKind::A));
         assert_ne!(input.snapshot(), InputState::<Pro>::neutral());
 
-        let first = sessions
-            .begin_periodic(&mut sender, &mut reporting, &mut observed, &mut input)
-            .expect("first session");
+        let first = sessions.begin_periodic(&mut sender, &mut reporting, &mut observed, &mut input);
         assert_eq!(
             input.snapshot(),
             InputState::<Pro>::neutral(),
@@ -252,9 +230,8 @@ mod tests {
         assert!(!observed.is_empty());
         assert_ne!(input.snapshot(), InputState::<Pro>::neutral());
 
-        let second = sessions
-            .begin_periodic(&mut sender, &mut reporting, &mut observed, &mut input)
-            .expect("second session");
+        let second =
+            sessions.begin_periodic(&mut sender, &mut reporting, &mut observed, &mut input);
 
         assert_eq!(first.get(), 1);
         assert_eq!(second.get(), 2);
@@ -274,18 +251,14 @@ mod tests {
         let mut input = InputStateStore::<Pro>::new();
 
         assert!(sessions.tag_current(TransportEvent::Connected).is_none());
-        let first = sessions
-            .begin_direct(&mut sender, &mut observed, &mut input)
-            .expect("first session");
+        let first = sessions.begin_direct(&mut sender, &mut observed, &mut input);
         let stale = sessions
             .tag_current(TransportEvent::Disconnected { reason: Some(0x13) })
             .expect("current session tags its event");
         assert!(sessions.end_current(first));
         assert_eq!(sessions.current(), None);
 
-        let second = sessions
-            .begin_direct(&mut sender, &mut observed, &mut input)
-            .expect("second session");
+        let second = sessions.begin_direct(&mut sender, &mut observed, &mut input);
 
         assert_eq!(first.get(), 1);
         assert_eq!(second.get(), 2);
@@ -297,6 +270,27 @@ mod tests {
             sessions.take_current(current),
             Some(TransportEvent::Connected)
         );
+    }
+
+    #[test]
+    fn session_id_wraps_to_one_and_rejects_the_previous_max_session() {
+        let maximum = ConnectionSessionId(NonZeroU64::new(u64::MAX).expect("non-zero maximum"));
+        let mut sessions = ConnectionSessions {
+            last_issued: u64::MAX,
+            current: Some(maximum),
+        };
+        let stale = sessions
+            .tag_current(TransportEvent::Disconnected { reason: Some(0x13) })
+            .expect("maximum session tags its event");
+        let mut sender = ReportSender::<Pro>::new();
+        let mut observed = ObservedSubcommands::default();
+        let mut input = InputStateStore::<Pro>::new();
+
+        let wrapped = sessions.begin_direct(&mut sender, &mut observed, &mut input);
+
+        assert_eq!(wrapped.get(), 1);
+        assert_eq!(sessions.current(), Some(wrapped));
+        assert_eq!(sessions.take_current(stale), None);
     }
 
     fn pressed_state(kind: ButtonKind) -> InputState<Pro> {

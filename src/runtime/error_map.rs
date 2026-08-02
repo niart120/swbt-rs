@@ -7,7 +7,10 @@ use crate::{
         lifecycle::LifecycleCommandError,
         periodic::PeriodicError,
         readiness::ReadinessError,
-        worker::{PairingError, ReconnectError, WorkerCommandError, WorkerCoreError},
+        worker::{
+            ConnectionCommandError, ConnectionCommandFailure, ConnectionCommandKind,
+            WorkerCommandError, WorkerCoreError,
+        },
         worker_thread::{WorkerFailureCause, WorkerJoinError, WorkerThreadOutcome},
     },
 };
@@ -66,8 +69,7 @@ pub(crate) fn map_command_error(error: WorkerCommandError) -> Error {
             ErrorKind::Shutdown,
             "controller shutdown interrupted the operation",
         ),
-        WorkerCommandError::Pair(error) => map_pairing_error(error),
-        WorkerCommandError::Reconnect(error) => map_reconnect_error(error),
+        WorkerCommandError::Connection(error) => map_connection_error(error),
         WorkerCommandError::Direct(DirectTapError::NotReady)
         | WorkerCommandError::Periodic(PeriodicError::NotReady) => Error::new(
             ErrorKind::TransportClosed,
@@ -87,12 +89,6 @@ pub(crate) fn map_command_error(error: WorkerCommandError) -> Error {
             ErrorKind::WorkerFailed,
             "controller worker has entered a failed state",
         ),
-        WorkerCommandError::ClockOverflow => {
-            Error::new(ErrorKind::Internal, "worker monotonic clock overflowed")
-        }
-        WorkerCommandError::DeadlineOverflow => {
-            Error::new(ErrorKind::Internal, "worker operation deadline overflowed")
-        }
         WorkerCommandError::Disconnected => Error::new(
             ErrorKind::Internal,
             "an unclassified disconnect interrupted the operation",
@@ -100,10 +96,12 @@ pub(crate) fn map_command_error(error: WorkerCommandError) -> Error {
     }
 }
 
-fn map_reconnect_error(error: ReconnectError) -> Error {
-    match error {
-        ReconnectError::Begin(WorkerCoreError::Transport(source))
-            if source.kind() == crate::runtime::transport::TransportErrorKind::NoBond =>
+fn map_connection_error(error: ConnectionCommandError) -> Error {
+    let ConnectionCommandError { command, failure } = error;
+    match failure {
+        ConnectionCommandFailure::Begin(WorkerCoreError::Transport(source))
+            if command == ConnectionCommandKind::Reconnect
+                && source.kind() == crate::runtime::transport::TransportErrorKind::NoBond =>
         {
             Error::with_source(
                 ErrorKind::NoBond,
@@ -111,70 +109,65 @@ fn map_reconnect_error(error: ReconnectError) -> Error {
                 source,
             )
         }
-        ReconnectError::Begin(error) => map_worker_core_error(error),
-        ReconnectError::Readiness(error) => map_reconnect_readiness_error(error),
-        ReconnectError::InvalidKeyStore => Error::new(
+        ConnectionCommandFailure::Begin(error) => map_worker_core_error(error),
+        ConnectionCommandFailure::Readiness(error) => {
+            map_connection_readiness_error(command, error)
+        }
+        ConnectionCommandFailure::InvalidKeyStore => Error::new(
             ErrorKind::InvalidKeyStore,
             "controller pairing key store could not be read or updated",
         ),
-        ReconnectError::WorkerFailed => Error::new(
-            ErrorKind::WorkerFailed,
-            "controller worker terminated during reconnect",
-        ),
+        ConnectionCommandFailure::WorkerFailed => match command {
+            ConnectionCommandKind::Pair => Error::new(
+                ErrorKind::WorkerFailed,
+                "controller worker terminated during pairing",
+            ),
+            ConnectionCommandKind::Reconnect => Error::new(
+                ErrorKind::WorkerFailed,
+                "controller worker terminated during reconnect",
+            ),
+        },
     }
 }
 
-fn map_pairing_error(error: PairingError) -> Error {
-    match error {
-        PairingError::Begin(error) => map_worker_core_error(error),
-        PairingError::Readiness(error) => map_readiness_error(error),
-        PairingError::InvalidKeyStore => Error::new(
-            ErrorKind::InvalidKeyStore,
-            "controller pairing key store could not be read or updated",
-        ),
-        PairingError::WorkerFailed => Error::new(
-            ErrorKind::WorkerFailed,
-            "controller worker terminated during pairing",
-        ),
-    }
-}
-
-fn map_reconnect_readiness_error(error: ReadinessError) -> Error {
-    let (kind, message) = match &error {
-        ReadinessError::TimedOut => (
+fn map_connection_readiness_error(command: ConnectionCommandKind, error: ReadinessError) -> Error {
+    let (kind, message) = match (command, &error) {
+        (ConnectionCommandKind::Pair, ReadinessError::TimedOut) => {
+            (ErrorKind::ConnectionTimeout, "controller pairing timed out")
+        }
+        (ConnectionCommandKind::Reconnect, ReadinessError::TimedOut) => (
             ErrorKind::ConnectionTimeout,
             "controller reconnect timed out",
         ),
-        ReadinessError::Disconnected { .. } => (
-            ErrorKind::ConnectionFailed,
-            "controller disconnected before reconnect completed",
-        ),
-        ReadinessError::StaleSession { .. } | ReadinessError::HandshakeSessionMismatch { .. } => (
-            ErrorKind::Protocol,
-            "controller reconnect protocol state was inconsistent",
-        ),
-        ReadinessError::Scheduler(_) => (
-            ErrorKind::ConnectionFailed,
-            "controller reconnect readiness failed",
-        ),
-    };
-    Error::with_source(kind, message, error)
-}
-
-fn map_readiness_error(error: ReadinessError) -> Error {
-    let (kind, message) = match &error {
-        ReadinessError::TimedOut => (ErrorKind::ConnectionTimeout, "controller pairing timed out"),
-        ReadinessError::Disconnected { .. } => (
+        (ConnectionCommandKind::Pair, ReadinessError::Disconnected { .. }) => (
             ErrorKind::ConnectionFailed,
             "controller disconnected before pairing completed",
         ),
-        ReadinessError::StaleSession { .. } | ReadinessError::HandshakeSessionMismatch { .. } => (
+        (ConnectionCommandKind::Reconnect, ReadinessError::Disconnected { .. }) => (
+            ErrorKind::ConnectionFailed,
+            "controller disconnected before reconnect completed",
+        ),
+        (
+            ConnectionCommandKind::Pair,
+            ReadinessError::StaleSession { .. } | ReadinessError::HandshakeSessionMismatch { .. },
+        ) => (
             ErrorKind::Protocol,
             "controller pairing protocol state was inconsistent",
         ),
-        ReadinessError::Scheduler(_) => (
+        (
+            ConnectionCommandKind::Reconnect,
+            ReadinessError::StaleSession { .. } | ReadinessError::HandshakeSessionMismatch { .. },
+        ) => (
+            ErrorKind::Protocol,
+            "controller reconnect protocol state was inconsistent",
+        ),
+        (ConnectionCommandKind::Pair, ReadinessError::Scheduler(_)) => (
             ErrorKind::ConnectionFailed,
             "controller pairing readiness failed",
+        ),
+        (ConnectionCommandKind::Reconnect, ReadinessError::Scheduler(_)) => (
+            ErrorKind::ConnectionFailed,
+            "controller reconnect readiness failed",
         ),
     };
     Error::with_source(kind, message, error)
@@ -294,18 +287,9 @@ fn map_delivery_error(error: CommandDeliveryError) -> Error {
 
 fn map_worker_core_error(error: WorkerCoreError) -> Error {
     match error {
-        WorkerCoreError::DeadlineOverflow => Error::new(
-            ErrorKind::WorkerFailed,
-            "controller worker deadline overflowed",
-        ),
         WorkerCoreError::InvalidLifecycle => Error::new(
             ErrorKind::WorkerFailed,
             "controller worker entered an invalid lifecycle state",
-        ),
-        WorkerCoreError::Session(source) => Error::with_source(
-            ErrorKind::WorkerFailed,
-            "controller worker session failed",
-            source,
         ),
         WorkerCoreError::Handshake(source) => Error::with_source(
             ErrorKind::WorkerFailed,
@@ -318,15 +302,6 @@ fn map_worker_core_error(error: WorkerCoreError) -> Error {
             Error::with_source(
                 ErrorKind::InvalidKeyStore,
                 "controller pairing key store could not be read or updated",
-                source,
-            )
-        }
-        WorkerCoreError::Transport(source)
-            if source.kind() == crate::runtime::transport::TransportErrorKind::NoBond =>
-        {
-            Error::with_source(
-                ErrorKind::NoBond,
-                "controller profile has no usable Classic bond",
                 source,
             )
         }
@@ -360,7 +335,10 @@ mod tests {
             readiness::ReadinessError,
             scheduler::SchedulerError,
             transport::{TransportError, TransportErrorKind},
-            worker::{PairingError, WorkerCommandError, WorkerCoreError},
+            worker::{
+                ConnectionCommandError, ConnectionCommandFailure, ConnectionCommandKind,
+                WorkerCommandError, WorkerCoreError,
+            },
             worker_thread::{WorkerFailureCause, WorkerJoinError, WorkerThreadOutcome},
         },
     };
@@ -401,31 +379,70 @@ mod tests {
     }
 
     #[test]
-    fn pairing_readiness_errors_map_to_recoverable_kinds_and_keep_their_source() {
-        let cases = [
-            (ReadinessError::TimedOut, ErrorKind::ConnectionTimeout),
-            (
-                ReadinessError::Disconnected { reason: Some(0x13) },
-                ErrorKind::ConnectionFailed,
-            ),
-            (
-                ReadinessError::Scheduler(SchedulerError::DeadlineOverflow),
-                ErrorKind::ConnectionFailed,
-            ),
-        ];
+    fn connection_readiness_errors_map_to_recoverable_kinds_and_keep_their_source() {
+        for command in [
+            ConnectionCommandKind::Pair,
+            ConnectionCommandKind::Reconnect,
+        ] {
+            for (readiness, expected_kind) in [
+                (ReadinessError::TimedOut, ErrorKind::ConnectionTimeout),
+                (
+                    ReadinessError::Disconnected { reason: Some(0x13) },
+                    ErrorKind::ConnectionFailed,
+                ),
+                (
+                    ReadinessError::Scheduler(SchedulerError::DeadlineOverflow),
+                    ErrorKind::ConnectionFailed,
+                ),
+            ] {
+                let error =
+                    map_command_error(WorkerCommandError::Connection(ConnectionCommandError {
+                        command,
+                        failure: ConnectionCommandFailure::Readiness(readiness),
+                    }));
 
-        for (readiness, expected_kind) in cases {
-            let error =
-                map_command_error(WorkerCommandError::Pair(PairingError::Readiness(readiness)));
-
-            assert_eq!(error.kind(), expected_kind);
-            assert!(
-                error
-                    .source()
-                    .and_then(|source| source.downcast_ref::<ReadinessError>())
-                    .is_some()
-            );
+                assert_eq!(error.kind(), expected_kind);
+                assert!(
+                    error
+                        .source()
+                        .and_then(|source| source.downcast_ref::<ReadinessError>())
+                        .is_some()
+                );
+            }
         }
+    }
+
+    #[test]
+    fn no_bond_category_is_reconnect_only_and_keeps_its_source() {
+        let pair_error =
+            map_command_error(WorkerCommandError::Connection(ConnectionCommandError {
+                command: ConnectionCommandKind::Pair,
+                failure: ConnectionCommandFailure::Begin(WorkerCoreError::Transport(
+                    TransportError::new(TransportErrorKind::NoBond),
+                )),
+            }));
+        assert_eq!(pair_error.kind(), ErrorKind::WorkerFailed);
+        assert!(
+            pair_error
+                .source()
+                .and_then(|source| source.downcast_ref::<TransportError>())
+                .is_some()
+        );
+
+        let reconnect_error =
+            map_command_error(WorkerCommandError::Connection(ConnectionCommandError {
+                command: ConnectionCommandKind::Reconnect,
+                failure: ConnectionCommandFailure::Begin(WorkerCoreError::Transport(
+                    TransportError::new(TransportErrorKind::NoBond),
+                )),
+            }));
+        assert_eq!(reconnect_error.kind(), ErrorKind::NoBond);
+        assert!(
+            reconnect_error
+                .source()
+                .and_then(|source| source.downcast_ref::<TransportError>())
+                .is_some()
+        );
     }
 
     #[test]

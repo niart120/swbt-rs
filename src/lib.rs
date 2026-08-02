@@ -29,8 +29,8 @@
 //! window, disconnects, closes the transport, joins the worker, and reports
 //! cleanup or join failures. It does not wait for completion credit for every
 //! in-flight packet. Dropping a controller is bounded best-effort shutdown: it
-//! omits neutral reporting and draining and cannot report failures. Runtime
-//! With the `diagnostics-schema` feature, runtime changes emit secret-free
+//! omits neutral reporting and draining and cannot report failures. With the
+//! `diagnostics-schema` feature, runtime changes emit secret-free
 //! schema-v1 `tracing` events on the `swbt::diagnostics` target. Featureless
 //! builds do not compile that stable event emitter. Accepted-report counters
 //! indicate transport acceptance, not radio delivery or console behavior.
@@ -68,9 +68,7 @@ pub mod reporting;
 mod runtime;
 
 pub use adapter::{AdapterInfo, AdapterSelector, list_adapters};
-pub use connection::{
-    ConnectOptions, ConnectionPath, ConnectionResult, ConnectionStatus, CreateProfileOptions,
-};
+pub use connection::{ConnectOptions, ConnectionPath, CreateProfileOptions};
 pub use controller::{
     Controller, ControllerBuilder, DirectJoyConL, DirectJoyConR, DirectProController, JoyConL,
     JoyConR, ProController,

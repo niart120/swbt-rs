@@ -692,9 +692,13 @@ match kind {
 
 ## 18. lifecycle state machine
 
+`Configured` と `Closed` は controller owner の公開 projection であり、live worker の内部状態ではない。
+`open()` は transport を開いた後に `Open` から始まる新しい worker を所有する。close 後の `open()` も
+終了済み worker を再利用せず、新しい worker owner を構築する。
+
 ```text
-Configured
-   │ open
+Configured / Closed
+   │ open: transport open + new worker
    ▼
 Open
    │ pair / reconnect / connect
@@ -706,19 +710,21 @@ Connecting
           ▼
         Ready
           ├─ disconnect ───────► Open
-          ├─ connect command ──► Busy
           └─ close
                 ▼
              Closing
                 ▼
-              Closed
-                │ open
-                └──────────────► Open
+              Closed (public projection; worker owner released)
 ```
+
+live worker の内部状態は `Open`、`Connecting`、`Ready`、`Closing`、`Failed` の5状態とする。
+通常 cleanup は公開 status を `Closing` から `Closed` へ進め、terminal failure 後の cleanup は
+公開 `Failed` を `Closed` で上書きしない。
 
 ### 18.1 connection session
 
-各Classic ACLにmonotonically increasing session IDを割り当てる。
+各Classic ACLに0を使わないprocess-local session IDを割り当てる。`u64::MAX` の次は1へ折り返す。
+永続一意性は要求しない。
 
 sessionごとにreset:
 
@@ -761,7 +767,9 @@ sessionごとにreset:
 | channel drain timeout | initial candidate 1 s |
 | worker idle poll upper bound | implementation spikeで評価 |
 
-clockはmonotonic。wall clockはdiagnosticsと運用記録だけに使う。
+clockはmonotonic。wall clockはdiagnosticsと運用記録だけに使う。protocol timestampへ射影する
+nanosecondsは`u64::MAX`で飽和させる。接続timeout自体がこの範囲を超える場合はtransport副作用前に
+`ErrorKind::InvalidInput`とする。
 
 ## 21. diagnosticsとsecurity
 

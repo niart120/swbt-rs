@@ -5,6 +5,7 @@ use crate::{
     model::ControllerModel,
     protocol::SwitchHidProtocol,
     runtime::{
+        clock::protocol_timestamp,
         connection::ObservedSubcommands,
         scheduler::{ReportScheduler, SchedulerError, TickDecision},
         sender::ReportSender,
@@ -44,7 +45,6 @@ pub(crate) enum HandshakeProgress {
 #[derive(Debug)]
 pub(crate) enum HandshakeError {
     Scheduler(SchedulerError),
-    ClockOverflow,
 }
 
 impl From<SchedulerError> for HandshakeError {
@@ -57,9 +57,6 @@ impl fmt::Display for HandshakeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Scheduler(error) => write!(formatter, "handshake schedule failed: {error}"),
-            Self::ClockOverflow => {
-                formatter.write_str("handshake monotonic time exceeds the protocol range")
-            }
         }
     }
 }
@@ -68,7 +65,6 @@ impl StdError for HandshakeError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             Self::Scheduler(error) => Some(error),
-            Self::ClockOverflow => None,
         }
     }
 }
@@ -199,7 +195,7 @@ impl Handshake {
 
         match self.retry.as_mut() {
             None => {
-                let now_ns = monotonic_ns(now)?;
+                let now_ns = protocol_timestamp(now);
                 let scheduler = ReportScheduler::start(now, BOOTSTRAP_RETRY)?;
                 self.retry = Some(scheduler);
                 let result = send_bootstrap(now_ns, protocol, sender, transport);
@@ -215,7 +211,7 @@ impl Handshake {
                 if now < deadline {
                     return Ok(HandshakeProgress::WaitingUntil { deadline });
                 }
-                let now_ns = monotonic_ns(now)?;
+                let now_ns = protocol_timestamp(now);
                 let TickDecision::Due { skipped } = scheduler.step(now)? else {
                     return Ok(HandshakeProgress::WaitingUntil {
                         deadline: scheduler.next_deadline(),
@@ -255,10 +251,6 @@ impl Handshake {
         self.retry = None;
         self.bootstrap_stopped = true;
     }
-}
-
-fn monotonic_ns(now: Duration) -> Result<u64, HandshakeError> {
-    u64::try_from(now.as_nanos()).map_err(|_| HandshakeError::ClockOverflow)
 }
 
 fn send_bootstrap<M: ControllerModel>(
@@ -767,9 +759,7 @@ mod tests {
     ) -> (Handshake, ConnectionSessionId) {
         let mut sessions = ConnectionSessions::new();
         let mut state = InputStateStore::new();
-        let session_id = sessions
-            .begin_direct(sender, observed, &mut state)
-            .expect("first test session");
+        let session_id = sessions.begin_direct(sender, observed, &mut state);
         (Handshake::new(session_id), session_id)
     }
 
@@ -790,13 +780,9 @@ mod tests {
     ) -> (ConnectionSessionId, ConnectionSessionId) {
         let mut sessions = ConnectionSessions::new();
         let mut state = InputStateStore::new();
-        let first = sessions
-            .begin_direct(sender, observed, &mut state)
-            .expect("first test session");
+        let first = sessions.begin_direct(sender, observed, &mut state);
         assert!(sessions.end_current(first));
-        let second = sessions
-            .begin_direct(sender, observed, &mut state)
-            .expect("second test session");
+        let second = sessions.begin_direct(sender, observed, &mut state);
         (first, second)
     }
 

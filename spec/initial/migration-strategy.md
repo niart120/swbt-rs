@@ -323,8 +323,8 @@ Rust`Drop`にPython context managerと同じcleanup保証を持たせない。
 | `await pair(timeout=...)` | `pair(Duration)` |
 | `await reconnect(timeout=...)` | `reconnect(Duration)` |
 | `await connect(...)` | `connect(ConnectOptions)` |
-| `await try_reconnect(...)` | `try_reconnect(Duration)` |
-| `await try_connect(...)` | `try_connect(ConnectOptions)` |
+| `await try_reconnect(...)` | `reconnect(Duration)` の `Error::kind()` で回復判断 |
+| `await try_connect(...)` | `connect(ConnectOptions)` の `Error::kind()` で回復判断 |
 | `await close(neutral=True)` | `close()` |
 | `await close(neutral=False)` | `close_without_neutral()` |
 

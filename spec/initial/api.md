@@ -27,8 +27,7 @@
 ```rust
 pub use adapter::{list_adapters, AdapterInfo, AdapterSelector};
 pub use connection::{
-    ConnectOptions, ConnectionPath, ConnectionResult, ConnectionStatus,
-    CreateProfileOptions,
+    ConnectOptions, ConnectionPath, CreateProfileOptions,
 };
 pub use controller::{
     Controller, ControllerBuilder,
@@ -282,14 +281,6 @@ impl<M: ControllerModel, R: ReportingMode> Controller<M, R> {
         &mut self,
         options: ConnectOptions,
     ) -> Result<ConnectionPath>;
-    pub fn try_reconnect(
-        &mut self,
-        timeout: Duration,
-    ) -> Result<ConnectionResult>;
-    pub fn try_connect(
-        &mut self,
-        options: ConnectOptions,
-    ) -> Result<ConnectionResult>;
     pub fn status(&self) -> GamepadStatus;
     pub fn close(&mut self) -> Result<()>;
     pub fn close_without_neutral(&mut self) -> Result<()>;
@@ -322,20 +313,6 @@ pub enum ConnectionPath {
     Reconnected,
     Paired,
 }
-
-#[non_exhaustive]
-pub enum ConnectionStatus {
-    Connected,
-    NoBond,
-    TimedOut,
-    Failed,
-}
-
-pub struct ConnectionResult {
-    pub status: ConnectionStatus,
-    pub path: Option<ConnectionPath>,
-    pub message: Option<String>,
-}
 ```
 
 `connect()` の順序:
@@ -344,6 +321,13 @@ pub struct ConnectionResult {
 2. bond がなく `allow_pairing = true` なら pairing
 3. bond がなく `allow_pairing = false` なら `NoBond`
 4. reconnect が通信失敗した場合、bond を暗黙削除して fresh pairing へ移らない
+
+接続失敗は `Error::kind()` で分岐する。保存鍵がない場合は `ErrorKind::NoBond`、readiness の
+期限超過は `ErrorKind::ConnectionTimeout`、Ready 前の切断は `ErrorKind::ConnectionFailed` とする。
+文字列 message と成功値を組み合わせた別の接続結果 DTO は設けない。
+
+`timeout` と `pair_timeout` は `u64::MAX` ナノ秒以下とし、範囲外は transport または profile I/O
+より前に `ErrorKind::InvalidInput` を返す。
 
 `pair()` は一時 controller、または既存の empty profile から pairing を再試行する入口である。新規 file 作成は行わない。
 
