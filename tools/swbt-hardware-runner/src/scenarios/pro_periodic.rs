@@ -474,5 +474,9 @@ mod tests {
         assert!(!encoded.contains("key"));
         assert!(!encoded.contains("usb:"));
         assert_eq!(args.error_kind_name(ErrorKind::NoBond), "unknown");
+        assert_eq!(
+            args.error_kind_name(ErrorKind::AdapterIdentityRecoveryRequired),
+            "adapter_identity_recovery_required"
+        );
     }
 }
