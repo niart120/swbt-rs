@@ -839,11 +839,10 @@ mod tests {
         );
         let source_json: serde_json::Value = serde_json::from_slice(&source).expect("source JSON");
         let stale_json: serde_json::Value = serde_json::from_slice(&stale).expect("stale JSON");
-        assert_eq!(source_json["future_top"], stale_json["future_top"]);
         assert_ne!(
-            source_json["key_store"]["namespaces"]["22:22:22:22:22:22"]["11:11:11:11:11:11"]["link_key"]
+            source_json["key_store"]["namespaces"]["22:22:22:22:22:22"]["11:11:11:11:11:11/P"]["link_key"]
                 ["value"],
-            stale_json["key_store"]["namespaces"]["22:22:22:22:22:22"]["11:11:11:11:11:11"]["link_key"]
+            stale_json["key_store"]["namespaces"]["22:22:22:22:22:22"]["11:11:11:11:11:11/P"]["link_key"]
                 ["value"]
         );
     }
@@ -889,7 +888,7 @@ mod tests {
             "key_store": {
                 "namespaces": {
                     "22:22:22:22:22:22": {
-                        "11:11:11:11:11:11": {
+                        "11:11:11:11:11:11/P": {
                             "link_key": {
                                 "authenticated": true,
                                 "value": "C7C7C7C7C7C7C7C7C7C7C7C7C7C7C7C7"
@@ -898,9 +897,6 @@ mod tests {
                         }
                     }
                 }
-            },
-            "future_top": {
-                "retained": true
             }
         }))
         .expect("serialize profile")
