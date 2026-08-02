@@ -45,12 +45,9 @@ use crate::{
 #[cfg(feature = "bumble")]
 use crate::controller::ControllerBuilder;
 
-use super::{
-    create::CreateProfileRuntimeAttempt,
-    runtime::{
-        ConcreteRuntimeAttempt, ConcreteRuntimeBackend, RuntimeComponents, map_worker_spawn_error,
-        open_controller_runtime,
-    },
+use super::runtime::{
+    RuntimeComponents, create_controller_runtime, map_worker_spawn_error, open_controller_runtime,
+    open_runtime_owner,
 };
 
 #[cfg(feature = "bumble")]
@@ -757,7 +754,6 @@ fn pair_primary_and_concrete_cleanup_failure_remain_separately_traversable() {
             ChannelWorkerWaiter::new(activity_receiver),
         ))
     };
-    let mut backend = ConcreteRuntimeBackend::new(factory);
     let mut store = MemoryProfileStore::default();
 
     let error = match ProController::builder("fake-adapter")
@@ -768,7 +764,9 @@ fn pair_primary_and_concrete_cleanup_failure_remain_separately_traversable() {
                 pair_timeout: PAIR_TIMEOUT,
             },
             &mut store,
-            &mut backend,
+            |config, status, pair_timeout| {
+                create_controller_runtime(config, status, pair_timeout, factory)
+            },
         ) {
         Ok(_) => panic!("disconnect before Ready and cleanup failure must fail"),
         Err(error) => error,
@@ -812,6 +810,49 @@ fn pair_primary_and_concrete_cleanup_failure_remain_separately_traversable() {
 }
 
 #[test]
+fn create_profile_transfers_one_ready_worker_owner_to_the_controller() {
+    let (transport, control) = TestTransport::with_limits(16, 3);
+    let observed_control = control.clone();
+    let clock = ManualClock::at(Duration::ZERO);
+    let worker_clock = clock.clone();
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+        Ok::<_, Error>(RuntimeComponents::new(
+            Box::new(FakePairTransport {
+                inner: transport,
+                control,
+                request_device_info: false,
+            }),
+            worker_clock,
+            PeriodicReadyWaiter {
+                inner: ChannelWorkerWaiter::new(activity_receiver),
+                clock,
+                periodic: true,
+            },
+        ))
+    };
+    let mut store = MemoryProfileStore::default();
+
+    let controller = ProController::builder("fake-adapter")
+        .profile_path("profiles/ready-owner.json")
+        .create_profile_with(
+            CreateProfileOptions {
+                identity: ProfileIdentity::AdapterDefault,
+                pair_timeout: PAIR_TIMEOUT,
+            },
+            &mut store,
+            |config, status, pair_timeout| {
+                create_controller_runtime(config, status, pair_timeout, factory)
+            },
+        )
+        .expect("create-profile returns a Ready controller");
+
+    assert_eq!(controller.status().lifecycle, LifecycleState::Ready);
+    assert_eq!(observed_control.counters(), (1, 0, 0));
+    drop(controller);
+    assert_eq!(observed_control.counters(), (1, 1, 1));
+}
+
+#[test]
 fn terminal_pair_worker_failure_cleans_and_joins_with_typed_primary() {
     let (transport, control) = TestTransport::with_limits(8, 3);
     let transport_fail_poll = Arc::new(AtomicBool::new(false));
@@ -830,7 +871,6 @@ fn terminal_pair_worker_failure_cleans_and_joins_with_typed_primary() {
             ChannelWorkerWaiter::new(activity_receiver),
         ))
     };
-    let mut backend = ConcreteRuntimeBackend::new(factory);
     let mut store = MemoryProfileStore::default();
 
     let error = match ProController::builder("fake-adapter")
@@ -841,7 +881,9 @@ fn terminal_pair_worker_failure_cleans_and_joins_with_typed_primary() {
                 pair_timeout: PAIR_TIMEOUT,
             },
             &mut store,
-            &mut backend,
+            |config, status, pair_timeout| {
+                create_controller_runtime(config, status, pair_timeout, factory)
+            },
         ) {
         Ok(_) => panic!("terminal pair worker failure must not return a controller"),
         Err(error) => error,
@@ -932,13 +974,15 @@ fn pair_after_worker_finishes_before_enqueue_uses_actual_terminal_outcome() {
             ChannelWorkerWaiter::new(activity_receiver),
         ))
     };
-    let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
-    attempt
-        .open(&controller.config)
-        .expect("open concrete runtime attempt");
+    let mut owner = open_runtime_owner(
+        &controller.config,
+        controller.status_publisher.clone(),
+        factory,
+    )
+    .expect("open concrete runtime owner");
 
     let watchdog = Instant::now() + DEADLOCK_WATCHDOG;
-    while !attempt.worker_is_finished() {
+    while !owner.worker_is_finished() {
         assert!(
             Instant::now() < watchdog,
             "worker must terminate before the enqueue-race assertion"
@@ -946,7 +990,7 @@ fn pair_after_worker_finishes_before_enqueue_uses_actual_terminal_outcome() {
         thread::yield_now();
     }
 
-    let error = attempt
+    let error = owner
         .pair_to_ready(PAIR_TIMEOUT)
         .expect_err("pairing after worker termination must return its actual outcome");
 
@@ -989,7 +1033,7 @@ fn pair_after_worker_finishes_before_enqueue_uses_actual_terminal_outcome() {
     );
     assert_eq!(control.counters(), (1, 1, 1));
 
-    attempt
+    owner
         .cleanup_without_neutral()
         .expect("terminal pair handling consumes the worker owner");
     assert_eq!(
@@ -1015,26 +1059,21 @@ fn non_classic_capabilities_fail_before_worker_spawn_and_clean_up_transport() {
             ChannelWorkerWaiter::new(activity_receiver),
         ))
     };
-    let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
-
-    let error = attempt
-        .open(&controller.config)
-        .expect_err("non-Classic capability must fail during transport open");
+    let result = open_runtime_owner(
+        &controller.config,
+        controller.status_publisher.clone(),
+        factory,
+    );
+    let error = match result {
+        Ok(_) => panic!("non-Classic capability must fail during transport open"),
+        Err(error) => error,
+    };
     assert_eq!(error.kind(), ErrorKind::TransportOpen);
     let source = error
         .source()
         .and_then(|source| source.downcast_ref::<TransportError>())
         .expect("typed unsupported-controller source");
     assert_eq!(source.kind(), TransportErrorKind::UnsupportedController);
-    assert!(
-        !attempt.owns_worker(),
-        "worker must not start before validation"
-    );
-    assert_eq!(control.counters(), (1, 0, 0));
-
-    attempt
-        .cleanup_without_neutral()
-        .expect("opened unsupported transport is cleaned up");
     assert_eq!(control.counters(), (1, 1, 1));
 }
 
@@ -1128,7 +1167,7 @@ fn invalid_usb_selector_maps_through_public_open_without_disclosure() {
 }
 
 #[test]
-fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
+fn partial_transport_open_failure_is_cleaned_before_return() {
     let (transport, control) = TestTransport::with_limits(8, 3);
     let observed_control = control.clone();
     let cleanup_trace = Arc::new(Mutex::new(Vec::new()));
@@ -1144,7 +1183,6 @@ fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
             ChannelWorkerWaiter::new(activity_receiver),
         ))
     };
-    let mut backend = ConcreteRuntimeBackend::new(factory);
     let mut store = MemoryProfileStore::default();
 
     let error = match ProController::builder("fake-adapter")
@@ -1155,7 +1193,9 @@ fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
                 pair_timeout: PAIR_TIMEOUT,
             },
             &mut store,
-            &mut backend,
+            |config, status, pair_timeout| {
+                create_controller_runtime(config, status, pair_timeout, factory)
+            },
         ) {
         Ok(_) => panic!("partially opened transport must report its open error"),
         Err(error) => error,
@@ -1200,7 +1240,7 @@ fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
 }
 
 #[test]
-fn partial_transport_open_attempt_drop_skips_drain_and_cleans_once() {
+fn partial_transport_open_owner_failure_cleans_once() {
     let controller = ProController::builder("fake-adapter")
         .build()
         .expect("build configured Pro controller");
@@ -1218,25 +1258,30 @@ fn partial_transport_open_attempt_drop_skips_drain_and_cleans_once() {
             ChannelWorkerWaiter::new(activity_receiver),
         ))
     };
-    let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
-
-    let error = attempt
-        .open(&controller.config)
-        .expect_err("partially opened transport reports its open error");
+    let result = open_runtime_owner(
+        &controller.config,
+        controller.status_publisher.clone(),
+        factory,
+    );
+    let error = match result {
+        Ok(_) => panic!("partially opened transport must report its open error"),
+        Err(error) => error,
+    };
     assert_eq!(error.kind(), ErrorKind::TransportOpen);
-    assert_eq!(control.counters(), (1, 0, 0));
-
-    drop(attempt);
 
     assert_eq!(
         *lock(&cleanup_trace),
-        [PartialCleanupTrace::Disconnect, PartialCleanupTrace::Close],
-        "Drop cleanup skips drain and preserves disconnect-before-close order"
+        [
+            PartialCleanupTrace::Drain(Duration::from_secs(1)),
+            PartialCleanupTrace::Disconnect,
+            PartialCleanupTrace::Close,
+        ],
+        "owner construction failure performs bounded explicit cleanup"
     );
     assert_eq!(
         control.counters(),
         (1, 1, 1),
-        "Drop disconnects and closes the partial open exactly once"
+        "owner construction failure cleans the partial open exactly once"
     );
 }
 
@@ -1259,19 +1304,19 @@ fn partial_transport_open_panic_is_guarded_for_drop_cleanup() {
             ChannelWorkerWaiter::new(activity_receiver),
         ))
     };
-    let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
-
     let panicked = catch_unwind(AssertUnwindSafe(|| {
-        let _ = attempt.open(&controller.config);
+        let _ = open_runtime_owner(
+            &controller.config,
+            controller.status_publisher.clone(),
+            factory,
+        );
     }));
 
     assert!(panicked.is_err(), "transport open panic must propagate");
-    assert_eq!(control.counters(), (1, 0, 0));
-    drop(attempt);
     assert_eq!(
         *lock(&cleanup_trace),
         [PartialCleanupTrace::Disconnect, PartialCleanupTrace::Close],
-        "attempt Drop skips drain and cleans the guarded partial open"
+        "transport guard Drop skips drain and cleans the partial open"
     );
     assert_eq!(control.counters(), (1, 1, 1));
 }
@@ -1468,15 +1513,15 @@ where
             waiter,
         ))
     };
-    let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
-
-    attempt
-        .open(&controller.config)
-        .expect("open fake concrete runtime");
-    attempt
-        .pair_to_ready(PAIR_TIMEOUT)
-        .expect("pair through worker one-shot");
-    controller._runtime = Some(attempt.into_ready());
+    controller._runtime = Some(
+        create_controller_runtime(
+            &controller.config,
+            controller.status_publisher.clone(),
+            PAIR_TIMEOUT,
+            factory,
+        )
+        .expect("open and pair fake runtime"),
+    );
 
     let status = controller.status();
     assert_eq!(status.lifecycle, LifecycleState::Ready);

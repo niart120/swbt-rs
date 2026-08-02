@@ -84,7 +84,7 @@
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| green | T01 create-profileが保存後のread capabilityを要求せず、保存bytesと同じ型付きmodel/identityをruntimeへ渡し、Ready ownerを一度だけ移譲する | new/regression | profile/controller/runtime integration | adapter-defaultとlocal identity、保存→open→pair順序、Drop一回性 |
+| refactor-done | T01 create-profileが保存後のread capabilityを要求せず、保存bytesと同じ型付きmodel/identityをruntimeへ渡し、Ready ownerを一度だけ移譲する | new/regression | profile/controller/runtime integration | adapter-defaultとlocal identity、保存→open→pair順序、Drop一回性 |
 
 ### 6.1 TDD cycle evidence
 
@@ -93,6 +93,7 @@
 | red | T01 | `FakeProfileStore`から`ProfileReadPort`を外し、期待イベントから`ReadBack`を削除した。`cargo test -p swbt-rs --lib controller::create_profile_tests --all-features --locked`は、`ProfileCreatePort`が`ProfileReadPort`を要求する`E0277`で失敗した |
 | green | T01 | `ProfileCreatePort`をtarget inspectionとcreate-newだけへ狭め、crate-privateなtyped empty profileを保存bytesとruntime configへ移譲した。同じcommandで13 tests passed。adapter-default/local identity、保存→open→pair→Ready、失敗cleanup、controller Drop一回性を確認した |
 | refactor | T01 | productionではno-op、testではworker外からeventを注入していた`PairDriver`を削除した。test pairing eventは`TransportPort::start_pairing()`、Periodicの仮想時刻前進は`WorkerWaiter::wait()`へ置き、`RuntimeComponents`と`ConcreteRuntimeAttempt`からtest専用型引数を除いた |
+| refactor | T01 | `CreateProfileRuntimeBackend` / `CreateProfileRuntimeAttempt`と工程別planを単一orchestratorへ集約した。未移譲transportは`UnownedTransportGuard`、pairing中のworkerは`RuntimeOwnerGuard`が所有し、成功時だけ具体的な`WorkerOwner<RuntimeCommand<M, R>>`を`ControllerRuntime`へ渡す。trait objectとtest tokenは削除した |
 
 Tidy decision:
 
@@ -147,6 +148,12 @@ T01をgreenにした後、既存のcreate-profile/runtime契約テストをgreen
 | `cargo test -p swbt-rs --lib controller::runtime_tests --all-features --locked` | success | `PairDriver`削除後。29 passed |
 | `cargo test -p swbt-rs --lib controller::runtime_tests --no-default-features --locked` | success | `PairDriver`削除後。25 passed |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | `PairDriver`削除後 |
+| `cargo test --workspace --all-targets --all-features --locked` | success | 全refactor後。root lib 265 passed / 1 ignored。実機testはignored |
+| `cargo test -p swbt-rs --all-targets --no-default-features --locked` | success | 全refactor後。root lib 250 passed / 1 ignored |
+| `cargo build --workspace --all-features --locked` | success | 全refactor後 |
+| `cargo build -p swbt-rs --no-default-features --locked` | success | 全refactor後 |
+| `cargo clippy -p swbt-rs --all-targets --no-default-features --locked -- -D warnings` | success | feature無効のdead-code境界を含む |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | 全refactor後 |
 
 ## 10. 先送り事項
 
@@ -156,9 +163,9 @@ T01をgreenにした後、既存のcreate-profile/runtime契約テストをgreen
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test Listを作成した
-- [ ] T01のRED/GREEN/refactorを記録した
-- [ ] create-profileとruntimeの既存契約testを維持した
+- [x] T01のRED/GREEN/refactorを記録した
+- [x] create-profileとruntimeの既存契約testを維持した
 - [ ] 全検証結果または未実行理由を記録した
 - [x] Cargo metadata、release、public APIは変更対象外と確認した
-- [ ] `spec/initial`のIntent Deltaを反映した
+- [x] `spec/initial`のIntent Deltaを反映した
 - [ ] self-reviewを完了した

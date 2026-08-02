@@ -45,10 +45,24 @@ impl TransportCapabilities {
             .expect("test controller capabilities are valid")
     }
 
+    #[cfg_attr(
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not project runtime transport capabilities"
+        )
+    )]
     pub(crate) const fn local_address(self) -> [u8; 6] {
         self.local_address
     }
 
+    #[cfg_attr(
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not validate runtime transport capabilities"
+        )
+    )]
     pub(crate) const fn classic_capable(self) -> bool {
         self.classic_capable
     }

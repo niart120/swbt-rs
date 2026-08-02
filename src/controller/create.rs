@@ -13,7 +13,10 @@ use crate::{
     reporting::{self, ReportingMode},
     runtime::{
         cleanup::CloseMode,
+        error_map::{map_command_error, map_enqueue_error, map_response_error, map_worker_outcome},
         status::{StatusPublisher, status_projection},
+        worker::RuntimeCommand,
+        worker_thread::WorkerOwner,
     },
 };
 
@@ -45,30 +48,16 @@ impl<M: ControllerModel, R: ReportingMode> CreateProfilePlan<M, R> {
         self.identity
     }
 
-    fn require_supported_backend(
-        self,
-        ensure_supported: impl FnOnce(&BuilderConfig<M, R>) -> crate::Result<()>,
-    ) -> crate::Result<BackendSupportedCreateProfilePlan<M, R>> {
-        ensure_supported(&self.config)?;
-        Ok(BackendSupportedCreateProfilePlan { plan: self })
-    }
-}
-
-struct BackendSupportedCreateProfilePlan<M: ControllerModel, R: ReportingMode> {
-    plan: CreateProfilePlan<M, R>,
-}
-
-impl<M: ControllerModel, R: ReportingMode> BackendSupportedCreateProfilePlan<M, R> {
-    fn persist_and_reopen(
+    fn persist_and_configure(
         self,
         store: &mut impl ProfileCreatePort,
-    ) -> crate::Result<ReopenedCreateProfilePlan<M, R>> {
+    ) -> crate::Result<(ControllerConfig<M, R>, Duration)> {
         let CreateProfilePlan {
             config,
             path,
             identity,
             pair_timeout,
-        } = self.plan;
+        } = self;
         let profile = PairingProfile::<M>::empty(identity);
         let bytes = profile.to_json_bytes()?;
         store.create_new(&path, &bytes).map_err(|source| {
@@ -91,43 +80,13 @@ impl<M: ControllerModel, R: ReportingMode> BackendSupportedCreateProfilePlan<M, 
             Ok(profile)
         })?;
 
-        Ok(ReopenedCreateProfilePlan {
-            config,
-            pair_timeout,
-        })
+        Ok((config, pair_timeout))
     }
-}
-
-struct ReopenedCreateProfilePlan<M: ControllerModel, R: ReportingMode> {
-    config: ControllerConfig<M, R>,
-    pair_timeout: Duration,
-}
-
-/// Type-erased command and shutdown boundary for an owned controller runtime.
-pub(super) trait ControllerRuntimePort<M, R>: Send
-where
-    M: ControllerModel,
-    R: ReportingMode,
-{
-    /// Starts pairing and waits for the worker's readiness result.
-    fn pair(&mut self, timeout: Duration) -> crate::Result<()>;
-
-    /// Starts stored-key reconnect and waits for the worker's readiness result.
-    fn reconnect(&mut self, timeout: Duration) -> crate::Result<()>;
-
-    /// Sends one reporting-specific command and waits for its worker response.
-    fn request(
-        &mut self,
-        command: <R as reporting::sealed::Sealed>::Command<M>,
-    ) -> crate::Result<()>;
-
-    /// Performs explicit cleanup and consumes the runtime owner.
-    fn close(self: Box<Self>, mode: CloseMode) -> crate::Result<()>;
 }
 
 /// Worker ownership retained from HCI-open through explicit close.
 pub(super) struct ControllerRuntime<M: ControllerModel, R: ReportingMode> {
-    port: Box<dyn ControllerRuntimePort<M, R>>,
+    owner: WorkerOwner<RuntimeCommand<M, R>>,
 }
 
 impl<M: ControllerModel, R: ReportingMode> ControllerRuntime<M, R> {
@@ -135,154 +94,73 @@ impl<M: ControllerModel, R: ReportingMode> ControllerRuntime<M, R> {
         not(any(test, feature = "bumble")),
         allow(
             dead_code,
-            reason = "feature-disabled builds cannot construct a concrete runtime port"
+            reason = "feature-disabled builds cannot construct a worker owner"
         )
     )]
-    pub(super) fn from_port(port: impl ControllerRuntimePort<M, R> + 'static) -> Self {
-        Self {
-            port: Box::new(port),
-        }
+    pub(super) const fn new(owner: WorkerOwner<RuntimeCommand<M, R>>) -> Self {
+        Self { owner }
     }
 
     pub(super) fn request(
         &mut self,
         command: <R as reporting::sealed::Sealed>::Command<M>,
     ) -> crate::Result<()> {
-        self.port.request(command)
+        let response = self
+            .owner
+            .try_enqueue(RuntimeCommand::Input(command))
+            .map_err(map_enqueue_error)?;
+        response
+            .recv()
+            .map_err(map_response_error)?
+            .map_err(map_command_error)
     }
 
     pub(super) fn pair(&mut self, timeout: Duration) -> crate::Result<()> {
-        self.port.pair(timeout)
+        let response = self
+            .owner
+            .try_enqueue(RuntimeCommand::Pair { timeout })
+            .map_err(map_enqueue_error)?;
+        response
+            .recv()
+            .map_err(map_response_error)?
+            .map_err(map_command_error)
     }
 
     pub(super) fn reconnect(&mut self, timeout: Duration) -> crate::Result<()> {
-        self.port.reconnect(timeout)
+        let response = self
+            .owner
+            .try_enqueue(RuntimeCommand::Reconnect { timeout })
+            .map_err(map_enqueue_error)?;
+        response
+            .recv()
+            .map_err(map_response_error)?
+            .map_err(map_command_error)
     }
 
     pub(super) fn close(self, mode: CloseMode) -> crate::Result<()> {
-        self.port.close(mode)
+        map_worker_outcome(self.owner.finish_explicit(mode))
     }
-
-    #[cfg(test)]
-    pub(super) fn new(owner: impl Send + 'static) -> Self {
-        Self::from_port(TestRuntimeToken(owner))
-    }
-}
-
-#[cfg(test)]
-#[allow(
-    dead_code,
-    reason = "the token is retained solely to verify runtime ownership and Drop"
-)]
-struct TestRuntimeToken<T: Send>(T);
-
-#[cfg(test)]
-impl<M, R, T> ControllerRuntimePort<M, R> for TestRuntimeToken<T>
-where
-    M: ControllerModel,
-    R: ReportingMode,
-    T: Send,
-{
-    fn pair(&mut self, _timeout: Duration) -> crate::Result<()> {
-        Err(Error::new(
-            ErrorKind::WorkerFailed,
-            "test runtime token cannot process pairing commands",
-        ))
-    }
-
-    fn reconnect(&mut self, _timeout: Duration) -> crate::Result<()> {
-        Err(Error::new(
-            ErrorKind::WorkerFailed,
-            "test runtime token cannot process reconnect commands",
-        ))
-    }
-
-    fn request(
-        &mut self,
-        _command: <R as reporting::sealed::Sealed>::Command<M>,
-    ) -> crate::Result<()> {
-        Err(Error::new(
-            ErrorKind::WorkerFailed,
-            "test runtime token cannot process worker commands",
-        ))
-    }
-
-    fn close(self: Box<Self>, _mode: CloseMode) -> crate::Result<()> {
-        Ok(())
-    }
-}
-
-/// Crate-private lifecycle seam used by the create-profile orchestrator.
-///
-/// Backend capability checks happen before persistence. Creating an attempt is
-/// side-effect-free; the orchestrator retains that attempt through open and
-/// pairing so either failure follows the same explicit cleanup path.
-pub(super) trait CreateProfileRuntimeBackend<M: ControllerModel, R: ReportingMode> {
-    type Attempt: CreateProfileRuntimeAttempt<M, R>;
-
-    /// Checks backend availability without creating a profile or opening I/O.
-    fn ensure_supported(&mut self, config: &BuilderConfig<M, R>) -> crate::Result<()>;
-
-    /// Creates an inactive attempt that owns the shared status writer.
-    fn begin_attempt(&mut self, status: StatusPublisher<M>) -> Self::Attempt;
-}
-
-/// One create-profile runtime attempt owned by the orchestrator.
-pub(super) trait CreateProfileRuntimeAttempt<M: ControllerModel, R: ReportingMode>:
-    Sized
-{
-    /// Opens runtime resources for the typed controller configuration.
-    fn open(&mut self, config: &ControllerConfig<M, R>) -> crate::Result<()>;
-
-    /// Completes pairing and returns only after protocol readiness.
-    fn pair_to_ready(&mut self, pair_timeout: Duration) -> crate::Result<()>;
-
-    /// Performs best-effort cleanup without sending a neutral report.
-    ///
-    /// Implementations retain the bounded drain used by explicit close and
-    /// disarm their `Drop` fallback before returning. Resource-owning
-    /// implementations also provide that fallback for panic and early-return
-    /// paths.
-    ///
-    /// # Errors
-    ///
-    /// Returns a structured worker or transport error after attempting every
-    /// cleanup phase.
-    fn cleanup_without_neutral(self) -> crate::Result<()>;
-
-    /// Transfers a successfully paired attempt into controller ownership.
-    fn into_ready(self) -> ControllerRuntime<M, R>;
 }
 
 pub(super) fn create_profile<M, R>(
     plan: CreateProfilePlan<M, R>,
     store: &mut impl ProfileCreatePort,
-    backend: &mut impl CreateProfileRuntimeBackend<M, R>,
+    open_and_pair: impl FnOnce(
+        &ControllerConfig<M, R>,
+        StatusPublisher<M>,
+        Duration,
+    ) -> crate::Result<ControllerRuntime<M, R>>,
 ) -> crate::Result<Controller<M, R>>
 where
     M: ControllerModel,
     R: ReportingMode,
 {
-    let plan = plan.require_supported_backend(|config| backend.ensure_supported(config))?;
-    let reopened = plan.persist_and_reopen(store)?;
+    let (config, pair_timeout) = plan.persist_and_configure(store)?;
     let (status_publisher, status_reader) = status_projection::<M, R>();
-    let mut attempt = backend.begin_attempt(status_publisher.clone());
-    if let Err(primary) = attempt.open(&reopened.config) {
-        return Err(with_cleanup_error(
-            primary,
-            attempt.cleanup_without_neutral(),
-        ));
-    }
-    if let Err(primary) = attempt.pair_to_ready(reopened.pair_timeout) {
-        return Err(with_cleanup_error(
-            primary,
-            attempt.cleanup_without_neutral(),
-        ));
-    }
-    let runtime = attempt.into_ready();
+    let runtime = open_and_pair(&config, status_publisher.clone(), pair_timeout)?;
 
     Ok(Controller::from_ready_runtime(
-        reopened.config,
+        config,
         status_publisher,
         status_reader,
         runtime,
@@ -297,18 +175,19 @@ where
     M: ControllerModel,
     R: ReportingMode,
 {
-    let _supported = plan.require_supported_backend(|_| {
-        Err(crate::runtime::error_map::unsupported_capability(
-            "Bluetooth transport",
-        ))
-    })?;
-
-    Err(Error::new(
-        ErrorKind::Internal,
-        "unavailable backend passed its capability gate",
+    let _ = plan;
+    Err(crate::runtime::error_map::unsupported_capability(
+        "Bluetooth transport",
     ))
 }
 
+#[cfg_attr(
+    not(any(test, feature = "bumble")),
+    allow(
+        dead_code,
+        reason = "feature-disabled builds do not aggregate runtime cleanup"
+    )
+)]
 pub(super) fn with_cleanup_error(primary: Error, cleanup: crate::Result<()>) -> Error {
     match cleanup {
         Ok(()) => primary,
