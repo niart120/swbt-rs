@@ -92,6 +92,7 @@
 |---|---|---|
 | red | T01 | `FakeProfileStore`から`ProfileReadPort`を外し、期待イベントから`ReadBack`を削除した。`cargo test -p swbt-rs --lib controller::create_profile_tests --all-features --locked`は、`ProfileCreatePort`が`ProfileReadPort`を要求する`E0277`で失敗した |
 | green | T01 | `ProfileCreatePort`をtarget inspectionとcreate-newだけへ狭め、crate-privateなtyped empty profileを保存bytesとruntime configへ移譲した。同じcommandで13 tests passed。adapter-default/local identity、保存→open→pair→Ready、失敗cleanup、controller Drop一回性を確認した |
+| refactor | T01 | productionではno-op、testではworker外からeventを注入していた`PairDriver`を削除した。test pairing eventは`TransportPort::start_pairing()`、Periodicの仮想時刻前進は`WorkerWaiter::wait()`へ置き、`RuntimeComponents`と`ConcreteRuntimeAttempt`からtest専用型引数を除いた |
 
 Tidy decision:
 
@@ -143,6 +144,9 @@ T01をgreenにした後、既存のcreate-profile/runtime契約テストをgreen
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | T01 commit前gate |
 | `cargo fmt --all --check` | success | T01 commit前gate |
 | `git diff --check` | success | T01 commit前gate |
+| `cargo test -p swbt-rs --lib controller::runtime_tests --all-features --locked` | success | `PairDriver`削除後。29 passed |
+| `cargo test -p swbt-rs --lib controller::runtime_tests --no-default-features --locked` | success | `PairDriver`削除後。25 passed |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | `PairDriver`削除後 |
 
 ## 10. 先送り事項
 

@@ -71,25 +71,13 @@ pub(super) const fn default_runtime_tuning() -> usize {
     not(any(test, feature = "bumble")),
     allow(
         dead_code,
-        reason = "feature-disabled builds do not construct runtime factories"
-    )
-)]
-pub(super) trait PairDriver {
-    fn after_pair_enqueued(&mut self) -> crate::Result<()>;
-}
-
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
         reason = "feature-disabled builds do not construct runtime components"
     )
 )]
-pub(super) struct RuntimeComponents<C, W, D> {
+pub(super) struct RuntimeComponents<C, W> {
     transport: Box<dyn TransportPort>,
     clock: C,
     waiter: W,
-    pair_driver: D,
 }
 
 #[cfg_attr(
@@ -99,18 +87,12 @@ pub(super) struct RuntimeComponents<C, W, D> {
         reason = "feature-disabled builds do not construct runtime components"
     )
 )]
-impl<C, W, D> RuntimeComponents<C, W, D> {
-    pub(super) fn new(
-        transport: Box<dyn TransportPort>,
-        clock: C,
-        waiter: W,
-        pair_driver: D,
-    ) -> Self {
+impl<C, W> RuntimeComponents<C, W> {
+    pub(super) fn new(transport: Box<dyn TransportPort>, clock: C, waiter: W) -> Self {
         Self {
             transport,
             clock,
             waiter,
-            pair_driver,
         }
     }
 }
@@ -209,7 +191,7 @@ impl<F> ConcreteRuntimeBackend<F> {
         reason = "feature-disabled builds do not own concrete runtime attempts"
     )
 )]
-pub(super) struct ConcreteRuntimeAttempt<M, R, F, C, W, D>
+pub(super) struct ConcreteRuntimeAttempt<M, R, F, C, W>
 where
     M: ControllerModel,
     R: ReportingMode,
@@ -218,7 +200,6 @@ where
     status: StatusPublisher<M>,
     owner: Option<WorkerOwner<RuntimeCommand<M, R>>>,
     unowned_transport: Option<Box<dyn TransportPort>>,
-    pair_driver: Option<D>,
     _resources: PhantomData<fn() -> (C, W)>,
 }
 
@@ -229,7 +210,7 @@ where
         reason = "feature-disabled builds do not construct concrete runtime attempts"
     )
 )]
-impl<M, R, F, C, W, D> ConcreteRuntimeAttempt<M, R, F, C, W, D>
+impl<M, R, F, C, W> ConcreteRuntimeAttempt<M, R, F, C, W>
 where
     M: ControllerModel,
     R: ReportingMode,
@@ -240,7 +221,6 @@ where
             status,
             owner: None,
             unowned_transport: None,
-            pair_driver: None,
             _resources: PhantomData,
         }
     }
@@ -267,7 +247,7 @@ where
     }
 }
 
-impl<M, R, F, C, W, D> CreateProfileRuntimeBackend<M, R> for ConcreteRuntimeBackend<F>
+impl<M, R, F, C, W> CreateProfileRuntimeBackend<M, R> for ConcreteRuntimeBackend<F>
 where
     M: ControllerModel,
     R: WorkerReporting<M>,
@@ -275,12 +255,11 @@ where
         RuntimeFactoryConfig,
         ActivityNotifier,
         Receiver<()>,
-    ) -> crate::Result<RuntimeComponents<C, W, D>>,
+    ) -> crate::Result<RuntimeComponents<C, W>>,
     C: MonotonicClock + 'static,
     W: WorkerWaiter + 'static,
-    D: PairDriver,
 {
-    type Attempt = ConcreteRuntimeAttempt<M, R, F, C, W, D>;
+    type Attempt = ConcreteRuntimeAttempt<M, R, F, C, W>;
 
     fn ensure_supported(&mut self, _config: &BuilderConfig<M, R>) -> crate::Result<()> {
         if self.factory.is_some() {
@@ -302,8 +281,7 @@ where
     }
 }
 
-impl<M, R, F, C, W, D> CreateProfileRuntimeAttempt<M, R>
-    for ConcreteRuntimeAttempt<M, R, F, C, W, D>
+impl<M, R, F, C, W> CreateProfileRuntimeAttempt<M, R> for ConcreteRuntimeAttempt<M, R, F, C, W>
 where
     M: ControllerModel,
     R: WorkerReporting<M>,
@@ -311,13 +289,12 @@ where
         RuntimeFactoryConfig,
         ActivityNotifier,
         Receiver<()>,
-    ) -> crate::Result<RuntimeComponents<C, W, D>>,
+    ) -> crate::Result<RuntimeComponents<C, W>>,
     C: MonotonicClock + 'static,
     W: WorkerWaiter + 'static,
-    D: PairDriver,
 {
     fn open(&mut self, config: &ControllerConfig<M, R>) -> crate::Result<()> {
-        if self.owner.is_some() || self.unowned_transport.is_some() || self.pair_driver.is_some() {
+        if self.owner.is_some() || self.unowned_transport.is_some() {
             return Err(Error::new(
                 ErrorKind::WorkerFailed,
                 "runtime attempt is already open",
@@ -334,7 +311,6 @@ where
             transport,
             clock,
             waiter,
-            pair_driver,
         } = factory(
             RuntimeFactoryConfig::from_controller(config),
             activity.clone(),
@@ -383,7 +359,6 @@ where
                 })?;
 
         self.owner = Some(WorkerOwner::new(commands, shutdown, thread));
-        self.pair_driver = Some(pair_driver);
         Ok(())
     }
 
@@ -402,15 +377,6 @@ where
             }
             Err(error) => return Err(map_enqueue_error(error)),
         };
-        self.pair_driver
-            .as_mut()
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::WorkerFailed,
-                    "runtime pair driver is unavailable",
-                )
-            })?
-            .after_pair_enqueued()?;
         match response.recv() {
             Ok(Err(error @ WorkerCommandError::Pair(PairingError::WorkerFailed))) => {
                 finish_terminal_owner(&mut self.owner, map_command_error(error))
@@ -438,7 +404,7 @@ where
 }
 
 #[cfg(any(test, feature = "bumble"))]
-pub(super) fn open_controller_runtime<M, R, F, C, W, D>(
+pub(super) fn open_controller_runtime<M, R, F, C, W>(
     config: &ControllerConfig<M, R>,
     status: StatusPublisher<M>,
     factory: F,
@@ -450,10 +416,9 @@ where
         RuntimeFactoryConfig,
         ActivityNotifier,
         Receiver<()>,
-    ) -> crate::Result<RuntimeComponents<C, W, D>>,
+    ) -> crate::Result<RuntimeComponents<C, W>>,
     C: MonotonicClock + 'static,
     W: WorkerWaiter + 'static,
-    D: PairDriver,
 {
     let mut attempt = ConcreteRuntimeAttempt::new(factory, status);
     if let Err(primary) = attempt.open(config) {
@@ -491,7 +456,7 @@ fn bumble_runtime_components(
     config: RuntimeFactoryConfig,
     _activity: ActivityNotifier,
     activity_receiver: Receiver<()>,
-) -> crate::Result<RuntimeComponents<SystemClock, ChannelWorkerWaiter, ProductionPairDriver>> {
+) -> crate::Result<RuntimeComponents<SystemClock, ChannelWorkerWaiter>> {
     Ok(RuntimeComponents::new(
         Box::new(
             crate::runtime::transport::BumbleTransportPort::with_profile_key_store(
@@ -503,7 +468,6 @@ fn bumble_runtime_components(
         ),
         SystemClock::new(),
         ChannelWorkerWaiter::new(activity_receiver),
-        ProductionPairDriver,
     ))
 }
 
@@ -543,17 +507,7 @@ impl MonotonicClock for SystemClock {
     }
 }
 
-#[cfg(feature = "bumble")]
-pub(super) struct ProductionPairDriver;
-
-#[cfg(feature = "bumble")]
-impl PairDriver for ProductionPairDriver {
-    fn after_pair_enqueued(&mut self) -> crate::Result<()> {
-        Ok(())
-    }
-}
-
-impl<M, R, F, C, W, D> Drop for ConcreteRuntimeAttempt<M, R, F, C, W, D>
+impl<M, R, F, C, W> Drop for ConcreteRuntimeAttempt<M, R, F, C, W>
 where
     M: ControllerModel,
     R: ReportingMode,
