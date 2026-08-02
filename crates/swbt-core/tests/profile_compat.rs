@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, error::Error as _, fs, path::PathBuf};
 
 use serde_json::{Value, json};
 use swbt_core::{ErrorKind, PairingProfile, model};
@@ -104,33 +104,32 @@ fn typed_profile_rejects_unknown_extensions() {
 }
 
 #[test]
-fn typed_profile_normalizes_lowercase_namespace_to_uppercase() {
-    let mut input = python_profile_fixtures()
-        .into_iter()
-        .next()
-        .expect("fixture must retain the Pro case");
-    let namespaces = input["key_store"]["namespaces"]
-        .as_object_mut()
-        .expect("fixture namespaces must be an object");
-    let peers = namespaces
-        .remove("00:11:22:33:44:55")
-        .expect("fixture namespace must exist");
-    namespaces.insert("aa:bb:cc:dd:ee:ff".to_owned(), peers);
+fn typed_profile_requires_canonical_uppercase_namespace() {
+    for noncanonical_namespace in ["aa:bb:cc:dd:ee:ff", "Aa:BB:CC:DD:EE:FF"] {
+        let mut input = python_profile_fixtures()
+            .into_iter()
+            .next()
+            .expect("fixture must retain the Pro case");
+        let namespaces = input["key_store"]["namespaces"]
+            .as_object_mut()
+            .expect("fixture namespaces must be an object");
+        let peers = namespaces
+            .remove("00:11:22:33:44:55")
+            .expect("fixture namespace must exist");
+        namespaces.insert(noncanonical_namespace.to_owned(), peers);
 
-    let profile = PairingProfile::<model::Pro>::from_json(
-        &serde_json::to_vec(&input).expect("serialize lowercase namespace profile"),
-    )
-    .expect("lowercase Bluetooth namespace must parse");
-    let output: Value = serde_json::from_slice(
-        &profile
-            .to_json_bytes()
-            .expect("normalized profile must serialize"),
-    )
-    .expect("normalized profile must remain JSON");
+        let error = PairingProfile::<model::Pro>::from_json(
+            &serde_json::to_vec(&input).expect("serialize noncanonical namespace profile"),
+        )
+        .expect_err("noncanonical Bluetooth namespace must fail");
 
-    assert!(
-        output["key_store"]["namespaces"]["AA:BB:CC:DD:EE:FF"]["98:B6:E9:11:22:33/P"].is_object()
-    );
+        assert_eq!(error.kind(), ErrorKind::InvalidProfile);
+        assert!(!error.to_string().contains(noncanonical_namespace));
+        assert!(!format!("{error:?}").contains(noncanonical_namespace));
+        let source = error.source().expect("invalid profile source");
+        assert!(!source.to_string().contains(noncanonical_namespace));
+        assert!(!format!("{source:?}").contains(noncanonical_namespace));
+    }
 }
 
 #[test]
@@ -159,8 +158,7 @@ fn typed_profile_normalizes_lowercase_peer_to_uppercase() {
     .expect("normalized profile must remain JSON");
 
     assert!(
-        output["key_store"]["namespaces"]["00:11:22:33:44:55"]["98:B6:E9:11:22:33/P"]
-            .is_object()
+        output["key_store"]["namespaces"]["00:11:22:33:44:55"]["98:B6:E9:11:22:33/P"].is_object()
     );
 }
 

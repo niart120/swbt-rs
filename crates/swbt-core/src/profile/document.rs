@@ -299,12 +299,12 @@ struct BluetoothAddressKey(String);
 
 impl BluetoothAddressKey {
     fn parse(value: &str) -> crate::Result<Self> {
-        if !is_bluetooth_address(value) {
+        if !is_canonical_bluetooth_address(value) {
             return Err(invalid_profile(
-                "profile key-store namespace must be a Bluetooth address",
+                "profile key-store namespace must use an uppercase Bluetooth address",
             ));
         }
-        Ok(Self(value.to_ascii_uppercase()))
+        Ok(Self(value.to_owned()))
     }
 }
 
@@ -336,7 +336,7 @@ impl<'de> Deserialize<'de> for BluetoothAddressKey {
     {
         let value = String::deserialize(deserializer)?;
         Self::parse(&value).map_err(|_| {
-            de::Error::custom("profile key-store namespace must be a Bluetooth address")
+            de::Error::custom("profile key-store namespace must use an uppercase Bluetooth address")
         })
     }
 }
@@ -458,6 +458,10 @@ fn is_bluetooth_address(value: &str) -> bool {
             .iter()
             .enumerate()
             .all(|(index, byte)| matches!(index, 2 | 5 | 8 | 11 | 14) || byte.is_ascii_hexdigit())
+}
+
+fn is_canonical_bluetooth_address(value: &str) -> bool {
+    is_bluetooth_address(value) && !value.bytes().any(|byte| byte.is_ascii_lowercase())
 }
 
 fn encode_hex(bytes: &[u8]) -> String {
