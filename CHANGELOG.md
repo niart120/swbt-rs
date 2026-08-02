@@ -2,6 +2,17 @@
 
 この文書は利用者に見える変更と互換性上の制限を記録する。
 
+## Unreleased
+
+- `swbt-probe` と実機 runner を `publish = false` の workspace package へ移し、crates.io の
+  `swbt-rs` archive から検証用 CLI、実機操作、専用 test を除外した。repository checkout では
+  `cargo run -p swbt-probe -- ...` と、三つの scenario を持つ
+  `cargo run -p swbt-hardware-runner -- <scenario> ...` を使う。
+- 安定 diagnostics schema を `diagnostics-schema` feature の明示選択に変更した。feature なしの
+  library dependency graph は `tracing` を含まず、`GamepadStatus` は引き続き利用できる。
+- 公開 `ErrorKind::Trace` を削除し、trace の作成・subscriber・書き込み失敗を `swbt-probe`
+  内部 error へ移した。この削除は source 非互換なので、次の公開版は 0.2.0 以降とする。
+
 ## 0.1.0 - 2026-08-02
 
 - Pro Controller、Joy-Con L、Joy-Con R を Periodic/Direct の型付き API から操作できる。
