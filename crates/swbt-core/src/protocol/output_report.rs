@@ -9,36 +9,35 @@ const SUBCOMMAND_MINIMUM_SIZE: usize = 11;
 const RUMBLE_MINIMUM_SIZE: usize = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct RawRumble([u8; RUMBLE_SIZE]);
+pub struct RawRumble([u8; RUMBLE_SIZE]);
 
 impl RawRumble {
     #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn bytes(&self) -> &[u8; RUMBLE_SIZE] {
+    pub const fn bytes(&self) -> &[u8; RUMBLE_SIZE] {
         &self.0
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SubcommandRequest<'a> {
+pub struct SubcommandRequest<'a> {
     id: u8,
     payload: &'a [u8],
 }
 
 impl<'a> SubcommandRequest<'a> {
     #[must_use]
-    pub(crate) const fn id(self) -> u8 {
+    pub const fn id(self) -> u8 {
         self.id
     }
 
     #[must_use]
-    pub(crate) const fn payload(self) -> &'a [u8] {
+    pub const fn payload(self) -> &'a [u8] {
         self.payload
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum OutputReport<'a> {
+pub enum OutputReport<'a> {
     Subcommand {
         packet_id: u8,
         rumble: RawRumble,
@@ -52,7 +51,7 @@ pub(crate) enum OutputReport<'a> {
 
 impl<'a> OutputReport<'a> {
     #[must_use]
-    pub(crate) const fn report_id(self) -> u8 {
+    pub const fn report_id(self) -> u8 {
         match self {
             Self::Subcommand { .. } => SUBCOMMAND_REPORT_ID,
             Self::Rumble { .. } => RUMBLE_REPORT_ID,
@@ -60,22 +59,21 @@ impl<'a> OutputReport<'a> {
     }
 
     #[must_use]
-    pub(crate) const fn packet_id(self) -> u8 {
+    pub const fn packet_id(self) -> u8 {
         match self {
             Self::Subcommand { packet_id, .. } | Self::Rumble { packet_id, .. } => packet_id,
         }
     }
 
     #[must_use]
-    pub(crate) const fn rumble(&self) -> &RawRumble {
+    pub const fn rumble(&self) -> &RawRumble {
         match self {
             Self::Subcommand { rumble, .. } | Self::Rumble { rumble, .. } => rumble,
         }
     }
 
     #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn subcommand(self) -> Option<SubcommandRequest<'a>> {
+    pub const fn subcommand(self) -> Option<SubcommandRequest<'a>> {
         match self {
             Self::Subcommand { request, .. } => Some(request),
             Self::Rumble { .. } => None,
@@ -83,7 +81,7 @@ impl<'a> OutputReport<'a> {
     }
 }
 
-pub(crate) fn parse_output_report(raw: &[u8]) -> Result<OutputReport<'_>, ProtocolError> {
+pub fn parse_output_report(raw: &[u8]) -> Result<OutputReport<'_>, ProtocolError> {
     let Some(report_id) = raw.first().copied() else {
         return Err(ProtocolError::OutputReportEmpty);
     };

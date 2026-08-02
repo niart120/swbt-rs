@@ -9,31 +9,31 @@ const INPUT_REPORT_SIZE: usize = 49;
 const STANDARD_FULL_REPORT_ID: u8 = 0x30;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PreparedInputReport {
+pub struct PreparedInputReport {
     bytes: [u8; INPUT_REPORT_SIZE],
     next_timer: u8,
 }
 
 impl PreparedInputReport {
     #[must_use]
-    pub(crate) const fn bytes(&self) -> &[u8; INPUT_REPORT_SIZE] {
+    pub const fn bytes(&self) -> &[u8; INPUT_REPORT_SIZE] {
         &self.bytes
     }
 
     #[must_use]
-    pub(crate) const fn next_timer(self) -> u8 {
+    pub const fn next_timer(self) -> u8 {
         self.next_timer
     }
 }
 
 #[must_use]
 #[cfg(test)]
-pub(crate) fn encode_neutral_0x30<M: ControllerModel>(timer: u8) -> PreparedInputReport {
+pub fn encode_neutral_0x30<M: ControllerModel>(timer: u8) -> PreparedInputReport {
     encode_0x30(&InputState::<M>::neutral(), timer, &[0; 36])
 }
 
 #[must_use]
-pub(crate) fn encode_0x30<M: ControllerModel>(
+pub fn encode_0x30<M: ControllerModel>(
     state: &InputState<M>,
     timer: u8,
     imu_block: &[u8; 36],

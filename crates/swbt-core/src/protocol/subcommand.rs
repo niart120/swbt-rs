@@ -44,64 +44,57 @@ const MCU_CONFIG_DATA: [u8; 34] = [
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct DeviceInfoBluetoothAddress([u8; 6]);
+pub struct DeviceInfoBluetoothAddress([u8; 6]);
 
 impl DeviceInfoBluetoothAddress {
     #[must_use]
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not construct the runtime protocol"
-        )
-    )]
-    pub(crate) const fn from_wire_bytes(bytes: [u8; 6]) -> Self {
+    pub const fn from_wire_bytes(bytes: [u8; 6]) -> Self {
         Self(bytes)
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PreparedSubcommandReply {
+pub struct PreparedSubcommandReply {
     bytes: [u8; SUBCOMMAND_REPLY_SIZE],
     next_timer: u8,
 }
 
 impl PreparedSubcommandReply {
     #[must_use]
-    pub(crate) const fn bytes(&self) -> &[u8; SUBCOMMAND_REPLY_SIZE] {
+    pub const fn bytes(&self) -> &[u8; SUBCOMMAND_REPLY_SIZE] {
         &self.bytes
     }
 
     #[must_use]
-    pub(crate) const fn next_timer(self) -> u8 {
+    pub const fn next_timer(self) -> u8 {
         self.next_timer
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct PreparedSessionReply {
+pub struct PreparedSessionReply {
     reply: PreparedSubcommandReply,
     next_session: ProtocolSession,
 }
 
 impl PreparedSessionReply {
     #[must_use]
-    pub(crate) const fn bytes(&self) -> &[u8; SUBCOMMAND_REPLY_SIZE] {
+    pub const fn bytes(&self) -> &[u8; SUBCOMMAND_REPLY_SIZE] {
         self.reply.bytes()
     }
 
     #[must_use]
-    pub(crate) const fn next_timer(self) -> u8 {
+    pub const fn next_timer(self) -> u8 {
         self.reply.next_timer()
     }
 
     #[must_use]
-    pub(crate) const fn next_session(self) -> ProtocolSession {
+    pub const fn next_session(self) -> ProtocolSession {
         self.next_session
     }
 }
 
-pub(crate) fn try_prepare_stateless_reply<M: ControllerModel>(
+pub fn try_prepare_stateless_reply<M: ControllerModel>(
     request: SubcommandRequest<'_>,
     state: &InputState<M>,
     timer: u8,
@@ -142,7 +135,7 @@ pub(crate) fn try_prepare_stateless_reply<M: ControllerModel>(
     Ok(Some(reply))
 }
 
-pub(crate) fn try_prepare_spi_reply<M: ControllerModel>(
+pub fn try_prepare_spi_reply<M: ControllerModel>(
     request: SubcommandRequest<'_>,
     state: &InputState<M>,
     timer: u8,
@@ -176,7 +169,7 @@ pub(crate) fn try_prepare_spi_reply<M: ControllerModel>(
     Ok(Some(reply))
 }
 
-pub(crate) fn try_prepare_stateful_reply<M: ControllerModel>(
+pub fn try_prepare_stateful_reply<M: ControllerModel>(
     request: SubcommandRequest<'_>,
     state: &InputState<M>,
     timer: u8,
@@ -227,7 +220,7 @@ pub(crate) fn try_prepare_stateful_reply<M: ControllerModel>(
     }))
 }
 
-pub(crate) fn prepare_0x21<M: ControllerModel>(
+pub fn prepare_0x21<M: ControllerModel>(
     subcommand_id: u8,
     ack: u8,
     data: &[u8],

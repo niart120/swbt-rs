@@ -8,7 +8,7 @@ const IDENTITY_QUATERNION: [f64; 4] = [0.0, 0.0, 0.0, 1.0];
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ImuMode {
+pub enum ImuMode {
     Disabled = 0x00,
     Standard = 0x01,
     Quaternion1 = 0x02,
@@ -18,7 +18,7 @@ pub(crate) enum ImuMode {
 }
 
 impl ImuMode {
-    pub(crate) const fn from_wire(value: u8) -> Option<Self> {
+    pub const fn from_wire(value: u8) -> Option<Self> {
         match value {
             0x00 => Some(Self::Disabled),
             0x01 => Some(Self::Standard),
@@ -32,14 +32,14 @@ impl ImuMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ImuEncodingState {
+pub struct ImuEncodingState {
     orientation: [f64; 4],
     previous_report_ns: Option<u64>,
 }
 
 impl ImuEncodingState {
     #[must_use]
-    pub(crate) const fn new(orientation: [f64; 4], previous_report_ns: Option<u64>) -> Self {
+    pub const fn new(orientation: [f64; 4], previous_report_ns: Option<u64>) -> Self {
         Self {
             orientation,
             previous_report_ns,
@@ -47,14 +47,12 @@ impl ImuEncodingState {
     }
 
     #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn orientation(self) -> [f64; 4] {
+    pub const fn orientation(self) -> [f64; 4] {
         self.orientation
     }
 
     #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn previous_report_ns(self) -> Option<u64> {
+    pub const fn previous_report_ns(self) -> Option<u64> {
         self.previous_report_ns
     }
 }
@@ -66,25 +64,25 @@ impl Default for ImuEncodingState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ImuEncodingResult {
+pub struct ImuEncodingResult {
     block: [u8; IMU_BLOCK_SIZE],
     next_state: ImuEncodingState,
 }
 
 impl ImuEncodingResult {
     #[must_use]
-    pub(crate) const fn block(&self) -> &[u8; IMU_BLOCK_SIZE] {
+    pub const fn block(&self) -> &[u8; IMU_BLOCK_SIZE] {
         &self.block
     }
 
     #[must_use]
-    pub(crate) const fn next_state(self) -> ImuEncodingState {
+    pub const fn next_state(self) -> ImuEncodingState {
         self.next_state
     }
 }
 
 #[must_use]
-pub(crate) fn encode_imu_block(
+pub fn encode_imu_block(
     current: ImuEncodingState,
     mode: ImuMode,
     frames: &[ImuFrame; 3],

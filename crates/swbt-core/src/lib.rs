@@ -6,6 +6,8 @@ pub mod error;
 pub mod input;
 pub mod model;
 pub mod profile;
+#[allow(missing_docs)]
+mod protocol;
 
 /// Runtime integration details shared with the `swbt` package.
 ///
@@ -17,6 +19,11 @@ pub mod __private {
         button_wire_position,
     };
     pub use crate::profile::__private::{ProfileDocument, StoredClassicBond};
+    pub use crate::protocol::{
+        ImuEncodingState, InputPreparation, OutputReport, PreparedOutputAction,
+        PreparedSessionReply, PreparedSubcommandReply, ProtocolError, ProtocolSession, RawRumble,
+        SubcommandRequest, SwitchHidProtocol, parse_output_report,
+    };
 }
 
 pub use error::{Error, ErrorKind, Result};

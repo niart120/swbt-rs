@@ -21,7 +21,7 @@ impl ReportModeSelection {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ProtocolSession {
+pub struct ProtocolSession {
     report_mode: Option<ReportModeSelection>,
     player_lights: Option<u8>,
     imu_mode: ImuMode,
@@ -31,7 +31,7 @@ pub(crate) struct ProtocolSession {
 
 impl ProtocolSession {
     #[must_use]
-    pub(crate) const fn report_mode(self) -> Option<u8> {
+    pub const fn report_mode(self) -> Option<u8> {
         match self.report_mode {
             Some(ReportModeSelection::StandardFull) => Some(SUPPORTED_INPUT_REPORT_MODE),
             Some(ReportModeSelection::Unsupported(requested)) => Some(requested),
@@ -40,13 +40,12 @@ impl ProtocolSession {
     }
 
     #[must_use]
-    pub(crate) const fn report_mode_supported(self) -> bool {
+    pub const fn report_mode_supported(self) -> bool {
         matches!(self.report_mode, Some(ReportModeSelection::StandardFull))
     }
 
     #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn unsupported_report_mode(self) -> Option<u8> {
+    pub const fn unsupported_report_mode(self) -> Option<u8> {
         match self.report_mode {
             Some(ReportModeSelection::Unsupported(requested)) => Some(requested),
             Some(ReportModeSelection::StandardFull) | None => None,
@@ -54,69 +53,63 @@ impl ProtocolSession {
     }
 
     #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn player_lights(self) -> Option<u8> {
+    pub const fn player_lights(self) -> Option<u8> {
         self.player_lights
     }
 
     #[must_use]
-    pub(crate) const fn imu_mode(self) -> ImuMode {
+    pub const fn imu_mode(self) -> ImuMode {
         self.imu_mode
     }
 
     #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn imu_enabled(self) -> bool {
+    pub const fn imu_enabled(self) -> bool {
         !matches!(self.imu_mode, ImuMode::Disabled)
     }
 
     #[must_use]
-    pub(crate) const fn imu_encoding_state(self) -> ImuEncodingState {
+    pub const fn imu_encoding_state(self) -> ImuEncodingState {
         self.imu_encoding_state
     }
 
     #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn vibration_enabled(self) -> bool {
+    pub const fn vibration_enabled(self) -> bool {
         self.vibration_enabled
     }
 
     #[must_use]
-    pub(crate) const fn protocol_ready(self) -> bool {
+    pub const fn protocol_ready(self) -> bool {
         self.report_mode_supported()
             && matches!(self.player_lights, Some(player_lights) if player_lights != 0)
     }
 
     #[must_use]
-    pub(crate) const fn with_report_mode(mut self, requested: u8) -> Self {
+    pub const fn with_report_mode(mut self, requested: u8) -> Self {
         self.report_mode = Some(ReportModeSelection::from_requested(requested));
         self
     }
 
     #[must_use]
-    pub(crate) const fn with_player_lights(mut self, player_lights: u8) -> Self {
+    pub const fn with_player_lights(mut self, player_lights: u8) -> Self {
         self.player_lights = Some(player_lights);
         self
     }
 
     #[must_use]
-    pub(crate) fn with_imu_mode(mut self, imu_mode: ImuMode) -> Self {
+    pub fn with_imu_mode(mut self, imu_mode: ImuMode) -> Self {
         self.imu_mode = imu_mode;
         self.imu_encoding_state = ImuEncodingState::default();
         self
     }
 
     #[must_use]
-    pub(crate) const fn with_imu_encoding_state(
-        mut self,
-        imu_encoding_state: ImuEncodingState,
-    ) -> Self {
+    pub const fn with_imu_encoding_state(mut self, imu_encoding_state: ImuEncodingState) -> Self {
         self.imu_encoding_state = imu_encoding_state;
         self
     }
 
     #[must_use]
-    pub(crate) const fn with_vibration_enabled(mut self, vibration_enabled: bool) -> Self {
+    pub const fn with_vibration_enabled(mut self, vibration_enabled: bool) -> Self {
         self.vibration_enabled = vibration_enabled;
         self
     }

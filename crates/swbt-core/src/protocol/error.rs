@@ -3,7 +3,7 @@ use std::fmt;
 use crate::model::ButtonKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ProtocolError {
+pub enum ProtocolError {
     SpiReadTooLarge {
         size: usize,
         maximum: usize,

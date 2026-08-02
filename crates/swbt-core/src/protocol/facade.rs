@@ -19,37 +19,37 @@ use super::{
 use super::output_report::{OutputReport, RawRumble, parse_output_report};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct InputPreparation {
+pub struct InputPreparation {
     report: PreparedInputReport,
     next_imu_encoding_state: ImuEncodingState,
 }
 
 impl InputPreparation {
     #[must_use]
-    pub(crate) const fn bytes(&self) -> &[u8; 49] {
+    pub const fn bytes(&self) -> &[u8; 49] {
         self.report.bytes()
     }
 
     #[must_use]
-    pub(crate) const fn next_timer(self) -> u8 {
+    pub const fn next_timer(self) -> u8 {
         self.report.next_timer()
     }
 
     #[must_use]
-    pub(crate) const fn next_imu_encoding_state(self) -> ImuEncodingState {
+    pub const fn next_imu_encoding_state(self) -> ImuEncodingState {
         self.next_imu_encoding_state
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum PreparedOutputAction {
+pub enum PreparedOutputAction {
     Reply(PreparedSubcommandReply),
     SessionReply(PreparedSessionReply),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg(test)]
-pub(crate) enum OutputPreparation<'a> {
+pub enum OutputPreparation<'a> {
     RumbleOnly {
         packet_id: u8,
         rumble: RawRumble,
@@ -62,21 +62,14 @@ pub(crate) enum OutputPreparation<'a> {
     },
 }
 
-pub(crate) struct SwitchHidProtocol<M: ControllerModel> {
+pub struct SwitchHidProtocol<M: ControllerModel> {
     spi: VirtualSpiFlash<M>,
     device_info_address: DeviceInfoBluetoothAddress,
 }
 
 impl<M: ControllerModel> SwitchHidProtocol<M> {
     #[must_use]
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not construct the runtime protocol"
-        )
-    )]
-    pub(crate) fn new(colors: Option<ControllerColors>, device_info_address: [u8; 6]) -> Self {
+    pub fn new(colors: Option<ControllerColors>, device_info_address: [u8; 6]) -> Self {
         Self {
             spi: VirtualSpiFlash::new(colors),
             device_info_address: DeviceInfoBluetoothAddress::from_wire_bytes(device_info_address),
@@ -84,7 +77,7 @@ impl<M: ControllerModel> SwitchHidProtocol<M> {
     }
 
     #[must_use]
-    pub(crate) fn prepare_input_report(
+    pub fn prepare_input_report(
         &self,
         state: &InputState<M>,
         timer: u8,
@@ -105,7 +98,7 @@ impl<M: ControllerModel> SwitchHidProtocol<M> {
     }
 
     #[cfg(test)]
-    pub(crate) fn prepare_output_report<'a>(
+    pub fn prepare_output_report<'a>(
         &self,
         raw: &'a [u8],
         state: &InputState<M>,
@@ -133,7 +126,7 @@ impl<M: ControllerModel> SwitchHidProtocol<M> {
         }
     }
 
-    pub(crate) fn prepare_subcommand(
+    pub fn prepare_subcommand(
         &self,
         request: SubcommandRequest<'_>,
         state: &InputState<M>,
