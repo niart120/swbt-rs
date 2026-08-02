@@ -76,6 +76,10 @@ where
     I: IntoIterator<Item = (&'static str, Value)>,
 {
     let value = evidence_event(target, duration_ms(started.elapsed()), event, fields);
+    write_event(&value);
+}
+
+fn write_event(value: &Value) {
     let encoded = serde_json::to_string(&value).expect("hardware evidence event must serialize");
     let mut output = io::stdout().lock();
     writeln!(output, "{encoded}").expect("hardware evidence event must be written");
@@ -129,9 +133,19 @@ pub(crate) fn emit_controller_failure<T: EvidenceTarget>(
     operation: &'static str,
     error: &Error,
 ) {
-    emit(
+    let value = controller_failure_event(target, duration_ms(started.elapsed()), operation, error);
+    write_event(&value);
+}
+
+fn controller_failure_event<T: EvidenceTarget>(
+    target: &T,
+    elapsed_ms: u64,
+    operation: &'static str,
+    error: &Error,
+) -> Value {
+    evidence_event(
         target,
-        started,
+        elapsed_ms,
         "operation_failure",
         [
             ("operation", json!(operation)),
@@ -141,7 +155,7 @@ pub(crate) fn emit_controller_failure<T: EvidenceTarget>(
                 json!(error.related_error().is_some()),
             ),
         ],
-    );
+    )
 }
 
 pub(crate) fn emit_fixed_failure<T: EvidenceTarget>(
@@ -163,12 +177,17 @@ pub(crate) fn emit_fixed_failure<T: EvidenceTarget>(
 }
 
 pub(crate) fn emit_completion<T: EvidenceTarget>(target: &T, started: Instant, success: bool) {
-    emit(
+    let value = completion_event(target, duration_ms(started.elapsed()), success);
+    write_event(&value);
+}
+
+fn completion_event<T: EvidenceTarget>(target: &T, elapsed_ms: u64, success: bool) -> Value {
+    evidence_event(
         target,
-        started,
+        elapsed_ms,
         "runner_complete",
         [("success", json!(success))],
-    );
+    )
 }
 
 pub(crate) fn verify_adapter_reopen<T, C>(
@@ -276,6 +295,7 @@ pub(crate) fn error_kind_name(kind: ErrorKind) -> &'static str {
     match kind {
         ErrorKind::AdapterDiscovery => "adapter_discovery",
         ErrorKind::TransportOpen => "transport_open",
+        ErrorKind::AdapterIdentityRecoveryRequired => "adapter_identity_recovery_required",
         ErrorKind::ProfilePathRequired => "profile_path_required",
         ErrorKind::ProfileNotFound => "profile_not_found",
         ErrorKind::ProfileAlreadyExists => "profile_already_exists",
@@ -299,7 +319,126 @@ pub(crate) fn error_kind_name(kind: ErrorKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{KeyValueArguments, UsageError};
+    use std::{error::Error as StdError, fmt};
+
+    use serde_json::{Value, json};
+    use swbt::{Error, ErrorKind};
+
+    use super::{
+        EvidenceTarget, KeyValueArguments, UsageError, completion_event, controller_failure_event,
+        error_kind_name,
+    };
+
+    struct TestTarget;
+
+    impl EvidenceTarget for TestTarget {
+        fn evidence_schema(&self) -> &'static str {
+            "swbt.test.hardware-runner"
+        }
+
+        fn evidence_dimensions(&self) -> Vec<(&'static str, Value)> {
+            vec![("run_index", json!(7))]
+        }
+    }
+
+    #[test]
+    fn current_error_kinds_have_explicit_evidence_names() {
+        let cases = [
+            (ErrorKind::AdapterDiscovery, "adapter_discovery"),
+            (ErrorKind::TransportOpen, "transport_open"),
+            (ErrorKind::ProfilePathRequired, "profile_path_required"),
+            (ErrorKind::ProfileNotFound, "profile_not_found"),
+            (ErrorKind::ProfileAlreadyExists, "profile_already_exists"),
+            (ErrorKind::InvalidProfile, "invalid_profile"),
+            (
+                ErrorKind::ProfileControllerMismatch,
+                "profile_controller_mismatch",
+            ),
+            (ErrorKind::InvalidKeyStore, "invalid_key_store"),
+            (ErrorKind::NoBond, "no_bond"),
+            (ErrorKind::TransportClosed, "transport_closed"),
+            (ErrorKind::ConnectionTimeout, "connection_timeout"),
+            (ErrorKind::ConnectionFailed, "connection_failed"),
+            (ErrorKind::Protocol, "protocol"),
+            (ErrorKind::InvalidInput, "invalid_input"),
+            (ErrorKind::UnsupportedInput, "unsupported_input"),
+            (ErrorKind::UnsupportedCapability, "unsupported_capability"),
+            (
+                ErrorKind::AdapterIdentityRecoveryRequired,
+                "adapter_identity_recovery_required",
+            ),
+            (ErrorKind::WorkerFailed, "worker_failed"),
+            (ErrorKind::Shutdown, "shutdown"),
+            (ErrorKind::Internal, "internal"),
+        ];
+
+        for (kind, expected) in cases {
+            assert_eq!(error_kind_name(kind), expected, "kind: {kind:?}");
+        }
+    }
+
+    #[test]
+    fn recovery_required_failure_and_completion_events_are_secret_free_and_unsuccessful() {
+        let error = Error::with_source(
+            ErrorKind::AdapterIdentityRecoveryRequired,
+            r"secret message usb:0a12:0001 02:12:34:56:78:9A SERIAL-123 C:\secret-profile.json",
+            SecretSource,
+        )
+        .with_related(Error::new(
+            ErrorKind::WorkerFailed,
+            "secret related failure",
+        ));
+
+        let failure = controller_failure_event(&TestTarget, 125, "create_profile", &error);
+        let encoded = serde_json::to_string(&failure).expect("serialize failure evidence");
+
+        assert_eq!(failure["event"], "operation_failure");
+        assert_eq!(failure["operation"], "create_profile");
+        assert_eq!(failure["error_kind"], "adapter_identity_recovery_required");
+        assert_eq!(failure["related_failure_present"], true);
+        assert_eq!(failure["run_index"], 7);
+        assert_eq!(failure["elapsed_ms"], 125);
+        assert_eq!(failure.as_object().expect("object event").len(), 9);
+        for forbidden in [
+            "secret message",
+            "secret source",
+            "secret related",
+            "usb:0a12:0001",
+            "02:12:34:56:78:9A",
+            "SERIAL-123",
+            r"C:\secret-profile.json",
+        ] {
+            assert!(
+                !encoded.contains(forbidden),
+                "evidence disclosed {forbidden}"
+            );
+        }
+
+        let error_without_related = Error::new(
+            ErrorKind::AdapterIdentityRecoveryRequired,
+            "secret standalone failure",
+        );
+        let failure_without_related =
+            controller_failure_event(&TestTarget, 126, "open", &error_without_related);
+        assert_eq!(failure_without_related["related_failure_present"], false);
+
+        let completion = completion_event(&TestTarget, 127, false);
+        assert_eq!(completion["event"], "runner_complete");
+        assert_eq!(completion["success"], false);
+    }
+
+    #[derive(Debug)]
+    struct SecretSource;
+
+    impl fmt::Display for SecretSource {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(
+                r"secret source usb:0a12:0001 02:12:34:56:78:9A SERIAL-123 C:\secret-profile.json",
+            )
+        }
+    }
+
+    impl StdError for SecretSource {}
 
     #[test]
     fn key_value_arguments_reject_missing_unknown_and_duplicate_inputs() {
