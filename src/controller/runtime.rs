@@ -1,6 +1,5 @@
 use std::{sync::mpsc::Receiver, time::Duration};
 
-#[cfg(feature = "bumble")]
 use std::time::Instant;
 
 use crate::{
@@ -31,28 +30,12 @@ use crate::{
 };
 
 use super::create::{validate_connection_timeout, with_cleanup_error};
-#[cfg(feature = "bumble")]
 use crate::runtime::transport::{ProfileKeyStoreFactory, TransportConfig};
-#[cfg(feature = "bumble")]
 use crate::runtime::worker::ChannelWorkerWaiter;
 
 use super::{config::ControllerConfig, create::ControllerRuntime};
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not construct worker budgets"
-    )
-)]
 const POLL_BATCHES: usize = 4;
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not own partially opened transports"
-    )
-)]
 const UNOWNED_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[cfg(test)]
@@ -60,26 +43,12 @@ pub(super) const fn default_runtime_tuning() -> usize {
     POLL_BATCHES
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not construct runtime components"
-    )
-)]
 pub(super) struct RuntimeComponents<C, W> {
     transport: Box<dyn TransportPort>,
     clock: C,
     waiter: W,
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not construct runtime components"
-    )
-)]
 impl<C, W> RuntimeComponents<C, W> {
     pub(super) fn new(transport: Box<dyn TransportPort>, clock: C, waiter: W) -> Self {
         Self {
@@ -90,85 +59,45 @@ impl<C, W> RuntimeComponents<C, W> {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not construct runtime factory projections"
-    )
-)]
 pub(super) struct RuntimeFactoryConfig {
-    #[cfg(feature = "bumble")]
     selector: crate::AdapterSelector,
-    #[cfg(feature = "bumble")]
     transport: TransportConfig,
-    #[cfg(feature = "bumble")]
     profile_key_store: Option<ProfileKeyStoreFactory>,
-    #[cfg(feature = "bumble")]
     identity: crate::ProfileIdentity,
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not construct runtime factory projections"
-    )
-)]
 impl RuntimeFactoryConfig {
     pub(super) fn from_controller<M, R>(config: &ControllerConfig<M, R>) -> Self
     where
         M: ControllerModel,
         R: ReportingMode,
     {
-        #[cfg(feature = "bumble")]
-        {
-            Self {
-                selector: config.adapter.clone(),
-                transport: config.transport_config(),
-                profile_key_store: config
-                    .profile
-                    .persistent_path()
-                    .map(|path| ProfileKeyStoreFactory::for_model::<M>(path.to_owned())),
-                identity: config.profile.identity(),
-            }
-        }
-        #[cfg(not(feature = "bumble"))]
-        {
-            let _ = config;
-            Self {}
+        Self {
+            selector: config.adapter.clone(),
+            transport: config.transport_config(),
+            profile_key_store: config
+                .profile
+                .persistent_path()
+                .map(|path| ProfileKeyStoreFactory::for_model::<M>(path.to_owned())),
+            identity: config.profile.identity(),
         }
     }
 
-    #[cfg(all(test, feature = "bumble"))]
+    #[cfg(test)]
     pub(super) const fn has_profile_key_store(&self) -> bool {
         self.profile_key_store.is_some()
     }
 
-    #[cfg(all(test, feature = "bumble"))]
+    #[cfg(test)]
     pub(super) const fn identity(&self) -> crate::ProfileIdentity {
         self.identity
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not own partially opened transports"
-    )
-)]
 struct UnownedTransportGuard {
     transport: Option<Box<dyn TransportPort>>,
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not own partially opened transports"
-    )
-)]
 impl UnownedTransportGuard {
     fn new(transport: Box<dyn TransportPort>) -> Self {
         Self {
@@ -204,13 +133,6 @@ impl Drop for UnownedTransportGuard {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not construct runtime owner guards"
-    )
-)]
 pub(super) struct RuntimeOwnerGuard<M, R>
 where
     M: ControllerModel,
@@ -219,13 +141,6 @@ where
     owner: Option<WorkerOwner<RuntimeCommand<M, R>>>,
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not use runtime owner guards"
-    )
-)]
 impl<M, R> RuntimeOwnerGuard<M, R>
 where
     M: ControllerModel,
@@ -288,13 +203,6 @@ where
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not open controller runtime owners"
-    )
-)]
 pub(super) fn open_runtime_owner<M, R, F, C, W>(
     config: &ControllerConfig<M, R>,
     status: StatusPublisher<M>,
@@ -362,7 +270,6 @@ where
     )))
 }
 
-#[cfg(any(test, feature = "bumble"))]
 pub(super) fn open_controller_runtime<M, R, F, C, W>(
     config: &ControllerConfig<M, R>,
     status: StatusPublisher<M>,
@@ -382,7 +289,6 @@ where
     Ok(open_runtime_owner(config, status, factory)?.into_runtime())
 }
 
-#[cfg(any(test, feature = "bumble"))]
 pub(super) fn create_controller_runtime<M, R, F, C, W>(
     config: &ControllerConfig<M, R>,
     status: StatusPublisher<M>,
@@ -407,7 +313,6 @@ where
     Ok(owner.into_runtime())
 }
 
-#[cfg(feature = "bumble")]
 pub(super) fn open_bumble_runtime<M, R>(
     config: &ControllerConfig<M, R>,
     status: StatusPublisher<M>,
@@ -419,7 +324,6 @@ where
     open_controller_runtime(config, status, bumble_runtime_components)
 }
 
-#[cfg(feature = "bumble")]
 pub(super) fn create_bumble_runtime<M, R>(
     config: &ControllerConfig<M, R>,
     status: StatusPublisher<M>,
@@ -432,7 +336,6 @@ where
     create_controller_runtime(config, status, pair_timeout, bumble_runtime_components)
 }
 
-#[cfg(feature = "bumble")]
 fn bumble_runtime_components(
     config: RuntimeFactoryConfig,
     _activity: ActivityNotifier,
@@ -452,13 +355,6 @@ fn bumble_runtime_components(
     ))
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not map transport open errors"
-    )
-)]
 fn map_transport_open_error(source: TransportError) -> Error {
     if source.kind() == TransportErrorKind::AdapterIdentityRecoveryRequired {
         return Error::with_source(
@@ -474,12 +370,10 @@ fn map_transport_open_error(source: TransportError) -> Error {
     )
 }
 
-#[cfg(feature = "bumble")]
 struct SystemClock {
     origin: Instant,
 }
 
-#[cfg(feature = "bumble")]
 impl SystemClock {
     fn new() -> Self {
         Self {
@@ -488,20 +382,12 @@ impl SystemClock {
     }
 }
 
-#[cfg(feature = "bumble")]
 impl MonotonicClock for SystemClock {
     fn now(&self) -> Duration {
         self.origin.elapsed()
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not finish terminal runtime owners"
-    )
-)]
 fn finish_terminal_owner<C>(
     owner: &mut Option<WorkerOwner<C>>,
     fallback: Error,
@@ -515,13 +401,6 @@ fn finish_terminal_owner<C>(
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not spawn controller workers"
-    )
-)]
 pub(super) fn map_worker_spawn_error(error: WorkerSpawnError) -> Error {
     let (source, cleanup) = error.into_parts();
     let mut error = Error::with_source(
@@ -535,13 +414,6 @@ pub(super) fn map_worker_spawn_error(error: WorkerSpawnError) -> Error {
     error
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not own partially opened transports"
-    )
-)]
 fn cleanup_unowned_transport(transport: &mut dyn TransportPort) -> crate::Result<()> {
     let mut first_failure = None;
     record_cleanup_failure(
@@ -562,25 +434,11 @@ fn cleanup_unowned_transport(transport: &mut dyn TransportPort) -> crate::Result
     first_failure.map_or(Ok(()), |failure| Err(map_cleanup_error(failure)))
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not own partially opened transports"
-    )
-)]
 fn cleanup_unowned_transport_for_drop(transport: &mut dyn TransportPort) {
     let _ = transport.disconnect();
     let _ = transport.close();
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not aggregate transport cleanup"
-    )
-)]
 fn record_cleanup_failure(
     first_failure: &mut Option<CleanupFailure>,
     phase: CleanupPhase,

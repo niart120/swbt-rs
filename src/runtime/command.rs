@@ -144,13 +144,6 @@ impl CommandResponse {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not create runtime command channels"
-    )
-)]
 pub(crate) fn command_channel<C>(
     activity: ActivityNotifier,
 ) -> (CommandClient<C>, CommandReceiver<C>) {

@@ -74,13 +74,6 @@ pub(crate) trait ProfileStore {
     /// Atomically replaces an existing regular profile for its single live writer.
     ///
     /// Multiple processes or controllers updating the same path are unsupported.
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not persist pairing-key updates"
-        )
-    )]
     fn update(&mut self, path: &Path, replacement: &[u8]) -> io::Result<()>;
 }
 

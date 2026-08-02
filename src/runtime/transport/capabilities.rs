@@ -1,6 +1,5 @@
 use std::fmt;
 
-#[cfg(any(test, feature = "bumble"))]
 use super::{TransportError, TransportErrorKind, TransportResult};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -10,7 +9,6 @@ pub(crate) struct TransportCapabilities {
 }
 
 impl TransportCapabilities {
-    #[cfg(feature = "bumble")]
     pub(crate) fn from_validated_classic_controller(
         local_address: [u8; 6],
     ) -> TransportResult<Self> {
@@ -45,24 +43,10 @@ impl TransportCapabilities {
             .expect("test controller capabilities are valid")
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not project runtime transport capabilities"
-        )
-    )]
     pub(crate) const fn local_address(self) -> [u8; 6] {
         self.local_address
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not validate runtime transport capabilities"
-        )
-    )]
     pub(crate) const fn classic_capable(self) -> bool {
         self.classic_capable
     }

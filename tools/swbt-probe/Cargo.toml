@@ -7,5 +7,5 @@ publish = false
 
 [dependencies]
 serde_json = "1"
-swbt-rs = { path = "../..", features = ["bumble", "diagnostics-schema"] }
+swbt-rs = { path = "../..", features = ["diagnostics-schema"] }
 tracing = "0.1"

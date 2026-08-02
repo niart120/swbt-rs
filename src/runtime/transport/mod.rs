@@ -1,10 +1,8 @@
-#[cfg(feature = "bumble")]
 mod bumble;
-#[cfg(all(test, feature = "bumble"))]
+#[cfg(test)]
 mod bumble_tests;
 mod capabilities;
 mod config;
-#[cfg(feature = "bumble")]
 mod profile_key_store;
 
 use std::error::Error as StdError;
@@ -13,11 +11,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::time::Duration;
 
-#[cfg(feature = "bumble")]
 pub(crate) use bumble::BumbleTransportPort;
 pub(crate) use capabilities::TransportCapabilities;
 pub(crate) use config::TransportConfig;
-#[cfg(feature = "bumble")]
 pub(crate) use profile_key_store::ProfileKeyStoreFactory;
 
 #[cfg(test)]
@@ -26,25 +22,11 @@ pub(in crate::runtime) mod fake;
 mod tests;
 
 #[derive(Clone)]
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not construct transport activity notifiers"
-    )
-)]
 pub(crate) struct ActivityNotifier {
     sender: SyncSender<()>,
 }
 
 impl ActivityNotifier {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not notify transport activity"
-        )
-    )]
     pub(crate) fn notify(&self) {
         match self.sender.try_send(()) {
             Ok(()) | Err(TrySendError::Full(())) | Err(TrySendError::Disconnected(())) => {}
@@ -52,13 +34,6 @@ impl ActivityNotifier {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not create transport activity channels"
-    )
-)]
 pub(crate) fn activity_channel() -> (ActivityNotifier, Receiver<()>) {
     let (sender, receiver) = sync_channel(1);
     (ActivityNotifier { sender }, receiver)
@@ -68,37 +43,16 @@ pub(crate) fn activity_channel() -> (ActivityNotifier, Receiver<()>) {
 pub(crate) struct SendAcceptance(());
 
 impl SendAcceptance {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not accept HID interrupt sends"
-        )
-    )]
     pub(in crate::runtime) const ACCEPTED: Self = Self(());
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not produce HID channel events"
-    )
-)]
 pub(crate) enum HidChannel {
     Control,
     Interrupt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not produce transport events"
-    )
-)]
 pub(crate) enum TransportEvent {
     Connected,
     HidChannelOpened {
@@ -115,82 +69,24 @@ pub(crate) enum TransportEvent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TransportErrorKind {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not report transport initialization failures"
-        )
-    )]
     OpenFailed,
     /// The controller returned an unusable all-zero public address.
-    #[cfg(any(test, feature = "bumble"))]
     InvalidControllerIdentity,
     /// The initialized controller address differs from the persisted identity.
-    #[cfg_attr(
-        not(feature = "bumble"),
-        allow(
-            dead_code,
-            reason = "explicit identity guards require the Bumble transport"
-        )
-    )]
     IdentityMismatch,
     /// An explicit identity write started, but the final adapter state is uncertain.
-    #[cfg_attr(
-        not(feature = "bumble"),
-        allow(
-            dead_code,
-            reason = "explicit identity writes require the Bumble transport"
-        )
-    )]
     AdapterIdentityRecoveryRequired,
     /// The controller lacks the Classic feature or ACL buffers required by NX.
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not validate runtime transport capabilities"
-        )
-    )]
     UnsupportedController,
     /// The configured pairing profile could not supply or persist key material.
     InvalidKeyStore,
     /// The configured pairing profile has no usable Classic bond.
     NoBond,
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not construct concrete closed ports"
-        )
-    )]
     Closed,
     SendRejected,
-    #[cfg_attr(
-        not(feature = "bumble"),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not perform concrete ACL drain waits"
-        )
-    )]
     DrainTimedOut,
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not bound a transport event queue"
-        )
-    )]
     EventQueueOverflow,
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not observe transport source termination"
-        )
-    )]
     SourceTerminated,
-    #[cfg(feature = "bumble")]
     CloseFailed,
 }
 
@@ -201,24 +97,10 @@ pub(crate) struct TransportError {
 }
 
 impl TransportError {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not construct concrete transport errors"
-        )
-    )]
     pub(crate) const fn new(kind: TransportErrorKind) -> Self {
         Self { kind, source: None }
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not preserve concrete backend sources"
-        )
-    )]
     pub(crate) fn with_source(
         kind: TransportErrorKind,
         source: Arc<dyn StdError + Send + Sync>,
@@ -247,7 +129,6 @@ impl fmt::Display for TransportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self.kind {
             TransportErrorKind::OpenFailed => "transport could not be opened or initialized",
-            #[cfg(any(test, feature = "bumble"))]
             TransportErrorKind::InvalidControllerIdentity => {
                 "transport controller returned an invalid identity"
             }
@@ -269,7 +150,6 @@ impl fmt::Display for TransportError {
             TransportErrorKind::DrainTimedOut => "transport send drain timed out",
             TransportErrorKind::EventQueueOverflow => "transport event queue overflowed",
             TransportErrorKind::SourceTerminated => "transport source terminated",
-            #[cfg(feature = "bumble")]
             TransportErrorKind::CloseFailed => "transport could not be closed cleanly",
         };
         formatter.write_str(message)
@@ -287,13 +167,6 @@ impl StdError for TransportError {
 pub(crate) type TransportResult<T> = Result<T, TransportError>;
 
 pub(crate) trait TransportPort: Send {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not open concrete transport ports"
-        )
-    )]
     fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities>;
 
     fn start_pairing(&mut self) -> TransportResult<()>;

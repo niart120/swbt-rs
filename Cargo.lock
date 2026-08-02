@@ -249,6 +249,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "swbt-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "swbt-hardware-runner"
 version = "0.1.0"
 dependencies = [
@@ -271,9 +279,9 @@ version = "0.1.0"
 dependencies = [
  "atomic-write-file",
  "rusb",
- "serde",
  "serde_json",
  "swbt-bumble-backend",
+ "swbt-core",
  "tracing",
 ]
 

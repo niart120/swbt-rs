@@ -70,12 +70,10 @@ impl TransportConfig {
         }
     }
 
-    #[cfg(any(test, feature = "bumble"))]
     pub(crate) fn local_name(&self) -> &str {
         &self.local_name
     }
 
-    #[cfg(any(test, feature = "bumble"))]
     pub(crate) const fn class_of_device(&self) -> u32 {
         self.class_of_device
     }

@@ -42,7 +42,7 @@ impl<M: ControllerModel, R: ReportingMode> CreateProfilePlan<M, R> {
         self.pair_timeout
     }
 
-    #[cfg(all(test, feature = "bumble"))]
+    #[cfg(test)]
     pub(super) const fn identity(&self) -> ProfileIdentity {
         self.identity
     }
@@ -89,13 +89,6 @@ pub(super) struct ControllerRuntime<M: ControllerModel, R: ReportingMode> {
 }
 
 impl<M: ControllerModel, R: ReportingMode> ControllerRuntime<M, R> {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds cannot construct a worker owner"
-        )
-    )]
     pub(super) const fn new(owner: WorkerOwner<RuntimeCommand<M, R>>) -> Self {
         Self { owner }
     }
@@ -168,27 +161,6 @@ where
     ))
 }
 
-#[cfg(not(feature = "bumble"))]
-pub(super) fn reject_unavailable_backend<M, R>(
-    plan: CreateProfilePlan<M, R>,
-) -> crate::Result<Controller<M, R>>
-where
-    M: ControllerModel,
-    R: ReportingMode,
-{
-    let _ = plan;
-    Err(crate::runtime::error_map::unsupported_capability(
-        "Bluetooth transport",
-    ))
-}
-
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not aggregate runtime cleanup"
-    )
-)]
 pub(super) fn with_cleanup_error(primary: Error, cleanup: crate::Result<()>) -> Error {
     match cleanup {
         Ok(()) => primary,
@@ -206,16 +178,6 @@ pub(super) fn validate_target<M: ControllerModel, R: ReportingMode>(
             "profile creation requires a target path",
         )
     })?;
-
-    if matches!(options.identity, ProfileIdentity::LocalAddress(_)) {
-        #[cfg(not(feature = "bumble"))]
-        {
-            return Err(Error::new(
-                ErrorKind::UnsupportedCapability,
-                "explicit local address profiles require the Bumble transport",
-            ));
-        }
-    }
 
     validate_connection_timeout(options.pair_timeout)?;
 

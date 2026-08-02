@@ -50,6 +50,8 @@ Rust compilerが型として保証する性質を、専用のcompiler UI testで
 | Packaging | 不要 | 不要 | build時に必要 | MSRV、docs、crate、license、examples |
 
 Default CIはModel / mapping audit、Pure、Golden、Runtime、Transport contract、Bumble virtual、Packagingを必須にする。
+PureとGoldenは`swbt-core`で実行し、その依存graphにBumble、`rusb`、`tracing`、profile writerが
+含まれないことを検査する。runtimeはdefault/no-defaultの両方でBumble、`rusb`、`tracing`を含む。
 
 ## 3. model宣言とmappingのaudit
 
@@ -250,7 +252,7 @@ return_controller
 
 - profile path未指定は`ProfilePathRequired`
 - targetを事前検査せず、create-new競合は`ProfileAlreadyExists`、上書きなし
-- feature無効時はtarget filesystem I/Oなしで`UnsupportedCapability`
+- runtimeのdefault/no-default buildはいずれもBumble backendへ到達する
 - invalid identityはtransport open前に失敗
 - empty envelope persistenceがtransport openより先
 - 同じcreate呼出しでは保存後のprofile readを行わず、保存bytesとruntime configが同じ型付きprofileから作られる
@@ -262,7 +264,8 @@ return_controller
 
 controller objectに`create_profile()`が存在しないこと自体はtestしない。
 
-explicit local addressが未対応の間は、`UnsupportedCapability`を返しadapter identity変更eventがないことを検査する。
+explicit local addressは入力検証、書換え前後のreadback、失敗時の
+`AdapterIdentityRecoveryRequired`、秘密値を出さないdiagnosticsを検査する。
 
 ### 6.3 persistence failure
 

@@ -1,11 +1,12 @@
 # 公開 API 仕様
 
 - 状態: **決定**
-- 対象: library target `swbt`
+- 対象: library target `swbt` と backend 非依存 package `swbt-core`
 - 基準断面: [source-baseline.md](source-baseline.md)
 - 型関係の正本: [type-modeling.md](type-modeling.md)
 
-この文書は `swbt-rs` の初期公開 API と、その成功・失敗・状態確定の意味を定義する。
+この文書は `swbt-rs` の公開 API と、その成功・失敗・状態確定の意味を定義する。
+model、input、profile、共有errorは`swbt-core`が所有し、`swbt`が同一型として再公開する。
 
 ## 1. API 方針
 
@@ -16,6 +17,8 @@
 - 使用できないボタン、存在しないスティック、異なる model の入力状態は可能な限りコンパイル時に拒否する
 - profile JSON、status、CLI のような動的境界だけが `ControllerKind`、`ReportingKind`、`ButtonKind` を扱う
 - Bumble の型、CID、HCI packet、L2CAP manager を公開 API に出さない
+- runtimeを必要としない利用者は`swbt-core`の`error`、`input`、`model`、`profile`を直接使える
+- protocol engineとwire metadataはrustdoc非表示のruntime support境界とし、安定公開APIにしない
 - controller object は `Clone` しない。初期 API では `Send`、非 `Sync` を目標にする
 - 状態変更操作は `&mut self` を要求する
 - `Drop` は短い best-effort shutdown だけを行い、neutral と終了エラーの確認には明示的な `close()` を使う
@@ -168,8 +171,9 @@ validate builder and required target path
 - pairing に失敗しても envelope は残す
 - 失敗時は内部 controller を `close_without_neutral()` 相当で cleanup し、controller object は返さない
 - 成功時に返す controller は `Ready`
-- `ProfileIdentity::LocalAddress` は対応 gate 完了まで `UnsupportedCapability`
-- `bumble` feature無効時はprofile filesystem I/Oより先に`UnsupportedCapability`
+- `ProfileIdentity::LocalAddress` はCSR8510 A10の揮発書換えとreadback検証を行い、検証不能時は
+  `AdapterIdentityRecoveryRequired`を返す
+- runtime packageはBumble backendを常に含み、profile保存後にadapter openとpairingへ進む
 
 `Controller<M, R>` 自体には `create_profile()` method を生やさない。
 

@@ -80,48 +80,13 @@ impl<M: ControllerModel, R: ReportingMode> BuilderConfig<M, R> {
 
 #[derive(Debug)]
 pub(super) struct ControllerConfig<M: ControllerModel, R: ReportingMode> {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds retain the selector without opening it"
-        )
-    )]
     pub(super) adapter: AdapterSelector,
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds retain profiles without constructing a transport"
-        )
-    )]
     pub(super) profile: ProfileConfig<M>,
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds retain colors without constructing a worker"
-        )
-    )]
     pub(super) colors: ControllerColors,
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds retain reporting settings without constructing a worker"
-        )
-    )]
     pub(super) mode: <R as reporting::sealed::Sealed>::Config,
 }
 
 impl<M: ControllerModel, R: ReportingMode> ControllerConfig<M, R> {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not project a transport configuration"
-        )
-    )]
     pub(super) fn transport_config(&self) -> TransportConfig {
         TransportConfig::for_model::<M>()
     }
@@ -131,13 +96,6 @@ impl<M: ControllerModel, R: ReportingMode> ControllerConfig<M, R> {
 pub(super) enum ProfileConfig<M: ControllerModel> {
     Ephemeral,
     Persistent {
-        #[cfg_attr(
-            not(any(test, feature = "bumble")),
-            allow(
-                dead_code,
-                reason = "feature-disabled builds retain but do not persist profile paths"
-            )
-        )]
         path: PathBuf,
         #[cfg_attr(
             not(test),
@@ -151,7 +109,6 @@ pub(super) enum ProfileConfig<M: ControllerModel> {
 }
 
 impl<M: ControllerModel> ProfileConfig<M> {
-    #[cfg(feature = "bumble")]
     pub(super) fn persistent_path(&self) -> Option<&Path> {
         match self {
             Self::Ephemeral => None,
@@ -159,7 +116,6 @@ impl<M: ControllerModel> ProfileConfig<M> {
         }
     }
 
-    #[cfg(feature = "bumble")]
     pub(super) const fn identity(&self) -> crate::ProfileIdentity {
         match self {
             Self::Ephemeral => crate::ProfileIdentity::AdapterDefault,

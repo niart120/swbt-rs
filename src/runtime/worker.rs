@@ -61,13 +61,6 @@ pub(crate) enum WorkerWaitRequest {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WorkerWaitError {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not run the channel waiter"
-        )
-    )]
     Disconnected,
 }
 
@@ -79,25 +72,11 @@ pub(crate) trait WorkerWaiter: Send {
     ) -> Result<(), WorkerWaitError>;
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not run the channel waiter"
-    )
-)]
 pub(crate) struct ChannelWorkerWaiter {
     receiver: Receiver<()>,
 }
 
 impl ChannelWorkerWaiter {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not construct the channel waiter"
-        )
-    )]
     pub(crate) const fn new(receiver: Receiver<()>) -> Self {
         Self { receiver }
     }
@@ -139,13 +118,6 @@ impl ShutdownRequest {
         Self::Explicit(mode)
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not own a runtime worker"
-        )
-    )]
     pub(crate) const fn dropped() -> Self {
         Self::Dropped
     }
@@ -165,13 +137,6 @@ pub(crate) struct WorkerBudget {
 }
 
 impl WorkerBudget {
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not construct controller workers"
-        )
-    )]
     pub(crate) const fn new(poll_batches: usize) -> Self {
         assert!(poll_batches > 0, "worker poll batch count must be positive");
         Self { poll_batches }
@@ -400,13 +365,6 @@ pub(crate) struct DirectRuntime<M: ControllerModel> {
 pub(crate) trait WorkerReporting<M: ControllerModel>: ReportingMode {
     type RuntimeState: Send + 'static;
 
-    #[cfg_attr(
-        not(any(test, feature = "bumble")),
-        allow(
-            dead_code,
-            reason = "feature-disabled builds do not construct concrete workers"
-        )
-    )]
     fn build_worker(
         protocol: SwitchHidProtocol<M>,
         transport: Box<dyn TransportPort>,
@@ -528,10 +486,6 @@ impl ReportingDue {
     }
 }
 
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(dead_code, reason = "feature-disabled builds do not own a worker core")
-)]
 pub(crate) struct WorkerCore<M, R>
 where
     M: ControllerModel,

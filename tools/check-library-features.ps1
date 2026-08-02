@@ -1,21 +1,23 @@
 $ErrorActionPreference = "Stop"
 
-$defaultTree = cargo tree -p swbt-rs --no-default-features --edges normal --prefix none --locked
+$coreTree = cargo tree -p swbt-core --edges normal --prefix none --locked
 if ($LASTEXITCODE -ne 0) {
-    throw "default dependency tree failed with exit code $LASTEXITCODE"
+    throw "core dependency tree failed with exit code $LASTEXITCODE"
 }
-$defaultTreeText = $defaultTree -join "`n"
-if ($defaultTreeText -match "(?m)^tracing v") {
-    throw "featureless swbt-rs must not compile tracing"
+$coreTreeText = $coreTree -join "`n"
+if ($coreTreeText -match "(?m)^(swbt-bumble-backend|rusb|tracing|atomic-write-file) v") {
+    throw "swbt-core must remain independent of runtime, USB, tracing, and profile writer dependencies"
 }
 
-$diagnosticsTree = cargo tree -p swbt-rs --no-default-features --features diagnostics-schema --edges normal --prefix none --locked
+$runtimeTree = cargo tree -p swbt-rs --no-default-features --edges normal --prefix none --locked
 if ($LASTEXITCODE -ne 0) {
-    throw "diagnostics dependency tree failed with exit code $LASTEXITCODE"
+    throw "runtime dependency tree failed with exit code $LASTEXITCODE"
 }
-$diagnosticsTreeText = $diagnosticsTree -join "`n"
-if ($diagnosticsTreeText -notmatch "(?m)^tracing v") {
-    throw "diagnostics-schema must compile tracing"
+$runtimeTreeText = $runtimeTree -join "`n"
+foreach ($package in @("swbt-bumble-backend", "rusb", "tracing")) {
+    if ($runtimeTreeText -notmatch "(?m)^$package v") {
+        throw "swbt-rs --no-default-features must compile $package"
+    }
 }
 
-Write-Output "library feature contract passed"
+Write-Output "core/runtime package boundary passed"

@@ -405,7 +405,9 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("tests/fixtures/python-v0.6.0/protocol/protocol-fixtures.json"),
+        default=Path(
+            "crates/swbt-core/tests/fixtures/python-v0.6.0/protocol/protocol-fixtures.json"
+        ),
     )
     arguments = parser.parse_args()
     repository = arguments.python_repo.resolve()
