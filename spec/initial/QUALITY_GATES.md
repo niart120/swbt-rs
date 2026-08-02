@@ -5,10 +5,10 @@
 通常の変更:
 
 ```powershell
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-cargo build --all-features
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-targets --all-features --locked
+cargo build --workspace --all-features --locked
 git diff --check
 ```
 

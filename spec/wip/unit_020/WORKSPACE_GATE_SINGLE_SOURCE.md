@@ -72,7 +72,7 @@ Cargo manifestとは別の検査へ複製する。採用方針では、workspace
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | T01 CIのpackage-boundary jobがrepository-local dependency boundary scriptを実行し、同じ依存契約のBash実装を持たない | regression | CI / package | CI command契約とscript実行が成功。重複削除後の追加refactorなし |
-| todo | T02 通常のlocal gateがworkspace全体を明示的に対象とし、旧workspace検査がoperational surfaceに残らない | regression / cleanup | package / docs | command契約、file不在、参照範囲を検査する |
+| refactor-skipped | T02 通常のlocal gateがworkspace全体を明示的に対象とし、旧workspace検査がoperational surfaceに残らない | regression / cleanup | package / docs | command契約、file不在、operational参照不在を確認。追加refactorなし |
 
 status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`deferred` を使う。
 
@@ -83,6 +83,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | red | T01 | CI command契約のPowerShell assertionは`package-boundary job does not invoke check-library-features.ps1`で失敗した |
 | green | T01 | CIのinline Bash処理を`pwsh ./tools/check-library-features.ps1`へ置換した。command契約のassertionとscript実行が成功した |
 | refactor-skipped | T01 | package名、依存名、正規表現のCI重複は削除済みで、追加の構造変更は不要と判断した |
+| red | T02 | PowerShell assertionは旧scriptの存在と、`AGENTS.md`、`QUALITY_GATES.md`にworkspace明示commandがないことを検出した |
+| green | T02 | 旧scriptを削除し、両文書のfmt/clippy/test/build commandをworkspace構成へ同期した。file不在、command契約、operational参照不在を確認した |
+| refactor-skipped | T02 | workspace構成を別helperへ移さずCargo manifestを正本にするため、追加の構造変更は行わなかった |
 
 ## 7. 設計メモ
 
@@ -108,7 +111,7 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 |---|---|---|
 | CI command契約のPowerShell assertion | success | T01 redはrepo-local script未呼出しで失敗。greenはscript呼出しとinline実装不在を確認 |
 | `pwsh -NoProfile -File ./tools/check-library-features.ps1` | success | `core/runtime package boundary passed` |
-| local gate command契約、旧script不在、operational参照のPowerShell assertion | not run | T02 red/greenで実行する |
+| local gate command契約、旧script不在、operational参照のPowerShell assertion | success | redは旧scriptと暗黙gateを検出。greenは両文書のcommand、file不在、参照不在を確認 |
 | `cargo fmt --all --check` | not run | workspace formatting |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | workspace static gate |
 | `cargo test --workspace --all-targets --all-features --locked` | not run | workspace test gate |
@@ -128,8 +131,8 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test Listを作成した
 - [x] CIの依存境界検査をrepo-local scriptへ一本化した
-- [ ] workspace構成の固定検査を削除した
-- [ ] 通常gateがworkspace全体を明示的に対象とする
+- [x] workspace構成の固定検査を削除した
+- [x] 通常gateがworkspace全体を明示的に対象とする
 - [ ] 検証結果または未実行理由を記録した
 - [x] CI/package変更に必要なbuild/package gateを記録した
 - [ ] docs-quality-reviewとagentic-self-reviewを完了した
