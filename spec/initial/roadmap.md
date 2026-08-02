@@ -381,6 +381,7 @@ virtual integration未通過で実機packetを場当たりpatchしない。
 - Python fixture read
 - Rust write→Python read
 - strict Classic key shapeとunknown/legacy/LE field rejection
+- key-store namespace / Classic peer addressはcanonical uppercaseだけを受理
 - atomic create/replace
 - single-writer update。複数writerの競合検出は対象外
 - model mismatch

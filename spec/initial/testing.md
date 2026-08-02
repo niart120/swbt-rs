@@ -502,8 +502,11 @@ release制限として扱う。詳細は
 |---|---|---|
 | Python v0.6.0 | Rust `PairingProfile<M>` | matching modelのみ成功 |
 | Rust | Python v0.6.0 | same kind / identity / keys |
-| Rust | Rust | stable normalized JSON |
+| Rust | Rust | stable canonical JSON |
 | future schema | current Rust | explicit unsupported error |
+
+Python fixtureのcanonical uppercase namespace / Classic peerは受理する。lowercase / mixed-caseの
+address keyは正規化せず、key順序に依存しないsecret-freeな`InvalidProfile`として検査する。
 
 actual hardware keyをfixtureにcommitしない。
 

@@ -78,8 +78,8 @@ profile入力の正本とし、Rust固有の寛容な正規化を廃止する。
 
 | status | item | type | layer | notes |
 |---|---|---|---|---|
-| refactor-skipped | T01 canonical uppercase namespaceは受理し、lowercase / mixed-case namespaceはkey順序に依存せずsecret-freeな`InvalidProfile`になる | behavior / regression / edge | profile unit / public integration | key変換を削除し、既存address parserへcanonical検査だけを追加した |
-| refactor-skipped | T02 canonical uppercase Classic `/P` peerは受理し、lowercase / mixed-case peerはkey順序に依存せずsecret-freeな`InvalidProfile`になる | behavior / regression / edge | profile unit / public integration | `/P`、16-byte link key、最大1 peerを維持する |
+| refactor-skipped | T01 canonical uppercase namespaceは受理し、lowercase / mixed-case namespaceはkey順序に依存せずsecret-freeな`InvalidProfile`になる | behavior / regression / edge | public integration | key変換を削除し、既存address parserへcanonical検査だけを追加した |
+| refactor-skipped | T02 canonical uppercase Classic `/P` peerは受理し、lowercase / mixed-case peerはkey順序に依存せずsecret-freeな`InvalidProfile`になる | behavior / regression / edge | public integration | `/P`、16-byte link key、最大1 peerを維持する |
 
 status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`deferred` を使う。
 
@@ -111,8 +111,8 @@ canonical uppercase検査は既存address parserへ置き、profile model、nest
 | path | change | 内容 |
 |---|---|---|
 | `crates/swbt-core/src/profile/document.rs` | modify | namespace / peer keyのcanonical uppercase検査、正規化削除、rustdoc更新 |
-| `crates/swbt-core/src/profile/document_tests.rs` | modify | 非canonical key、順序非依存、secret-free error test |
 | `crates/swbt-core/tests/profile_compat.rs` | modify | namespace / peerの受理契約分離とPython fixture回帰 |
+| `src/lib.rs` | modify | crate-level profile入力契約を同期 |
 | `spec/initial/architecture.md` | modify | canonical uppercase入力境界を明記 |
 | `spec/initial/testing.md` | modify | 非canonical key拒否と互換testを明記 |
 | `spec/initial/roadmap.md` | modify | M6 profile契約をcanonical uppercaseへ同期 |

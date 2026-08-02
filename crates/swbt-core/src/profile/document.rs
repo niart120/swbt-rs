@@ -510,7 +510,9 @@ impl fmt::Debug for ProfileDocument {
 /// A validated schema v2 pairing profile for one controller model.
 ///
 /// The accepted document is the strict Classic pairing subset emitted by
-/// swbt-python 0.6.0. Unknown fields and non-Classic key material are rejected.
+/// swbt-python 0.6.0. Key-store namespace addresses and the address portion of
+/// Classic `/P` peer names must use uppercase hexadecimal. Unknown fields,
+/// noncanonical address keys, and non-Classic key material are rejected.
 /// Its [`Debug`](fmt::Debug) representation does not expose identity or
 /// pairing-key values.
 pub struct PairingProfile<M: ControllerModel> {
@@ -532,7 +534,8 @@ impl<M: ControllerModel> PairingProfile<M> {
     /// # Errors
     ///
     /// Returns [`ErrorKind::InvalidProfile`] when the document is not valid
-    /// JSON in the supported swbt-python 0.6.0 Classic profile shape.
+    /// JSON in the supported swbt-python 0.6.0 Classic profile shape, including
+    /// when a key-store namespace or peer address is not canonical uppercase.
     /// Returns [`ErrorKind::ProfileControllerMismatch`] when the document is
     /// for a controller model other than `M`.
     pub fn from_json(bytes: &[u8]) -> crate::Result<Self> {
@@ -541,8 +544,8 @@ impl<M: ControllerModel> PairingProfile<M> {
 
     /// Serializes the complete profile as deterministic UTF-8 JSON.
     ///
-    /// Object keys are sorted, indentation is two spaces, Bluetooth addresses
-    /// are uppercase, and the output ends with one newline.
+    /// Object keys are sorted, indentation is two spaces, canonical uppercase
+    /// Bluetooth addresses are preserved, and the output ends with one newline.
     ///
     /// # Errors
     ///

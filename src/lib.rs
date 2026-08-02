@@ -18,12 +18,13 @@
 //! that fallback only when configured by the caller.
 //!
 //! [`PairingProfile`] accepts the strict Classic pairing subset emitted by
-//! swbt-python 0.6.0; unknown fields, legacy Rust peer names, and LE key fields
-//! are rejected. Profile creation uses one no-replace publication attempt, and
-//! pairing-key updates atomically replace the complete profile for one live
-//! writer. Multiple processes or controllers updating the same profile path are
-//! unsupported. A new connection session resets committed input to neutral and
-//! excludes events from earlier sessions.
+//! swbt-python 0.6.0. Key-store namespace and peer addresses must use canonical
+//! uppercase hexadecimal; unknown fields, legacy Rust peer names, and LE key
+//! fields are rejected. Profile creation uses one no-replace publication
+//! attempt, and pairing-key updates atomically replace the complete profile for
+//! one live writer. Multiple processes or controllers updating the same profile
+//! path are unsupported. A new connection session resets committed input to
+//! neutral and excludes events from earlier sessions.
 //!
 //! Explicit close drains accepted interrupt sends to the controller flow-control
 //! window, disconnects, closes the transport, joins the worker, and reports
