@@ -1,20 +1,24 @@
 use std::{
-    env, fmt, fs,
+    fmt, fs,
     fs::OpenOptions,
-    io::{self, Write},
+    io::Write,
     path::PathBuf,
-    process, thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, Instant},
 };
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use swbt::{
-    DirectProController, Error, ErrorKind, GamepadStatus, LifecycleState, ProButton, ProController,
-    ProInputState, ReportingKind, Stick,
+    DirectProController, ErrorKind, GamepadStatus, ProButton, ProController, ProInputState, Stick,
+};
+
+use crate::support::{
+    EvidenceTarget, KeyValueArguments, UsageError, duration_ms, emit, emit_completion,
+    emit_controller_failure, emit_fixed_failure, emit_status as emit_common_status,
+    verify_adapter_reopen as verify_common_adapter_reopen,
 };
 
 const EVIDENCE_SCHEMA: &str = "swbt.m6.pro-profile";
-const EVIDENCE_SCHEMA_VERSION: u64 = 1;
 const BUTTON_HOLD: Duration = Duration::from_millis(500);
 const STICK_HOLD: Duration = Duration::from_millis(500);
 const DIRECT_IDLE: Duration = Duration::from_millis(500);
@@ -87,34 +91,37 @@ impl fmt::Debug for RunnerArgs {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct UsageError(&'static str);
+impl EvidenceTarget for RunnerArgs {
+    fn evidence_schema(&self) -> &'static str {
+        EVIDENCE_SCHEMA
+    }
 
-impl fmt::Display for UsageError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.0)
+    fn evidence_dimensions(&self) -> Vec<(&'static str, Value)> {
+        vec![
+            ("run_index", json!(self.run_index)),
+            ("mode", json!(self.mode.name())),
+            ("operator_setup", json!(self.setup.name())),
+        ]
     }
 }
 
-impl std::error::Error for UsageError {}
-
-fn main() {
-    let args = match parse_args(env::args().skip(1)) {
+pub(crate) fn run(arguments: Vec<String>) -> u8 {
+    let args = match parse_args(arguments) {
         Ok(args) => args,
         Err(error) => {
             eprintln!("{error}");
             eprintln!(
-                "usage: pro_profile_hardware --adapter <selector> --profile <path> \
+                "usage: swbt-hardware-runner pro-profile --adapter <selector> --profile <path> \
                  --mode <periodic|direct> --setup <normal|post-power-cycle|stale-bond> \
                  --connect-timeout-secs <1..600> --run <1..99> \
                  [--stale-source-profile <existing-path>]"
             );
-            process::exit(2);
+            return 2;
         }
     };
 
     let success = run_hardware(&args);
-    process::exit(if success { 0 } else { 1 });
+    u8::from(!success)
 }
 
 fn parse_args<I, S>(args: I) -> Result<RunnerArgs, UsageError>
@@ -122,79 +129,50 @@ where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
-    let mut adapter = None;
-    let mut profile = None;
-    let mut stale_source_profile = None;
-    let mut mode = None;
-    let mut setup = None;
-    let mut connect_timeout_secs = None;
-    let mut run_index = None;
-    let mut args = args.into_iter().map(Into::into);
+    let mut args = KeyValueArguments::parse(
+        args,
+        &[
+            "--adapter",
+            "--profile",
+            "--stale-source-profile",
+            "--mode",
+            "--setup",
+            "--connect-timeout-secs",
+            "--run",
+        ],
+    )?;
 
-    while let Some(flag) = args.next() {
-        let value = args.next().ok_or(UsageError("argument value is missing"))?;
-        match flag.as_str() {
-            "--adapter" if adapter.is_none() => adapter = Some(value),
-            "--profile" if profile.is_none() => profile = Some(PathBuf::from(value)),
-            "--stale-source-profile" if stale_source_profile.is_none() => {
-                stale_source_profile = Some(PathBuf::from(value));
-            }
-            "--mode" if mode.is_none() => {
-                mode = Some(match value.as_str() {
-                    "periodic" => RunnerMode::Periodic,
-                    "direct" => RunnerMode::Direct,
-                    _ => return Err(UsageError("invalid --mode")),
-                });
-            }
-            "--setup" if setup.is_none() => {
-                setup = Some(match value.as_str() {
-                    "normal" => OperatorSetup::Normal,
-                    "post-power-cycle" => OperatorSetup::PostPowerCycle,
-                    "stale-bond" => OperatorSetup::StaleBond,
-                    _ => return Err(UsageError("invalid --setup")),
-                });
-            }
-            "--connect-timeout-secs" if connect_timeout_secs.is_none() => {
-                connect_timeout_secs = Some(
-                    value
-                        .parse::<u64>()
-                        .map_err(|_| UsageError("invalid --connect-timeout-secs"))?,
-                );
-            }
-            "--run" if run_index.is_none() => {
-                run_index = Some(
-                    value
-                        .parse::<u8>()
-                        .map_err(|_| UsageError("invalid --run"))?,
-                );
-            }
-            "--adapter"
-            | "--profile"
-            | "--stale-source-profile"
-            | "--mode"
-            | "--setup"
-            | "--connect-timeout-secs"
-            | "--run" => return Err(UsageError("duplicate argument")),
-            _ => return Err(UsageError("unknown argument")),
-        }
-    }
-
-    let adapter = adapter.ok_or(UsageError("missing --adapter"))?;
+    let adapter = args.required("--adapter", "missing --adapter")?;
     if adapter.is_empty() {
         return Err(UsageError("invalid --adapter"));
     }
-    let profile = profile.ok_or(UsageError("missing --profile"))?;
+    let profile = PathBuf::from(args.required("--profile", "missing --profile")?);
     if profile.as_os_str().is_empty() {
         return Err(UsageError("invalid --profile"));
     }
-    let mode = mode.ok_or(UsageError("missing --mode"))?;
-    let setup = setup.ok_or(UsageError("missing --setup"))?;
-    let connect_timeout_secs =
-        connect_timeout_secs.ok_or(UsageError("missing --connect-timeout-secs"))?;
+    let stale_source_profile = args.optional("--stale-source-profile").map(PathBuf::from);
+    let mode = match args.required("--mode", "missing --mode")?.as_str() {
+        "periodic" => RunnerMode::Periodic,
+        "direct" => RunnerMode::Direct,
+        _ => return Err(UsageError("invalid --mode")),
+    };
+    let setup = match args.required("--setup", "missing --setup")?.as_str() {
+        "normal" => OperatorSetup::Normal,
+        "post-power-cycle" => OperatorSetup::PostPowerCycle,
+        "stale-bond" => OperatorSetup::StaleBond,
+        _ => return Err(UsageError("invalid --setup")),
+    };
+    let connect_timeout_secs = args
+        .required("--connect-timeout-secs", "missing --connect-timeout-secs")?
+        .parse::<u64>()
+        .map_err(|_| UsageError("invalid --connect-timeout-secs"))?;
     if !(MIN_CONNECT_TIMEOUT_SECS..=MAX_CONNECT_TIMEOUT_SECS).contains(&connect_timeout_secs) {
         return Err(UsageError("invalid --connect-timeout-secs"));
     }
-    let run_index = run_index.ok_or(UsageError("missing --run"))?;
+    let run_index = args
+        .required("--run", "missing --run")?
+        .parse::<u8>()
+        .map_err(|_| UsageError("invalid --run"))?;
     if !(MIN_RUN_INDEX..=MAX_RUN_INDEX).contains(&run_index) {
         return Err(UsageError("invalid --run"));
     }
@@ -480,7 +458,7 @@ fn run_hardware(args: &RunnerArgs) -> bool {
                 started,
                 "expected_reconnect_failure",
                 [
-                    ("error_kind", json!(error_kind_name(error.kind()))),
+                    ("error_kind", json!(args.error_kind_name(error.kind()))),
                     (
                         "reconnect_elapsed_ms",
                         json!(duration_ms(reconnect_started.elapsed())),
@@ -702,24 +680,19 @@ fn close_controller(
 }
 
 fn verify_adapter_reopen(args: &RunnerArgs, started: Instant) -> bool {
-    emit(args, started, "adapter_reopen_start", []);
-    let mut controller = match ProHardwareController::build(args) {
-        Ok(controller) => controller,
-        Err(error) => {
-            emit_controller_failure(args, started, "adapter_reopen_build", &error);
-            return false;
-        }
-    };
-    if let Err(error) = controller.open() {
-        emit_controller_failure(args, started, "adapter_reopen_open", &error);
-        return false;
-    }
-    if let Err(error) = controller.close_without_neutral() {
-        emit_controller_failure(args, started, "adapter_reopen_close", &error);
-        return false;
-    }
-    emit_status(args, started, "adapter_reopen_complete", None, &controller);
-    true
+    verify_common_adapter_reopen(
+        args,
+        started,
+        || ProHardwareController::build(args),
+        ProHardwareController::open,
+        ProHardwareController::close_without_neutral,
+        |controller| {
+            (
+                controller.status(),
+                controller.snapshot() == ProInputState::neutral(),
+            )
+        },
+    )
 }
 
 fn verify_profile_unchanged(
@@ -754,197 +727,14 @@ fn emit_status(
     controller: &ProHardwareController,
 ) {
     let status = controller.status();
-    let mut fields = status_fields(&status);
-    fields.push((
-        "snapshot_neutral",
-        json!(controller.snapshot() == ProInputState::neutral()),
-    ));
-    if let Some(operation) = operation {
-        fields.push(("operation", json!(operation)));
-    }
-    emit(args, started, event, fields);
-}
-
-fn status_fields(status: &GamepadStatus) -> Vec<(&'static str, Value)> {
-    vec![
-        ("lifecycle", json!(lifecycle_name(status.lifecycle))),
-        ("connected", json!(status.connected)),
-        (
-            "controller_kind",
-            json!(status.controller_kind.profile_name()),
-        ),
-        (
-            "reporting_kind",
-            json!(reporting_name(status.reporting_kind)),
-        ),
-        ("report_mode", json!(status.report_mode)),
-        (
-            "input_reports_accepted",
-            json!(status.input_reports_accepted),
-        ),
-        ("replies_accepted", json!(status.replies_accepted)),
-        ("last_subcommand", json!(status.last_subcommand)),
-        (
-            "last_disconnect_reason",
-            json!(status.last_disconnect_reason),
-        ),
-        (
-            "worker_failure_present",
-            json!(status.worker_failure.is_some()),
-        ),
-    ]
-}
-
-fn emit_controller_failure(
-    args: &RunnerArgs,
-    started: Instant,
-    operation: &'static str,
-    error: &Error,
-) {
-    emit(
+    emit_common_status(
         args,
         started,
-        "operation_failure",
-        [
-            ("operation", json!(operation)),
-            ("error_kind", json!(error_kind_name(error.kind()))),
-            (
-                "related_failure_present",
-                json!(error.related_error().is_some()),
-            ),
-        ],
-    );
-}
-
-fn emit_fixed_failure(
-    args: &RunnerArgs,
-    started: Instant,
-    operation: &'static str,
-    error_kind: &'static str,
-) {
-    emit(
-        args,
-        started,
-        "operation_failure",
-        [
-            ("operation", json!(operation)),
-            ("error_kind", json!(error_kind)),
-            ("related_failure_present", json!(false)),
-        ],
-    );
-}
-
-fn emit_completion(args: &RunnerArgs, started: Instant, success: bool) {
-    emit(
-        args,
-        started,
-        "runner_complete",
-        [("success", json!(success))],
-    );
-}
-
-fn emit<I>(args: &RunnerArgs, started: Instant, event: &'static str, fields: I)
-where
-    I: IntoIterator<Item = (&'static str, Value)>,
-{
-    let value = evidence_event(
-        args.run_index,
-        args.mode,
-        args.setup,
-        duration_ms(started.elapsed()),
         event,
-        fields,
+        operation,
+        &status,
+        controller.snapshot() == ProInputState::neutral(),
     );
-    let encoded = serde_json::to_string(&value).expect("hardware evidence event must serialize");
-    let mut output = io::stdout().lock();
-    writeln!(output, "{encoded}").expect("hardware evidence event must be written");
-    output
-        .flush()
-        .expect("hardware evidence event must be flushed");
-}
-
-fn evidence_event<I>(
-    run_index: u8,
-    mode: RunnerMode,
-    setup: OperatorSetup,
-    elapsed_ms: u64,
-    event: &'static str,
-    fields: I,
-) -> Value
-where
-    I: IntoIterator<Item = (&'static str, Value)>,
-{
-    let mut object = Map::from_iter([
-        ("schema".into(), json!(EVIDENCE_SCHEMA)),
-        ("schema_version".into(), json!(EVIDENCE_SCHEMA_VERSION)),
-        ("run_index".into(), json!(run_index)),
-        ("mode".into(), json!(mode.name())),
-        ("operator_setup".into(), json!(setup.name())),
-        ("unix_time_ms".into(), json!(unix_time_ms())),
-        ("elapsed_ms".into(), json!(elapsed_ms)),
-        ("event".into(), json!(event)),
-    ]);
-    for (name, value) in fields {
-        object.entry(name).or_insert(value);
-    }
-    Value::Object(object)
-}
-
-fn duration_ms(duration: Duration) -> u64 {
-    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-}
-
-fn unix_time_ms() -> u64 {
-    duration_ms(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO),
-    )
-}
-
-fn lifecycle_name(lifecycle: LifecycleState) -> &'static str {
-    match lifecycle {
-        LifecycleState::Configured => "configured",
-        LifecycleState::Open => "open",
-        LifecycleState::Connecting => "connecting",
-        LifecycleState::Ready => "ready",
-        LifecycleState::Closing => "closing",
-        LifecycleState::Closed => "closed",
-        LifecycleState::Failed => "failed",
-        _ => "unknown",
-    }
-}
-
-fn reporting_name(reporting: ReportingKind) -> &'static str {
-    match reporting {
-        ReportingKind::Periodic => "periodic",
-        ReportingKind::Direct => "direct",
-    }
-}
-
-fn error_kind_name(kind: ErrorKind) -> &'static str {
-    match kind {
-        ErrorKind::AdapterDiscovery => "adapter_discovery",
-        ErrorKind::TransportOpen => "transport_open",
-        ErrorKind::ProfilePathRequired => "profile_path_required",
-        ErrorKind::ProfileNotFound => "profile_not_found",
-        ErrorKind::ProfileAlreadyExists => "profile_already_exists",
-        ErrorKind::InvalidProfile => "invalid_profile",
-        ErrorKind::ProfileControllerMismatch => "profile_controller_mismatch",
-        ErrorKind::InvalidKeyStore => "invalid_key_store",
-        ErrorKind::TransportClosed => "transport_closed",
-        ErrorKind::NoBond => "no_bond",
-        ErrorKind::ConnectionTimeout => "connection_timeout",
-        ErrorKind::ConnectionFailed => "connection_failed",
-        ErrorKind::Protocol => "protocol",
-        ErrorKind::InvalidInput => "invalid_input",
-        ErrorKind::UnsupportedInput => "unsupported_input",
-        ErrorKind::UnsupportedCapability => "unsupported_capability",
-        ErrorKind::WorkerFailed => "worker_failed",
-        ErrorKind::Shutdown => "shutdown",
-        ErrorKind::Internal => "internal",
-        _ => "unknown",
-    }
 }
 
 #[cfg(test)]
@@ -958,9 +748,10 @@ mod tests {
 
     use serde_json::json;
 
+    use crate::support::evidence_event;
+
     use super::{
-        EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_VERSION, OperatorSetup, RunnerMode, evidence_event,
-        parse_args, stale_profile_bytes,
+        EVIDENCE_SCHEMA, OperatorSetup, RunnerArgs, RunnerMode, parse_args, stale_profile_bytes,
     };
 
     static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -1059,10 +850,17 @@ mod tests {
 
     #[test]
     fn evidence_contains_mode_and_operator_claim_without_paths_or_keys() {
+        let args = RunnerArgs {
+            adapter: "secret-adapter".to_owned(),
+            profile: "secret-profile".into(),
+            stale_source_profile: None,
+            mode: RunnerMode::Periodic,
+            setup: OperatorSetup::Normal,
+            connect_timeout: Duration::from_secs(10),
+            run_index: 4,
+        };
         let event = evidence_event(
-            4,
-            RunnerMode::Periodic,
-            OperatorSetup::Normal,
+            &args,
             25,
             "runner_start",
             [
@@ -1073,7 +871,7 @@ mod tests {
         let encoded = event.to_string();
 
         assert_eq!(event["schema"], EVIDENCE_SCHEMA);
-        assert_eq!(event["schema_version"], EVIDENCE_SCHEMA_VERSION);
+        assert_eq!(event["schema_version"], 1);
         assert_eq!(event["mode"], "periodic");
         assert_eq!(event["operator_setup"], "normal");
         assert!(!encoded.contains("profile.json"));

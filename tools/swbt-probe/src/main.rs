@@ -18,10 +18,9 @@ use swbt::{
     reporting::{self, ReportingMode},
 };
 
-#[path = "swbt-probe/trace.rs"]
 mod trace;
 
-use trace::TraceSession;
+use trace::{TraceError, TraceSession};
 
 const PROBE_SCHEMA: &str = "swbt.probe";
 const PROBE_SCHEMA_VERSION: u64 = 1;
@@ -32,6 +31,27 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_secs(60);
 const BUTTON_TAP_DURATION: Duration = Duration::from_millis(100);
 const MIN_IMU_RUN_SECS: u64 = 1;
 const MAX_IMU_RUN_SECS: u64 = 3600;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProbeErrorKind {
+    Swbt(ErrorKind),
+    Trace,
+}
+
+impl From<ErrorKind> for ProbeErrorKind {
+    fn from(kind: ErrorKind) -> Self {
+        Self::Swbt(kind)
+    }
+}
+
+impl From<TraceError> for ProbeErrorKind {
+    fn from(_: TraceError) -> Self {
+        Self::Trace
+    }
+}
+
+type ProbeResult<T> = Result<T, ProbeErrorKind>;
+
 const HELP: &str = "\
 Usage:
   swbt-probe adapters
@@ -281,7 +301,7 @@ const fn parse_button_kind(value: &str) -> Option<ButtonKind> {
     }
 }
 
-fn execute(command: Command, backend: &mut impl ProbeBackend) -> Result<Value, ErrorKind> {
+fn execute(command: Command, backend: &mut impl ProbeBackend) -> ProbeResult<Value> {
     match command {
         Command::Help => unreachable!("help bypasses command execution"),
         Command::Adapters => backend.list_adapters().map(adapters_listed_record),
@@ -292,17 +312,17 @@ fn execute(command: Command, backend: &mut impl ProbeBackend) -> Result<Value, E
             .map(|evidence| connection_completed_record(&request, evidence)),
         Command::ProfileInspect(path) => inspect_profile(path)
             .map(profile_inspected_record)
-            .map_err(|error| error.kind()),
+            .map_err(|error| error.kind().into()),
         Command::ProfileVerify(path) => inspect_profile(path)
             .map(profile_verified_record)
-            .map_err(|error| error.kind()),
+            .map_err(|error| error.kind().into()),
     }
 }
 
 fn dispatch_connection(
     request: &ConnectionRequest,
     backend: &mut impl ProbeBackend,
-) -> Result<ConnectionEvidence, ErrorKind> {
+) -> ProbeResult<ConnectionEvidence> {
     match request.controller {
         ControllerSelection::Pro => dispatch_model::<model::Pro>(request, backend),
         ControllerSelection::JoyConL => dispatch_model::<model::JoyConL>(request, backend),
@@ -313,7 +333,7 @@ fn dispatch_connection(
 fn dispatch_model<M: ControllerModel>(
     request: &ConnectionRequest,
     backend: &mut impl ProbeBackend,
-) -> Result<ConnectionEvidence, ErrorKind> {
+) -> ProbeResult<ConnectionEvidence> {
     match request.operation {
         ConnectionOperation::Pair => backend.pair::<M>(request),
         ConnectionOperation::Reconnect => match request.reporting {
@@ -358,22 +378,22 @@ struct ImuRunEvidence {
 }
 
 trait ProbeBackend {
-    fn list_adapters(&mut self) -> Result<Vec<SafeAdapter>, ErrorKind>;
-    fn open_adapter(&mut self, selector: &str) -> Result<(), ErrorKind>;
+    fn list_adapters(&mut self) -> ProbeResult<Vec<SafeAdapter>>;
+    fn open_adapter(&mut self, selector: &str) -> ProbeResult<()>;
     fn pair<M: ControllerModel>(
         &mut self,
         request: &ConnectionRequest,
-    ) -> Result<ConnectionEvidence, ErrorKind>;
+    ) -> ProbeResult<ConnectionEvidence>;
     fn reconnect<M: ControllerModel, R: ProbeReporting<M>>(
         &mut self,
         request: &ConnectionRequest,
-    ) -> Result<ConnectionEvidence, ErrorKind>;
+    ) -> ProbeResult<ConnectionEvidence>;
 }
 
 struct SystemBackend;
 
 impl ProbeBackend for SystemBackend {
-    fn list_adapters(&mut self) -> Result<Vec<SafeAdapter>, ErrorKind> {
+    fn list_adapters(&mut self) -> ProbeResult<Vec<SafeAdapter>> {
         list_adapters()
             .map(|adapters| {
                 adapters
@@ -384,20 +404,20 @@ impl ProbeBackend for SystemBackend {
                     })
                     .collect()
             })
-            .map_err(|error| error.kind())
+            .map_err(|error| error.kind().into())
     }
 
-    fn open_adapter(&mut self, selector: &str) -> Result<(), ErrorKind> {
+    fn open_adapter(&mut self, selector: &str) -> ProbeResult<()> {
         let mut controller = DirectProController::builder(selector)
             .build()
             .map_err(|error| error.kind())?;
-        open_and_close(&mut controller)
+        open_and_close(&mut controller).map_err(Into::into)
     }
 
     fn pair<M: ControllerModel>(
         &mut self,
         request: &ConnectionRequest,
-    ) -> Result<ConnectionEvidence, ErrorKind> {
+    ) -> ProbeResult<ConnectionEvidence> {
         let trace = TraceSession::install(&request.trace)?;
         trace::emit_environment::<M, reporting::Periodic>();
         let operation = (|| {
@@ -421,7 +441,7 @@ impl ProbeBackend for SystemBackend {
     fn reconnect<M: ControllerModel, R: ProbeReporting<M>>(
         &mut self,
         request: &ConnectionRequest,
-    ) -> Result<ConnectionEvidence, ErrorKind> {
+    ) -> ProbeResult<ConnectionEvidence> {
         let trace = TraceSession::install(&request.trace)?;
         trace::emit_environment::<M, R>();
         let operation = (|| {
@@ -582,10 +602,10 @@ fn reopen_after_connection<M: ControllerModel, R: ReportingMode>(
         .map_err(|error| error.kind())
 }
 
-fn finish_trace<T>(trace: TraceSession, operation: Result<T, ErrorKind>) -> Result<T, ErrorKind> {
+fn finish_trace<T>(trace: TraceSession, operation: Result<T, ErrorKind>) -> ProbeResult<T> {
     match trace.finish() {
-        Ok(()) => operation,
-        Err(error) => Err(error),
+        Ok(()) => operation.map_err(Into::into),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -751,12 +771,18 @@ const fn profile_identity_kind(identity: ProfileIdentity) -> ProfileIdentityKind
     }
 }
 
-const fn error_kind_name(kind: ErrorKind) -> &'static str {
+const fn error_kind_name(kind: ProbeErrorKind) -> &'static str {
+    match kind {
+        ProbeErrorKind::Trace => "trace",
+        ProbeErrorKind::Swbt(kind) => swbt_error_kind_name(kind),
+    }
+}
+
+const fn swbt_error_kind_name(kind: ErrorKind) -> &'static str {
     match kind {
         ErrorKind::AdapterDiscovery => "adapter_discovery",
         ErrorKind::TransportOpen => "transport_open",
         ErrorKind::AdapterIdentityRecoveryRequired => "adapter_identity_recovery_required",
-        ErrorKind::Trace => "trace",
         ErrorKind::ProfilePathRequired => "profile_path_required",
         ErrorKind::ProfileNotFound => "profile_not_found",
         ErrorKind::ProfileAlreadyExists => "profile_already_exists",
@@ -811,5 +837,4 @@ fn operation_write_failure() -> ExitCode {
 }
 
 #[cfg(test)]
-#[path = "swbt-probe/tests.rs"]
 mod tests;

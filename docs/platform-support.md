@@ -18,17 +18,18 @@ version、Linux distribution へ同じ実機結果を一般化しません。
 ## 共通の確認
 
 `bumble` feature が USB transport を有効にします。descriptor の列挙は device を open/claim
-しません。
+しません。以下の `swbt-probe` command は GitHub repository checkout の root で実行します。
+crates.io archive にはこの検証用 package を含めません。
 
 ```powershell
-cargo run --locked --features probe --bin swbt-probe -- adapters
+cargo run -p swbt-probe --locked -- adapters
 ```
 
 出力は candidate 件数と VID/PID だけです。selector、USB serial、Bluetooth address は表示しません。
 対象を特定できたら、open と close の最小確認を実行します。
 
 ```powershell
-cargo run --locked --features probe --bin swbt-probe -- open --adapter usb:0a12:0001
+cargo run -p swbt-probe --locked -- open --adapter usb:0a12:0001
 ```
 
 この command は HCI 初期化後に `close_without_neutral()` を完了してから終了します。controller を

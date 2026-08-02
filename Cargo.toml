@@ -1,3 +1,11 @@
+[workspace]
+members = [
+    "tools/swbt-hardware-runner",
+    "tools/swbt-probe",
+]
+default-members = ["."]
+resolver = "3"
+
 [package]
 name = "swbt-rs"
 version = "0.1.0"
@@ -28,10 +36,11 @@ path = "src/lib.rs"
 [features]
 default = []
 adapter-tests = ["bumble"]
-probe = ["bumble"]
+diagnostics-schema = ["dep:tracing"]
 bumble = [
     "dep:swbt-bumble-backend",
     "dep:rusb",
+    "dep:tracing",
 ]
 
 [dependencies]
@@ -39,10 +48,5 @@ atomic-write-file = "0.3.0"
 fs2 = "0.4.3"
 rusb = { version = "0.9.4", features = ["vendored"], optional = true }
 serde_json = "1"
-tracing = "0.1"
+tracing = { version = "0.1", optional = true }
 swbt-bumble-backend = { version = "=0.1.1", optional = true }
-
-[[bin]]
-name = "swbt-probe"
-path = "src/bin/swbt-probe.rs"
-required-features = ["probe"]

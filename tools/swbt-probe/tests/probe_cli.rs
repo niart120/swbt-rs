@@ -1,5 +1,3 @@
-#![cfg(feature = "probe")]
-
 use std::{
     fs,
     path::PathBuf,

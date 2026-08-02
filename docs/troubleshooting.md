@@ -6,11 +6,12 @@ profile を添付しないでください。
 
 ## 最初の切り分け
 
-descriptor 列挙と HCI open を分けて実行します。
+descriptor 列挙と HCI open を分けて実行します。以下の `swbt-probe` command は GitHub repository
+checkout の root で実行します。crates.io archive にはこの検証用 package を含めません。
 
 ```powershell
-cargo run --locked --features probe --bin swbt-probe -- adapters
-cargo run --locked --features probe --bin swbt-probe -- open --adapter usb:0a12:0001
+cargo run -p swbt-probe --locked -- adapters
+cargo run -p swbt-probe --locked -- open --adapter usb:0a12:0001
 ```
 
 `adapters` は device を open/claim しません。ここで candidate が0件なら、USB 接続、VID/PID、
@@ -56,7 +57,7 @@ session を切断し、再接続後の session が neutral から開始するこ
 profile を表示せず、schema と model だけを検査します。
 
 ```powershell
-cargo run --locked --features probe --bin swbt-probe -- profile verify .\profile.json
+cargo run -p swbt-probe --locked -- profile verify .\profile.json
 ```
 
 - `NoBond`: usable Classic link key がない。`connect()` は `allow_pairing = true` の場合だけ fresh pairing

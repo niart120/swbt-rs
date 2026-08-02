@@ -1,0 +1,11 @@
+[package]
+name = "swbt-probe"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+
+[dependencies]
+serde_json = "1"
+swbt-rs = { path = "../..", features = ["bumble", "diagnostics-schema"] }
+tracing = "0.1"
