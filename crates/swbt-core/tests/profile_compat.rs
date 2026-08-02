@@ -133,33 +133,38 @@ fn typed_profile_requires_canonical_uppercase_namespace() {
 }
 
 #[test]
-fn typed_profile_normalizes_lowercase_peer_to_uppercase() {
-    let mut input = python_profile_fixtures()
-        .into_iter()
-        .next()
-        .expect("fixture must retain the Pro case");
-    let peers = input["key_store"]["namespaces"]["00:11:22:33:44:55"]
-        .as_object_mut()
-        .expect("fixture peers must be an object");
-    let keys = peers
-        .remove("98:B6:E9:11:22:33/P")
-        .expect("fixture peer must exist");
-    peers.insert("98:b6:e9:11:22:33/P".to_owned(), keys);
+fn typed_profile_requires_canonical_uppercase_peer() {
+    const LINK_KEY: &str = "01010101010101010101010101010101";
 
-    let profile = PairingProfile::<model::Pro>::from_json(
-        &serde_json::to_vec(&input).expect("serialize lowercase peer profile"),
-    )
-    .expect("lowercase Bluetooth peer must parse");
-    let output: Value = serde_json::from_slice(
-        &profile
-            .to_json_bytes()
-            .expect("normalized profile must serialize"),
-    )
-    .expect("normalized profile must remain JSON");
+    for noncanonical_peer in ["98:b6:e9:11:22:33/P", "98:B6:E9:11:22:3a/P"] {
+        let mut input = python_profile_fixtures()
+            .into_iter()
+            .next()
+            .expect("fixture must retain the Pro case");
+        let peers = input["key_store"]["namespaces"]["00:11:22:33:44:55"]
+            .as_object_mut()
+            .expect("fixture peers must be an object");
+        let keys = peers
+            .remove("98:B6:E9:11:22:33/P")
+            .expect("fixture peer must exist");
+        peers.insert(noncanonical_peer.to_owned(), keys);
 
-    assert!(
-        output["key_store"]["namespaces"]["00:11:22:33:44:55"]["98:B6:E9:11:22:33/P"].is_object()
-    );
+        let error = PairingProfile::<model::Pro>::from_json(
+            &serde_json::to_vec(&input).expect("serialize noncanonical peer profile"),
+        )
+        .expect_err("noncanonical Bluetooth peer must fail");
+
+        assert_eq!(error.kind(), ErrorKind::InvalidProfile);
+        assert!(!error.to_string().contains(noncanonical_peer));
+        assert!(!error.to_string().contains(LINK_KEY));
+        assert!(!format!("{error:?}").contains(noncanonical_peer));
+        assert!(!format!("{error:?}").contains(LINK_KEY));
+        let source = error.source().expect("invalid profile source");
+        assert!(!source.to_string().contains(noncanonical_peer));
+        assert!(!source.to_string().contains(LINK_KEY));
+        assert!(!format!("{source:?}").contains(noncanonical_peer));
+        assert!(!format!("{source:?}").contains(LINK_KEY));
+    }
 }
 
 fn assert_typed_debug_redaction<M: model::ControllerModel>(input: &Value, key: String) {

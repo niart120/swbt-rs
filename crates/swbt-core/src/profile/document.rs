@@ -347,14 +347,16 @@ struct ClassicPeerKey(String);
 impl ClassicPeerKey {
     fn parse(value: &str) -> crate::Result<Self> {
         let address = value.strip_suffix("/P").ok_or_else(|| {
-            invalid_profile("profile key-store peer name must be a public Bluetooth address")
+            invalid_profile(
+                "profile key-store peer name must use an uppercase public Bluetooth address",
+            )
         })?;
-        if !is_bluetooth_address(address) {
+        if !is_canonical_bluetooth_address(address) {
             return Err(invalid_profile(
-                "profile key-store peer name must be a public Bluetooth address",
+                "profile key-store peer name must use an uppercase public Bluetooth address",
             ));
         }
-        Ok(Self(format!("{}/P", address.to_ascii_uppercase())))
+        Ok(Self(value.to_owned()))
     }
 }
 
@@ -386,7 +388,9 @@ impl<'de> Deserialize<'de> for ClassicPeerKey {
     {
         let value = String::deserialize(deserializer)?;
         Self::parse(&value).map_err(|_| {
-            de::Error::custom("profile key-store peer name must be a public Bluetooth address")
+            de::Error::custom(
+                "profile key-store peer name must use an uppercase public Bluetooth address",
+            )
         })
     }
 }

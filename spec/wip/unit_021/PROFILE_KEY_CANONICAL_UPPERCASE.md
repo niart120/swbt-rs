@@ -79,7 +79,7 @@ profile入力の正本とし、Rust固有の寛容な正規化を廃止する。
 | status | item | type | layer | notes |
 |---|---|---|---|---|
 | refactor-skipped | T01 canonical uppercase namespaceは受理し、lowercase / mixed-case namespaceはkey順序に依存せずsecret-freeな`InvalidProfile`になる | behavior / regression / edge | profile unit / public integration | key変換を削除し、既存address parserへcanonical検査だけを追加した |
-| todo | T02 canonical uppercase Classic `/P` peerは受理し、lowercase / mixed-case peerはkey順序に依存せずsecret-freeな`InvalidProfile`になる | behavior / regression / edge | profile unit / public integration | `/P`、16-byte link key、最大1 peerを維持する |
+| refactor-skipped | T02 canonical uppercase Classic `/P` peerは受理し、lowercase / mixed-case peerはkey順序に依存せずsecret-freeな`InvalidProfile`になる | behavior / regression / edge | profile unit / public integration | `/P`、16-byte link key、最大1 peerを維持する |
 
 status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`deferred` を使う。
 
@@ -90,6 +90,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | red | T01 | `cargo test -p swbt-core --test profile_compat typed_profile_requires_canonical_uppercase_namespace --locked`は、現行parserがlowercase namespaceを受理して`PairingProfile`を返したため期待どおり失敗した |
 | green | T01 | namespace parserがuppercase addressだけを変換せず保持するよう変更した。同じcommandは成功し、peerのlowercase正規化testとpinned Python fixture 6件も成功した |
 | refactor-skipped | T01 | canonical検査はT02でも使う一つのpredicateへ置いた。namespace item内で追加の構造変更は不要と判断した |
+| red | T02 | `cargo test -p swbt-core --test profile_compat typed_profile_requires_canonical_uppercase_peer --locked`は、現行parserがlowercase peerを受理して`PairingProfile`を返したため期待どおり失敗した |
+| green | T02 | peer parserがuppercase addressと`/P`だけを変換せず保持するよう変更した。同じcommand、namespace test、pinned Python fixture 6件はすべて成功した |
+| refactor-skipped | T02 | T01で追加したcanonical address predicateをそのまま再利用できた。map deserializerや追加のkey型は不要と判断した |
 
 ## 7. 設計メモ
 
