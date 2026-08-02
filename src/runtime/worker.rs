@@ -36,7 +36,7 @@ use crate::{
         readiness::{ReadinessError, ReadinessGate, ReadinessProgress},
         scheduler::SchedulerError,
         sender::ReportSender,
-        session::{ConnectionSessionId, ConnectionSessions, SessionError, SessionEvent},
+        session::{ConnectionSessionId, ConnectionSessions, SessionEvent},
         state::InputStateStore,
         status::StatusPublisher,
         transport::{TransportError, TransportErrorKind, TransportEvent, TransportPort},
@@ -259,7 +259,6 @@ pub(crate) enum WorkerOperationError {
 pub(crate) enum WorkerCoreError {
     DeadlineOverflow,
     InvalidLifecycle,
-    Session(SessionError),
     Handshake(HandshakeError),
     Transport(TransportError),
 }
@@ -298,7 +297,6 @@ impl WorkerCoreError {
         match self {
             Self::DeadlineOverflow => "worker deadline overflowed",
             Self::InvalidLifecycle => "worker lifecycle invariant failed",
-            Self::Session(_) => "worker session failed",
             Self::Handshake(_) => "worker handshake failed",
             Self::Transport(error) if error.kind() == TransportErrorKind::InvalidKeyStore => {
                 "worker pairing key store failed"
@@ -429,7 +427,7 @@ pub(crate) trait WorkerReporting<M: ControllerModel>: ReportingMode {
         sender: &mut ReportSender<M>,
         observed: &mut ObservedSubcommands,
         input: &mut InputStateStore<M>,
-    ) -> Result<ConnectionSessionId, SessionError>;
+    ) -> ConnectionSessionId;
 
     fn begin_handshake(session_id: ConnectionSessionId) -> Handshake;
 
@@ -670,19 +668,13 @@ where
         if !self.lifecycle.begin_connection() {
             return Err(WorkerCoreError::InvalidLifecycle);
         }
-        let session_id = match R::begin_session(
+        let session_id = R::begin_session(
             &mut self.reporting,
             &mut self.sessions,
             &mut self.sender,
             &mut self.observed,
             &mut self.input,
-        ) {
-            Ok(session_id) => session_id,
-            Err(error) => {
-                self.lifecycle.mark_connection_ended();
-                return Err(WorkerCoreError::Session(error));
-            }
-        };
+        );
         self.connection = Some(ConnectionWork {
             session_id,
             handshake: Some(R::begin_handshake(session_id)),
@@ -1104,7 +1096,7 @@ where
                 self.connection = Some(connection);
             }
             Ok(ReadinessProgress::Ready(ready)) => {
-                if ready.session_id() != connection.session_id || !self.lifecycle.mark_ready() {
+                if ready != connection.session_id || !self.lifecycle.mark_ready() {
                     self.connection = Some(connection);
                     return Err(WorkerCoreError::InvalidLifecycle);
                 }
@@ -1363,7 +1355,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Periodic {
         sender: &mut ReportSender<M>,
         observed: &mut ObservedSubcommands,
         input: &mut InputStateStore<M>,
-    ) -> Result<ConnectionSessionId, SessionError> {
+    ) -> ConnectionSessionId {
         sessions.begin_periodic(sender, &mut runtime.policy, observed, input)
     }
 
@@ -1606,7 +1598,7 @@ impl<M: ControllerModel> WorkerReporting<M> for Direct {
         sender: &mut ReportSender<M>,
         observed: &mut ObservedSubcommands,
         input: &mut InputStateStore<M>,
-    ) -> Result<ConnectionSessionId, SessionError> {
+    ) -> ConnectionSessionId {
         sessions.begin_direct(sender, observed, input)
     }
 

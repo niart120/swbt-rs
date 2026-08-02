@@ -767,9 +767,7 @@ mod tests {
     ) -> (Handshake, ConnectionSessionId) {
         let mut sessions = ConnectionSessions::new();
         let mut state = InputStateStore::new();
-        let session_id = sessions
-            .begin_direct(sender, observed, &mut state)
-            .expect("first test session");
+        let session_id = sessions.begin_direct(sender, observed, &mut state);
         (Handshake::new(session_id), session_id)
     }
 
@@ -790,13 +788,9 @@ mod tests {
     ) -> (ConnectionSessionId, ConnectionSessionId) {
         let mut sessions = ConnectionSessions::new();
         let mut state = InputStateStore::new();
-        let first = sessions
-            .begin_direct(sender, observed, &mut state)
-            .expect("first test session");
+        let first = sessions.begin_direct(sender, observed, &mut state);
         assert!(sessions.end_current(first));
-        let second = sessions
-            .begin_direct(sender, observed, &mut state)
-            .expect("second test session");
+        let second = sessions.begin_direct(sender, observed, &mut state);
         (first, second)
     }
 

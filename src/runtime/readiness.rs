@@ -11,18 +11,6 @@ use crate::{
     },
 };
 
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct ReadySession {
-    session_id: ConnectionSessionId,
-}
-
-impl ReadySession {
-    #[must_use]
-    pub(crate) const fn session_id(&self) -> ConnectionSessionId {
-        self.session_id
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ReadinessWait {
     Handshake,
@@ -33,7 +21,7 @@ pub(crate) enum ReadinessWait {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ReadinessProgress {
     Pending(ReadinessWait),
-    Ready(ReadySession),
+    Ready(ConnectionSessionId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,14 +230,12 @@ impl ReadinessGate {
         Ok(true)
     }
 
-    fn take_ready_session(&mut self) -> ReadySession {
+    fn take_ready_session(&mut self) -> ConnectionSessionId {
         let completion = self
             .handshake
             .take()
             .expect("readiness is emitted only after handshake collection");
-        ReadySession {
-            session_id: completion.session_id(),
-        }
+        completion.session_id()
     }
 }
 
@@ -428,7 +414,7 @@ mod tests {
             ReadinessProgress::Ready(ready) => ready,
             ReadinessProgress::Pending(wait) => panic!("unexpected pending state: {wait:?}"),
         };
-        assert_eq!(ready.session_id(), session_id);
+        assert_eq!(ready, session_id);
         assert!(lifecycle.mark_ready());
         assert_eq!(lifecycle.state(), LifecycleState::Ready);
         assert_eq!(periodic.next_deadline(), Some(Duration::from_millis(448)));
@@ -642,7 +628,7 @@ mod tests {
             ReadinessProgress::Ready(ready) => ready,
             ReadinessProgress::Pending(wait) => panic!("unexpected pending state: {wait:?}"),
         };
-        assert_eq!(ready.session_id(), current);
+        assert_eq!(ready, current);
         assert!(current_handshake.is_none());
         assert!(lifecycle.mark_ready());
         assert_eq!(lifecycle.state(), LifecycleState::Ready);
@@ -860,20 +846,17 @@ mod tests {
         }
 
         fn begin_periodic(&mut self, periodic: &mut PeriodicPolicy) -> ConnectionSessionId {
-            self.sessions
-                .begin_periodic(
-                    &mut self.sender,
-                    periodic,
-                    &mut self.observed,
-                    &mut self.store,
-                )
-                .expect("periodic session")
+            self.sessions.begin_periodic(
+                &mut self.sender,
+                periodic,
+                &mut self.observed,
+                &mut self.store,
+            )
         }
 
         fn begin_direct(&mut self) -> ConnectionSessionId {
             self.sessions
                 .begin_direct(&mut self.sender, &mut self.observed, &mut self.store)
-                .expect("direct session")
         }
 
         fn bootstrap(

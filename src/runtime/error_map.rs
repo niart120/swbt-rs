@@ -302,11 +302,6 @@ fn map_worker_core_error(error: WorkerCoreError) -> Error {
             ErrorKind::WorkerFailed,
             "controller worker entered an invalid lifecycle state",
         ),
-        WorkerCoreError::Session(source) => Error::with_source(
-            ErrorKind::WorkerFailed,
-            "controller worker session failed",
-            source,
-        ),
         WorkerCoreError::Handshake(source) => Error::with_source(
             ErrorKind::WorkerFailed,
             "controller worker handshake failed",
