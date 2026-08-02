@@ -146,8 +146,9 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | `src/controller/{mod,create,runtime_tests}.rs` | modify | timeout validation、公開 `try_*` 削除、回帰試験 |
 | `src/connection.rs` / `src/lib.rs` | modify | result/status DTO と export 削除 |
 | `README.md` / `CHANGELOG.md` | modify | 0.2.0 移行説明と利用例更新 |
-| `spec/initial/{api,architecture,testing,migration-strategy}.md` | modify | Intent Delta 反映 |
-| `spec/wip/unit_018/RUNTIME_LIFECYCLE_AND_CONNECTION_API_SIMPLIFICATION.md` | new / modify | 作業記録 |
+| `spec/initial/{api,architecture,migration-strategy}.md` | modify | Intent Delta 反映 |
+| `spec/initial/testing.md` | inspect / no change | method 不在の compile-fail fixture を追加しない既存方針を確認 |
+| `spec/complete/unit_018/RUNTIME_LIFECYCLE_AND_CONNECTION_API_SIMPLIFICATION.md` | new / modify | 完了済み作業記録 |
 
 ## 9. 検証
 
@@ -169,16 +170,16 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 | `cargo test -p swbt-rs --doc --all-features --locked` | success | T05: 1 passed |
 | `cargo rustdoc -p swbt-rs --all-features --locked -- -D warnings` | success | T05: public rustdoc warning 0 |
 | `cargo package -p swbt-rs --locked --allow-dirty` | success | T05: 114 files、1.2 MiB、verify build success |
-| `cargo fmt --all --check` | not run | final gate |
-| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | not run | final gate |
-| `cargo clippy -p swbt-rs --all-targets --no-default-features --locked -- -D warnings` | not run | final gate |
-| `cargo test --workspace --all-targets --all-features --locked` | not run | final gate |
-| `cargo test -p swbt-rs --all-targets --no-default-features --locked` | not run | final gate |
-| `cargo +1.87.0 test -p swbt-rs --all-targets --all-features --locked` | not run | MSRV gate |
-| `cargo test --doc -p swbt-rs --all-features --locked` | not run | public rustdoc gate |
-| `cargo build --workspace --all-features --locked` | not run | build gate |
-| `cargo package -p swbt-rs --locked` | not run | public API/package gate |
-| `git diff --check` | not run | final gate |
+| `cargo fmt --all --check` | success | workspace formatting |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | library、tools、全 target / feature |
+| `cargo clippy -p swbt-rs --all-targets --no-default-features --locked -- -D warnings` | success | unit_019 前の featureless 契約 |
+| `cargo test --workspace --all-targets --all-features --locked` | success | library 267 passed / 1 ignored、workspace tools と integration tests 成功。adapter 実機5件と手動 profile 1件は ignored |
+| `cargo test -p swbt-rs --all-targets --no-default-features --locked` | success | library 253 passed / 1 ignored、featureless integration tests 成功。手動 profile 1件 ignored |
+| `cargo +1.87.0 test -p swbt-rs --all-targets --all-features --locked` | success | MSRV。library 267 passed / 1 ignored、integration tests 成功 |
+| `cargo test --doc -p swbt-rs --all-features --locked` | success | 1 passed |
+| `cargo build --workspace --all-features --locked` | success | library と2 tool package |
+| `cargo package -p swbt-rs --locked` | success | clean worktree、114 files、1.2 MiB、verify build success |
+| `git diff --check` | success | branch 全差分と worktree |
 | hardware / USB / Switch UI | not run | 本 unit は内部構造と software API の整理であり対象外 |
 
 ## 10. 先送り事項
@@ -192,9 +193,18 @@ status は `todo`、`red`、`green`、`refactor-done`、`refactor-skipped`、`de
 
 - [x] 対象範囲と対象外を確認した
 - [x] TDD Test List を作成した
-- [ ] 各 TDD item を個別に検証・commitした
-- [ ] 検証結果または未実行理由を記録した
-- [ ] package / release / public API に触れる場合の gate を記録した
-- [ ] `rust-api-boundary-review`、`rustdoc-style`、`docs-quality-review` を完了した
-- [ ] `agentic-self-review` を完了した
-- [ ] 完了条件を満たして `spec/complete/unit_018` へ移動した
+- [x] 各 TDD item を個別に検証・commitした
+- [x] 検証結果または未実行理由を記録した
+- [x] package / release / public API に触れる場合の gate を記録した
+- [x] `rust-api-boundary-review`、`rustdoc-style`、`docs-quality-review` を完了した
+- [x] `agentic-self-review` を完了した
+- [x] 完了条件を満たして `spec/complete/unit_018` へ移動した
+
+## 12. self-review
+
+- requirements: T01-T05、Intent Delta、Issue #22 の runtime/API 範囲と差分を照合し、未完了項目なし
+- scope: `swbt-core` 抽出と Bumble 必須化は `unit_019`、version 更新と publish は release work-unitへ維持
+- Rust API boundary: source 非互換削除は合意済み4要素に限定し、回復判断用 `ErrorKind` と error sourceを維持
+- rustdoc / docs: public timeout error、README、CHANGELOG、初期 API / architecture / migrationを現行実装へ同期。削除対象の現行 API 記述と仮テキストは0件
+- tests: software gate、MSRV、packageは成功。USB adapter、Switch UI、長時間 timing gateは本unitの対象外で未実行
+- integration review: subagentは使用していない。重大・中・低 severityの未処置 findingなし
