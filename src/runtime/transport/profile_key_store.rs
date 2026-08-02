@@ -81,18 +81,17 @@ impl<M: ControllerModel> SwbtProfileKeyStore<M> {
     fn read_profile(
         &self,
         error: BondStoreError,
-    ) -> Result<(Vec<u8>, PairingProfile<M>), BondStoreError> {
+    ) -> Result<PairingProfile<M>, BondStoreError> {
         let bytes = FileProfileStore.read(&self.path).map_err(|_| error)?;
-        let profile = PairingProfile::from_json(&bytes).map_err(|_| error)?;
-        Ok((bytes, profile))
+        PairingProfile::from_json(&bytes).map_err(|_| error)
     }
 
-    fn commit(&self, expected: &[u8], profile: &PairingProfile<M>) -> Result<(), BondStoreError> {
+    fn commit(&self, profile: &PairingProfile<M>) -> Result<(), BondStoreError> {
         let replacement = profile
             .to_json_bytes()
             .map_err(|_| BondStoreError::UpsertFailed)?;
         FileProfileStore
-            .update(&self.path, expected, &replacement)
+            .update(&self.path, &replacement)
             .map_err(|_| BondStoreError::UpsertFailed)
     }
 }
@@ -108,7 +107,7 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
 
     fn load(&self, peer: BluetoothAddress) -> Result<Option<ClassicBond>, BondStoreError> {
         let namespace = self.namespace(BondStoreError::LoadFailed)?;
-        let (_, profile) = self.read_profile(BondStoreError::LoadFailed)?;
+        let profile = self.read_profile(BondStoreError::LoadFailed)?;
         let public_peer = format_public_peer(peer);
         Ok(profile
             .pairing_keys(namespace, &public_peer)
@@ -117,7 +116,7 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
 
     fn load_all(&self) -> Result<Vec<(BluetoothAddress, ClassicBond)>, BondStoreError> {
         let namespace = self.namespace(BondStoreError::ListFailed)?;
-        let (_, profile) = self.read_profile(BondStoreError::ListFailed)?;
+        let profile = self.read_profile(BondStoreError::ListFailed)?;
         profile
             .all_pairing_keys(namespace)
             .into_iter()
@@ -133,11 +132,11 @@ impl<M: ControllerModel> BondStore for SwbtProfileKeyStore<M> {
 
     fn upsert(&mut self, peer: BluetoothAddress, bond: ClassicBond) -> Result<(), BondStoreError> {
         let namespace = self.namespace(BondStoreError::UpsertFailed)?.to_owned();
-        let (expected, mut profile) = self.read_profile(BondStoreError::UpsertFailed)?;
+        let mut profile = self.read_profile(BondStoreError::UpsertFailed)?;
         profile
             .replace_pairing_keys(&namespace, &format_public_peer(peer), encode_bond(&bond))
             .map_err(|_| BondStoreError::UpsertFailed)?;
-        self.commit(&expected, &profile)
+        self.commit(&profile)
     }
 }
 

@@ -1,13 +1,12 @@
 use std::{
     ffi::OsString,
     fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use atomic_write_file::AtomicWriteFile;
-use fs2::FileExt as _;
 
 const TEMP_CREATE_ATTEMPTS: usize = 128;
 static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
@@ -58,24 +57,12 @@ impl ProfileCreatePort for FileProfileStore {
 }
 
 impl ProfileUpdatePort for FileProfileStore {
-    fn update(&mut self, path: &Path, expected: &[u8], replacement: &[u8]) -> io::Result<()> {
+    fn update(&mut self, path: &Path, replacement: &[u8]) -> io::Result<()> {
         let metadata = fs::symlink_metadata(path)?;
         if !metadata.file_type().is_file() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "profile update target must be a regular file",
-            ));
-        }
-
-        let mut locked = OpenOptions::new().read(true).write(true).open(path)?;
-        try_lock_exclusive(&locked)?;
-        locked.seek(SeekFrom::Start(0))?;
-        let mut current = Vec::new();
-        locked.read_to_end(&mut current)?;
-        if current != expected {
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "profile changed before the update lock was acquired",
             ));
         }
 
@@ -122,31 +109,10 @@ pub(crate) trait ProfileCreatePort: ProfileCreateTargetPort {
     )
 )]
 pub(crate) trait ProfileUpdatePort: ProfileReadPort {
-    /// Replaces an existing profile if it still has the expected complete bytes.
+    /// Atomically replaces an existing regular profile for its single live writer.
     ///
-    /// Lock contention and a stale expected document are reported as
-    /// [`io::ErrorKind::WouldBlock`].
-    fn update(&mut self, path: &Path, expected: &[u8], replacement: &[u8]) -> io::Result<()>;
-}
-
-#[cfg_attr(
-    not(any(test, feature = "bumble")),
-    allow(
-        dead_code,
-        reason = "feature-disabled builds do not persist pairing-key updates"
-    )
-)]
-fn try_lock_exclusive(file: &File) -> io::Result<()> {
-    file.try_lock_exclusive().map_err(|source| {
-        if source.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
-            io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "profile update lock is already held",
-            )
-        } else {
-            source
-        }
-    })
+    /// Multiple processes or controllers updating the same path are unsupported.
+    fn update(&mut self, path: &Path, replacement: &[u8]) -> io::Result<()>;
 }
 
 fn inspect_target(path: &Path) -> io::Result<ProfileCreateTargetState> {
@@ -210,15 +176,13 @@ fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::{
-        fs::{self, OpenOptions},
+        fs,
         io::{self, Write},
         path::{Path, PathBuf},
         sync::atomic::{AtomicU64, Ordering},
     };
 
     use atomic_write_file::AtomicWriteFile;
-    use fs2::FileExt as _;
-
     use crate::{
         model,
         profile::{PairingProfile, ProfileDocument},
@@ -339,26 +303,17 @@ mod tests {
     }
 
     #[test]
-    fn file_profile_store_replaces_only_the_expected_complete_document() {
+    fn file_profile_store_replaces_an_existing_complete_document_for_one_writer() {
         let temp = TempDirectory::new("update");
         let target = temp.path().join("pro.json");
         let old = valid_profile_bytes("old");
         let new = valid_profile_bytes("new");
-        let competitor = valid_profile_bytes("competitor");
         let mut store = FileProfileStore;
         store
             .create_new(&target, &old)
             .expect("create original profile");
 
-        let error = store
-            .update(&target, &competitor, &new)
-            .expect_err("stale writer must not replace the current profile");
-        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
-        assert_eq!(store.read(&target).expect("read current profile"), old);
-
-        store
-            .update(&target, &old, &new)
-            .expect("replace matching profile");
+        store.update(&target, &new).expect("replace current profile");
         assert_eq!(store.read(&target).expect("read updated profile"), new);
         PairingProfile::<model::Pro>::try_from(
             ProfileDocument::parse_json(&new).expect("updated profile remains valid"),
@@ -369,36 +324,6 @@ mod tests {
             ["pro.json"],
             "successful update must remove the same-directory temporary file"
         );
-    }
-
-    #[test]
-    fn file_profile_store_rejects_lock_contention_without_waiting_or_mutating() {
-        let temp = TempDirectory::new("contention");
-        let target = temp.path().join("pro.json");
-        let old = valid_profile_bytes("old");
-        let new = valid_profile_bytes("new");
-        let mut store = FileProfileStore;
-        store
-            .create_new(&target, &old)
-            .expect("create original profile");
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&target)
-            .expect("open target for test lock");
-        lock.try_lock_exclusive().expect("hold exclusive test lock");
-
-        let error = store
-            .update(&target, &old, &new)
-            .expect_err("contended update must fail immediately");
-
-        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
-        drop(lock);
-        assert_eq!(store.read(&target).expect("read unchanged profile"), old);
-        store
-            .update(&target, &old, &new)
-            .expect("update must work after the lock is released");
-        assert_eq!(store.read(&target).expect("read updated profile"), new);
     }
 
     #[test]
@@ -429,9 +354,7 @@ mod tests {
         )
         .expect("old profile remains Pro-typed");
 
-        store
-            .update(&target, &old, &new)
-            .expect("complete later replacement");
+        store.update(&target, &new).expect("complete later replacement");
         let after_commit = store.read(&target).expect("read new profile");
         assert_eq!(after_commit, new);
         PairingProfile::<model::Pro>::try_from(

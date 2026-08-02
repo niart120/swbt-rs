@@ -237,7 +237,7 @@ git diff --check
 ```
 
 `cargo tree -p swbt-rs --no-default-features --edges normal --locked` の直接依存は
-`atomic-write-file`、`fs2`、`serde_json` で、`tracing`、Bumble、`rusb` を含みません。selected Miri は nightly の
+`atomic-write-file`、`serde`、`serde_json` で、`tracing`、Bumble、`rusb` を含みません。selected Miri は nightly の
 `miri` component を導入した環境で次の command を実行します。
 
 ```powershell
