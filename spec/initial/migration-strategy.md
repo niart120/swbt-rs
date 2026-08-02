@@ -13,7 +13,7 @@
 - 同じcontroller modelと入力から互換なNX HID bytesを生成する
 - 同じoutput reportに対し互換なreplyとsession transitionを行う
 - Periodic / Directのstate commit条件を一致させる
-- Python profile schema v2を相互に読める
+- Python 0.6.0のschema v2 Classic pairing profileを相互に読める
 - stored link keyの意味を失わない
 - connection readinessとclose neutralの契約を一致させる
 - 実機でpairing / reconnect / input / cleanupを再現する
@@ -41,7 +41,7 @@
 | L3 Pure protocol | report/parser/reply/SPI/conversion | M1 |
 | L4 Runtime semantics | Periodic/Direct/readiness/cleanup | M2 |
 | L5 Virtual Bluetooth | Classic/SDP/HID/pairing | M4 |
-| L6 Profile data | schema v2とkey fields相互読書き | M6 |
+| L6 Profile data | Python 0.6.0 schema v2 Classic fieldsの相互読書き | M6 |
 | L7 Hardware behavior | target matrix | M5-M8 |
 | L8 Operational cutover | docs/probe/monitoring/backend rollback | M9 |
 
@@ -142,7 +142,8 @@ Rustの`create_profile()`はcontroller methodではなく、typed builderを消�
 - pairing failure後もvalid empty envelopeから明示retryできる
 - partial controller objectを利用者へ返さない
 
-path既存は`ProfileAlreadyExists`、path未指定は`ProfilePathRequired`。pairing失敗ではenvelopeを残し、内部controllerをcleanupする。
+create-newが既存pathと競合した場合は`ProfileAlreadyExists`、path未指定は`ProfilePathRequired`。
+target existenceは事前検査しない。pairing失敗ではenvelopeを残し、内部controllerをcleanupする。
 
 既存empty profileからのretry:
 
@@ -346,26 +347,17 @@ Rust`Drop`にPython context managerと同じcleanup保証を持たせない。
 ```
 
 ```text
-ProfileDocument { controller_kind: ControllerKind }
+ProfileDocument { controller_kind, identity, key_store }
   ↓ compare with M::KIND
 PairingProfile<M>
 ```
 
 `PairingProfile<model::Pro>`をJoy-Conへ渡すAPIは作らない。
 
-key fields:
-
-- `address_type`
-- `ltk`
-- `ltk_central`
-- `ltk_peripheral`
-- `irk`
-- `csrk`
-- `local_csrk`
-- `link_key`
-- `link_key_type`
-
-unknown fieldを黙って捨てず、key materialをlogしない。
+key fieldsは`link_key.value` 16-byte hex、`link_key.authenticated` bool、
+`link_key_type` u8だけとする。peer名はpublic addressの`XX:XX:XX:XX:XX:XX/P`、namespaceは
+local Bluetooth addressとする。unknown field、旧Rustのraw peer名、`address_type`、LE key fieldを
+profile入力境界で拒否し、key materialをlogしない。
 
 write:
 
@@ -377,7 +369,7 @@ write:
 - flush / `sync_all`
 - create-newはno-replace
 - updateはatomic replace
-- concurrent writerはlockで拒否
+- 同一pathの複数live writerは非対応。lock、CAS、競合検出は提供しない
 
 自動backup、世代管理、復元機能は実装しない。更新中断では旧または新のvalid fileが残ることを保証する。
 

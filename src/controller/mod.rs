@@ -550,11 +550,13 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
 
     /// Attempts to create a new pairing profile and return a paired controller.
     ///
-    /// Builder settings, the required profile path, the requested identity,
-    /// and target existence are checked in that order. An existing target is
-    /// never replaced. With the `bumble` feature, a valid empty profile is
-    /// persisted before opening the selected adapter, then pairing waits for
-    /// normal-input readiness.
+    /// Builder settings, the required profile path, and the requested identity
+    /// are validated without inspecting the target. With the `bumble` feature,
+    /// one create-new attempt persists a valid empty profile without replacing
+    /// an existing file, directory, or symbolic link. Persistence completes
+    /// before the selected adapter is opened, then pairing waits for normal-input
+    /// readiness. Without `bumble`, the method returns an unsupported-capability
+    /// error before profile filesystem I/O.
     ///
     /// # Errors
     ///
@@ -562,8 +564,9 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
     /// [`crate::ErrorKind::ProfilePathRequired`] when no target path was
     /// selected, [`crate::ErrorKind::UnsupportedCapability`] for an unsupported
     /// identity or unavailable Bluetooth transport,
-    /// [`crate::ErrorKind::ProfileAlreadyExists`] when the target already
-    /// exists, [`crate::ErrorKind::TransportOpen`] when the adapter cannot be
+    /// [`crate::ErrorKind::ProfileAlreadyExists`] when the feature-enabled
+    /// create-new attempt finds an existing target,
+    /// [`crate::ErrorKind::TransportOpen`] when the adapter cannot be
     /// opened and initialized,
     /// [`crate::ErrorKind::AdapterIdentityRecoveryRequired`] when an explicit
     /// identity write started but could not be verified, or a structured

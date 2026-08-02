@@ -66,7 +66,7 @@ M9 portability / release
 
 追加対象:
 
-- profile schema v2 read/write
+- Python 0.6.0 Classic profile schema v2 read/write
 - `PairingProfile<model::Pro>`
 - stored link key reconnect
 - `DirectProController`
@@ -246,7 +246,7 @@ M9 portability / release
 - runtime coreにuntyped button vectorを永続保持しない
 - runtime coreが毎操作`ControllerKind`をmatchしない
 - nonexistent build pathは`ProfileNotFound`
-- create target existingは上書きなし
+- create targetは事前検査せず、create-new競合時も上書きなし
 - envelopeがtransport openより先
 - create failureでresource cleanup
 - success時Ready controller返却
@@ -380,9 +380,9 @@ virtual integration未通過で実機packetを場当たりpatchしない。
 - schema v2 DTO / typed profile
 - Python fixture read
 - Rust write→Python read
-- key preservation
+- strict Classic key shapeとunknown/legacy/LE field rejection
 - atomic create/replace
-- lock contention
+- single-writer update。複数writerの競合検出は対象外
 - model mismatch
 - adapter-default namespace
 - multiple peer reject

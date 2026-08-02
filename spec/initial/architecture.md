@@ -306,13 +306,12 @@ builder validation
 ```text
 ControllerBuilder<M, R>::create_profile(options)
   1. profile_path必須を検査
-  2. pathが存在しないことを検査
-  3. M::KINDとidentityを持つvalid empty PairingProfile<M>を生成してcreate-new
-  4. 同じPairingProfile<M>をruntime configへ移譲
-  5. Controller<M, R>を構築
-  6. worker / adapterをopen
-  7. pair to normal-input readiness
-  8. Ready Controller<M, R>を返す
+  2. M::KINDとidentityを持つvalid empty PairingProfile<M>を生成してcreate-new
+  3. 同じPairingProfile<M>をruntime configへ移譲
+  4. Controller<M, R>を構築
+  5. worker / adapterをopen
+  6. pair to normal-input readiness
+  7. Ready Controller<M, R>を返す
 ```
 
 重要な順序:
@@ -323,7 +322,8 @@ ControllerBuilder<M, R>::create_profile(options)
 - explicit local addressを実装する場合も、identity確定前にcontrollerをpower onしない
 - pairing failureでもempty envelopeは残す
 - failure時は内部controllerをcleanupし、partial objectは返さない
-- pathが既に存在すれば`ProfileAlreadyExists`
+- target existenceは事前検査せず、create-newの競合だけを`ProfileAlreadyExists`にする
+- `bumble` feature無効時はprofile filesystem I/Oより先に`UnsupportedCapability`
 
 `Controller<M, R>`に`create_profile()` methodは置かない。existing empty profileからのpairing再試行は`build()`→`open()`→`pair()`を使う。
 
@@ -650,12 +650,13 @@ Python `PairingKeys.to_dict()`とBumble Rustのstored型のfield / hex表現をc
 
 ## 16. profile persistence
 
-raw JSON DTOは`ControllerKind`を持つ。validation後は`PairingProfile<M>`。
+未知field拒否付きserde DTOはcontroller kind、identity、namespace、Classic bondを型付きで持つ。
+validation後は`PairingProfile<M>`。
 
 ```text
 JSON bytes
-  ↓ ProfileDocument { controller_kind: ControllerKind, ... }
-schema / shape validation
+  ↓ ProfileDocument { controller_kind, identity, key_store, ... }
+strict schema / Classic shape validation
   ↓ compare with M::KIND
 PairingProfile<M>
   ↓ Bumble key conversion
@@ -672,7 +673,8 @@ create-new / update:
 7. supported OSではparent sync
 8. temp cleanup
 
-自動backup、世代管理、復元機能は持たない。並行更新はlockで拒否する。
+自動backup、世代管理、復元機能は持たない。同一pathは一つのlive controller runtimeが所有し、
+複数process/controllerによる並行更新と競合検出は提供しない。
 
 ## 17. dynamic boundary
 

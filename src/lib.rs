@@ -17,10 +17,13 @@
 //! without deleting it or falling back to pairing; [`Controller::connect`] can
 //! permit that fallback only when configured by the caller.
 //!
-//! [`PairingProfile`] preserves unknown schema-v2 extension fields. Profile
-//! creation does not replace an existing target, and pairing-key updates replace
-//! the complete profile atomically. A new connection session resets committed
-//! input to neutral and excludes events from earlier sessions.
+//! [`PairingProfile`] accepts the strict Classic pairing subset emitted by
+//! swbt-python 0.6.0; unknown fields, legacy Rust peer names, and LE key fields
+//! are rejected. Profile creation uses one no-replace publication attempt, and
+//! pairing-key updates atomically replace the complete profile for one live
+//! writer. Multiple processes or controllers updating the same profile path are
+//! unsupported. A new connection session resets committed input to neutral and
+//! excludes events from earlier sessions.
 //!
 //! Explicit close drains accepted interrupt sends to the controller flow-control
 //! window, disconnects, closes the transport, joins the worker, and reports
