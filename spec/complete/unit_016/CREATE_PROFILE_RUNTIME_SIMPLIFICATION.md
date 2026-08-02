@@ -154,6 +154,13 @@ T01をgreenにした後、既存のcreate-profile/runtime契約テストをgreen
 | `cargo build -p swbt-rs --no-default-features --locked` | success | 全refactor後 |
 | `cargo clippy -p swbt-rs --all-targets --no-default-features --locked -- -D warnings` | success | feature無効のdead-code境界を含む |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | success | 全refactor後 |
+| `rustup run 1.87.0 cargo check --workspace --all-targets --all-features --locked` | success | 全refactor後のMSRV gate |
+| `cargo fmt --all --check` | success | 完了前gate |
+| `git diff --check main...HEAD` | success | 完了前gate |
+| docs-quality-review | success | initial specの現在契約、Intent Delta、参照先、仮テキスト残りを確認 |
+| rust-api-boundary-review | success | public API変更なし。owner移譲、error chain、feature有無、Send/Sync契約に追加findingなし |
+| agentic-self-review | success | blocking findingなし。Cargo metadataとpackage境界は未変更 |
+| 実機pairing / USB / Switch UI | not run | 本unitの対象外。software testの成功を実機確認として扱わない |
 
 ## 10. 先送り事項
 
@@ -165,7 +172,7 @@ T01をgreenにした後、既存のcreate-profile/runtime契約テストをgreen
 - [x] TDD Test Listを作成した
 - [x] T01のRED/GREEN/refactorを記録した
 - [x] create-profileとruntimeの既存契約testを維持した
-- [ ] 全検証結果または未実行理由を記録した
+- [x] 全検証結果または未実行理由を記録した
 - [x] Cargo metadata、release、public APIは変更対象外と確認した
 - [x] `spec/initial`のIntent Deltaを反映した
-- [ ] self-reviewを完了した
+- [x] self-reviewを完了した
