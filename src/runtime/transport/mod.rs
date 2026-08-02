@@ -145,6 +145,13 @@ pub(crate) enum TransportErrorKind {
     )]
     AdapterIdentityRecoveryRequired,
     /// The controller lacks the Classic feature or ACL buffers required by NX.
+    #[cfg_attr(
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not validate runtime transport capabilities"
+        )
+    )]
     UnsupportedController,
     /// The configured pairing profile could not supply or persist key material.
     InvalidKeyStore,

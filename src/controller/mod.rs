@@ -42,7 +42,7 @@ use build::{ProfileReadPort, read_typed_profile};
 #[cfg(test)]
 use config::ProfileConfig;
 use config::{BuilderConfig, ControllerConfig};
-use create::{ControllerRuntime, CreateProfilePlan, CreateProfileRuntimeBackend};
+use create::{ControllerRuntime, CreateProfilePlan};
 
 /// A controller whose model and reporting mode are fixed by its type.
 ///
@@ -539,10 +539,14 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
         self,
         options: CreateProfileOptions,
         store: &mut impl crate::profile::ProfileCreatePort,
-        backend: &mut impl CreateProfileRuntimeBackend<M, R>,
+        open_and_pair: impl FnOnce(
+            &ControllerConfig<M, R>,
+            StatusPublisher<M>,
+            Duration,
+        ) -> crate::Result<ControllerRuntime<M, R>>,
     ) -> crate::Result<Controller<M, R>> {
         let plan = self.validate_create_profile_target(options, store)?;
-        create::create_profile(plan, store, backend)
+        create::create_profile(plan, store, open_and_pair)
     }
 
     /// Attempts to create a new pairing profile and return a paired controller.
@@ -580,8 +584,7 @@ impl<M: ControllerModel, R: ReportingMode> ControllerBuilder<M, R> {
         #[cfg(feature = "bumble")]
         {
             let mut store = FileProfileStore;
-            let mut backend = runtime::bumble_runtime_backend::<M, R>();
-            self.create_profile_with(options, &mut store, &mut backend)
+            self.create_profile_with(options, &mut store, runtime::create_bumble_runtime::<M, R>)
         }
         #[cfg(not(feature = "bumble"))]
         {

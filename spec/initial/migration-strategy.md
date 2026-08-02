@@ -127,8 +127,8 @@ Rustの`create_profile()`はcontroller methodではなく、typed builderを消�
 順序:
 
 1. builder設定とtarget pathを検査
-2. `M::KIND`を持つvalid empty envelopeをcreate-new
-3. `PairingProfile<M>`として再読込
+2. `M::KIND`を持つvalid empty `PairingProfile<M>`を生成してcreate-new
+3. 同じ`PairingProfile<M>`をruntime configへ移譲
 4. controllerを構築
 5. adapter / workerをopen
 6. pairingとprotocol readiness
@@ -137,7 +137,8 @@ Rustの`create_profile()`はcontroller methodではなく、typed builderを消�
 理由:
 
 - profile identityを永続化する前にadapterをpower onしない
-- controller kind mismatchをopen前に排除する
+- 保存bytesとruntime configのcontroller kind / identityを同じ型付き値から作る
+- 後続のbuild/open/reconnectでは保存済みprofileを再読込して検証する
 - pairing failure後もvalid empty envelopeから明示retryできる
 - partial controller objectを利用者へ返さない
 

@@ -7,7 +7,7 @@ use std::{
     sync::{
         Arc, Mutex, MutexGuard,
         atomic::{AtomicBool, Ordering},
-        mpsc::{Receiver, SyncSender, sync_channel},
+        mpsc::Receiver,
     },
     thread,
     time::{Duration, Instant},
@@ -45,12 +45,9 @@ use crate::{
 #[cfg(feature = "bumble")]
 use crate::controller::ControllerBuilder;
 
-use super::{
-    create::CreateProfileRuntimeAttempt,
-    runtime::{
-        ConcreteRuntimeAttempt, ConcreteRuntimeBackend, PairDriver, RuntimeComponents,
-        map_worker_spawn_error, open_controller_runtime,
-    },
+use super::runtime::{
+    RuntimeComponents, create_controller_runtime, map_worker_spawn_error, open_controller_runtime,
+    open_runtime_owner,
 };
 
 #[cfg(feature = "bumble")]
@@ -63,16 +60,6 @@ const PAIR_TIMEOUT: Duration = Duration::from_secs(2);
 const PERIODIC_READY_AT: Duration = Duration::from_millis(300);
 const DEADLOCK_WATCHDOG: Duration = Duration::from_secs(2);
 const NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
-
-#[cfg(feature = "bumble")]
-#[test]
-fn production_pair_driver_leaves_the_worker_pair_command_in_control() {
-    let mut driver = super::runtime::ProductionPairDriver;
-
-    driver
-        .after_pair_enqueued()
-        .expect("production pairing needs no test-only continuation");
-}
 
 #[cfg(feature = "bumble")]
 #[test]
@@ -202,7 +189,6 @@ fn post_write_identity_uncertainty_maps_to_the_public_recovery_kind() {
             Box::new(IdentityRecoveryOpenTransport),
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
-            UnusedPairDriver,
         ))
     };
 
@@ -272,7 +258,6 @@ fn controller_open_is_idempotent_and_reopens_after_join() {
                 }),
                 first_clock,
                 ChannelWorkerWaiter::new(activity_receiver),
-                UnusedPairDriver,
             ))
         };
 
@@ -314,7 +299,6 @@ fn controller_open_is_idempotent_and_reopens_after_join() {
                 }),
                 second_clock,
                 ChannelWorkerWaiter::new(activity_receiver),
-                UnusedPairDriver,
             ))
         };
 
@@ -762,13 +746,14 @@ fn pair_primary_and_concrete_cleanup_failure_remain_separately_traversable() {
     let clock = ManualClock::at(Duration::ZERO);
     let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         Ok::<_, Error>(RuntimeComponents::new(
-            Box::new(DrainFailingTransport { inner: transport }),
+            Box::new(DisconnectingPairTransport {
+                inner: DrainFailingTransport { inner: transport },
+                control,
+            }),
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
-            DisconnectingPairDriver { control },
         ))
     };
-    let mut backend = ConcreteRuntimeBackend::new(factory);
     let mut store = MemoryProfileStore::default();
 
     let error = match ProController::builder("fake-adapter")
@@ -779,7 +764,9 @@ fn pair_primary_and_concrete_cleanup_failure_remain_separately_traversable() {
                 pair_timeout: PAIR_TIMEOUT,
             },
             &mut store,
-            &mut backend,
+            |config, status, pair_timeout| {
+                create_controller_runtime(config, status, pair_timeout, factory)
+            },
         ) {
         Ok(_) => panic!("disconnect before Ready and cleanup failure must fail"),
         Err(error) => error,
@@ -823,29 +810,67 @@ fn pair_primary_and_concrete_cleanup_failure_remain_separately_traversable() {
 }
 
 #[test]
+fn create_profile_transfers_one_ready_worker_owner_to_the_controller() {
+    let (transport, control) = TestTransport::with_limits(16, 3);
+    let observed_control = control.clone();
+    let clock = ManualClock::at(Duration::ZERO);
+    let worker_clock = clock.clone();
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+        Ok::<_, Error>(RuntimeComponents::new(
+            Box::new(FakePairTransport {
+                inner: transport,
+                control,
+                request_device_info: false,
+            }),
+            worker_clock,
+            PeriodicReadyWaiter {
+                inner: ChannelWorkerWaiter::new(activity_receiver),
+                clock,
+                periodic: true,
+            },
+        ))
+    };
+    let mut store = MemoryProfileStore::default();
+
+    let controller = ProController::builder("fake-adapter")
+        .profile_path("profiles/ready-owner.json")
+        .create_profile_with(
+            CreateProfileOptions {
+                identity: ProfileIdentity::AdapterDefault,
+                pair_timeout: PAIR_TIMEOUT,
+            },
+            &mut store,
+            |config, status, pair_timeout| {
+                create_controller_runtime(config, status, pair_timeout, factory)
+            },
+        )
+        .expect("create-profile returns a Ready controller");
+
+    assert_eq!(controller.status().lifecycle, LifecycleState::Ready);
+    assert_eq!(observed_control.counters(), (1, 0, 0));
+    drop(controller);
+    assert_eq!(observed_control.counters(), (1, 1, 1));
+}
+
+#[test]
 fn terminal_pair_worker_failure_cleans_and_joins_with_typed_primary() {
     let (transport, control) = TestTransport::with_limits(8, 3);
-    let fail_poll = Arc::new(AtomicBool::new(false));
-    let transport_fail_poll = Arc::clone(&fail_poll);
+    let transport_fail_poll = Arc::new(AtomicBool::new(false));
     let cleanup_trace = Arc::new(Mutex::new(Vec::new()));
     let transport_cleanup_trace = Arc::clone(&cleanup_trace);
     let clock = ManualClock::at(Duration::ZERO);
-    let factory = move |_config, activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
         Ok::<_, Error>(RuntimeComponents::new(
             Box::new(TerminalPairTransport {
                 inner: transport,
                 fail_poll: transport_fail_poll,
+                fail_on_start_pairing: true,
                 cleanup_trace: transport_cleanup_trace,
             }),
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
-            TerminalPairDriver {
-                fail_poll,
-                activity,
-            },
         ))
     };
-    let mut backend = ConcreteRuntimeBackend::new(factory);
     let mut store = MemoryProfileStore::default();
 
     let error = match ProController::builder("fake-adapter")
@@ -856,7 +881,9 @@ fn terminal_pair_worker_failure_cleans_and_joins_with_typed_primary() {
                 pair_timeout: PAIR_TIMEOUT,
             },
             &mut store,
-            &mut backend,
+            |config, status, pair_timeout| {
+                create_controller_runtime(config, status, pair_timeout, factory)
+            },
         ) {
         Ok(_) => panic!("terminal pair worker failure must not return a controller"),
         Err(error) => error,
@@ -940,20 +967,22 @@ fn pair_after_worker_finishes_before_enqueue_uses_actual_terminal_outcome() {
             Box::new(TerminalPairTransport {
                 inner: transport,
                 fail_poll: Arc::new(AtomicBool::new(true)),
+                fail_on_start_pairing: false,
                 cleanup_trace: transport_cleanup_trace,
             }),
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
-            UnusedPairDriver,
         ))
     };
-    let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
-    attempt
-        .open(&controller.config)
-        .expect("open concrete runtime attempt");
+    let mut owner = open_runtime_owner(
+        &controller.config,
+        controller.status_publisher.clone(),
+        factory,
+    )
+    .expect("open concrete runtime owner");
 
     let watchdog = Instant::now() + DEADLOCK_WATCHDOG;
-    while !attempt.worker_is_finished() {
+    while !owner.worker_is_finished() {
         assert!(
             Instant::now() < watchdog,
             "worker must terminate before the enqueue-race assertion"
@@ -961,7 +990,7 @@ fn pair_after_worker_finishes_before_enqueue_uses_actual_terminal_outcome() {
         thread::yield_now();
     }
 
-    let error = attempt
+    let error = owner
         .pair_to_ready(PAIR_TIMEOUT)
         .expect_err("pairing after worker termination must return its actual outcome");
 
@@ -1004,7 +1033,7 @@ fn pair_after_worker_finishes_before_enqueue_uses_actual_terminal_outcome() {
     );
     assert_eq!(control.counters(), (1, 1, 1));
 
-    attempt
+    owner
         .cleanup_without_neutral()
         .expect("terminal pair handling consumes the worker owner");
     assert_eq!(
@@ -1028,29 +1057,23 @@ fn non_classic_capabilities_fail_before_worker_spawn_and_clean_up_transport() {
             Box::new(transport),
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
-            UnusedPairDriver,
         ))
     };
-    let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
-
-    let error = attempt
-        .open(&controller.config)
-        .expect_err("non-Classic capability must fail during transport open");
+    let result = open_runtime_owner(
+        &controller.config,
+        controller.status_publisher.clone(),
+        factory,
+    );
+    let error = match result {
+        Ok(_) => panic!("non-Classic capability must fail during transport open"),
+        Err(error) => error,
+    };
     assert_eq!(error.kind(), ErrorKind::TransportOpen);
     let source = error
         .source()
         .and_then(|source| source.downcast_ref::<TransportError>())
         .expect("typed unsupported-controller source");
     assert_eq!(source.kind(), TransportErrorKind::UnsupportedController);
-    assert!(
-        !attempt.owns_worker(),
-        "worker must not start before validation"
-    );
-    assert_eq!(control.counters(), (1, 0, 0));
-
-    attempt
-        .cleanup_without_neutral()
-        .expect("opened unsupported transport is cleaned up");
     assert_eq!(control.counters(), (1, 1, 1));
 }
 
@@ -1080,7 +1103,6 @@ fn backend_open_failures_map_to_sanitized_public_transport_errors() {
                     }),
                     clock,
                     ChannelWorkerWaiter::new(activity_receiver),
-                    UnusedPairDriver,
                 ))
             };
 
@@ -1145,7 +1167,7 @@ fn invalid_usb_selector_maps_through_public_open_without_disclosure() {
 }
 
 #[test]
-fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
+fn partial_transport_open_failure_is_cleaned_before_return() {
     let (transport, control) = TestTransport::with_limits(8, 3);
     let observed_control = control.clone();
     let cleanup_trace = Arc::new(Mutex::new(Vec::new()));
@@ -1159,10 +1181,8 @@ fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
             }),
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
-            UnusedPairDriver,
         ))
     };
-    let mut backend = ConcreteRuntimeBackend::new(factory);
     let mut store = MemoryProfileStore::default();
 
     let error = match ProController::builder("fake-adapter")
@@ -1173,7 +1193,9 @@ fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
                 pair_timeout: PAIR_TIMEOUT,
             },
             &mut store,
-            &mut backend,
+            |config, status, pair_timeout| {
+                create_controller_runtime(config, status, pair_timeout, factory)
+            },
         ) {
         Ok(_) => panic!("partially opened transport must report its open error"),
         Err(error) => error,
@@ -1218,7 +1240,7 @@ fn partial_transport_open_failure_is_cleaned_before_attempt_drop() {
 }
 
 #[test]
-fn partial_transport_open_attempt_drop_skips_drain_and_cleans_once() {
+fn partial_transport_open_owner_failure_cleans_once() {
     let controller = ProController::builder("fake-adapter")
         .build()
         .expect("build configured Pro controller");
@@ -1234,28 +1256,32 @@ fn partial_transport_open_attempt_drop_skips_drain_and_cleans_once() {
             }),
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
-            UnusedPairDriver,
         ))
     };
-    let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
-
-    let error = attempt
-        .open(&controller.config)
-        .expect_err("partially opened transport reports its open error");
+    let result = open_runtime_owner(
+        &controller.config,
+        controller.status_publisher.clone(),
+        factory,
+    );
+    let error = match result {
+        Ok(_) => panic!("partially opened transport must report its open error"),
+        Err(error) => error,
+    };
     assert_eq!(error.kind(), ErrorKind::TransportOpen);
-    assert_eq!(control.counters(), (1, 0, 0));
-
-    drop(attempt);
 
     assert_eq!(
         *lock(&cleanup_trace),
-        [PartialCleanupTrace::Disconnect, PartialCleanupTrace::Close],
-        "Drop cleanup skips drain and preserves disconnect-before-close order"
+        [
+            PartialCleanupTrace::Drain(Duration::from_secs(1)),
+            PartialCleanupTrace::Disconnect,
+            PartialCleanupTrace::Close,
+        ],
+        "owner construction failure performs bounded explicit cleanup"
     );
     assert_eq!(
         control.counters(),
         (1, 1, 1),
-        "Drop disconnects and closes the partial open exactly once"
+        "owner construction failure cleans the partial open exactly once"
     );
 }
 
@@ -1276,22 +1302,21 @@ fn partial_transport_open_panic_is_guarded_for_drop_cleanup() {
             }),
             clock,
             ChannelWorkerWaiter::new(activity_receiver),
-            UnusedPairDriver,
         ))
     };
-    let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
-
     let panicked = catch_unwind(AssertUnwindSafe(|| {
-        let _ = attempt.open(&controller.config);
+        let _ = open_runtime_owner(
+            &controller.config,
+            controller.status_publisher.clone(),
+            factory,
+        );
     }));
 
     assert!(panicked.is_err(), "transport open panic must propagate");
-    assert_eq!(control.counters(), (1, 0, 0));
-    drop(attempt);
     assert_eq!(
         *lock(&cleanup_trace),
         [PartialCleanupTrace::Disconnect, PartialCleanupTrace::Close],
-        "attempt Drop skips drain and cleans the guarded partial open"
+        "transport guard Drop skips drain and cleans the partial open"
     );
     assert_eq!(control.counters(), (1, 1, 1));
 }
@@ -1472,36 +1497,31 @@ where
     let observed_control = control.clone();
     let clock = ManualClock::at(Duration::ZERO);
     let worker_clock = clock.clone();
-    let factory = move |_config, activity: ActivityNotifier, activity_receiver: Receiver<()>| {
-        let (requests, observed_requests) = sync_channel(16);
-        let waiter = ObservedWaiter {
+    let factory = move |_config, _activity: ActivityNotifier, activity_receiver: Receiver<()>| {
+        let waiter = PeriodicReadyWaiter {
             inner: ChannelWorkerWaiter::new(activity_receiver),
-            requests,
-        };
-        let driver = FakePairDriver {
-            control,
             clock,
-            activity,
-            observed_requests,
             periodic,
-            request_device_info,
         };
         Ok::<_, Error>(RuntimeComponents::new(
-            Box::new(transport),
+            Box::new(FakePairTransport {
+                inner: transport,
+                control,
+                request_device_info,
+            }),
             worker_clock,
             waiter,
-            driver,
         ))
     };
-    let mut attempt = ConcreteRuntimeAttempt::new(factory, controller.status_publisher.clone());
-
-    attempt
-        .open(&controller.config)
-        .expect("open fake concrete runtime");
-    attempt
-        .pair_to_ready(PAIR_TIMEOUT)
-        .expect("pair through worker one-shot");
-    controller._runtime = Some(attempt.into_ready());
+    controller._runtime = Some(
+        create_controller_runtime(
+            &controller.config,
+            controller.status_publisher.clone(),
+            PAIR_TIMEOUT,
+            factory,
+        )
+        .expect("open and pair fake runtime"),
+    );
 
     let status = controller.status();
     assert_eq!(status.lifecycle, LifecycleState::Ready);
@@ -1554,7 +1574,6 @@ fn open_public_connection_controller(
             }),
             worker_clock,
             ChannelWorkerWaiter::new(activity_receiver),
-            UnusedPairDriver,
         ))
     };
     controller
@@ -1599,12 +1618,9 @@ where
     assert_eq!(control.counters(), (1, 1, 1));
 }
 
-struct FakePairDriver {
+struct FakePairTransport {
+    inner: TestTransport,
     control: TestTransportControl,
-    clock: ManualClock,
-    activity: ActivityNotifier,
-    observed_requests: Receiver<WorkerWaitRequest>,
-    periodic: bool,
     request_device_info: bool,
 }
 
@@ -1633,76 +1649,9 @@ struct PublicPairTransport {
     operations: Arc<Mutex<Vec<PublicConnectionOperation>>>,
 }
 
-struct DisconnectingPairDriver {
+struct DisconnectingPairTransport {
+    inner: DrainFailingTransport,
     control: TestTransportControl,
-}
-
-struct UnusedPairDriver;
-
-impl PairDriver for UnusedPairDriver {
-    fn after_pair_enqueued(&mut self) -> crate::Result<()> {
-        panic!("pairing must not start after transport open failure")
-    }
-}
-
-impl PairDriver for DisconnectingPairDriver {
-    fn after_pair_enqueued(&mut self) -> crate::Result<()> {
-        self.control
-            .inject_disconnected(Some(0x13))
-            .map_err(pair_driver_error)
-    }
-}
-
-impl PairDriver for FakePairDriver {
-    fn after_pair_enqueued(&mut self) -> crate::Result<()> {
-        self.control.inject_connected().map_err(pair_driver_error)?;
-        self.control
-            .inject_hid_channel_opened(HidChannel::Control)
-            .map_err(pair_driver_error)?;
-        self.control
-            .inject_hid_channel_opened(HidChannel::Interrupt)
-            .map_err(pair_driver_error)?;
-        if self.request_device_info {
-            self.control
-                .inject_hid_output(HidChannel::Control, &subcommand_report(0x02, &[]))
-                .map_err(pair_driver_error)?;
-        }
-        self.control
-            .inject_hid_output(HidChannel::Control, &subcommand_report(0x03, &[0x30]))
-            .map_err(pair_driver_error)?;
-        self.control
-            .inject_hid_output(HidChannel::Interrupt, &subcommand_report(0x30, &[0x01]))
-            .map_err(pair_driver_error)?;
-
-        if self.periodic {
-            loop {
-                let request = self
-                    .observed_requests
-                    .recv_timeout(DEADLOCK_WATCHDOG)
-                    .map_err(|source| {
-                        Error::with_source(
-                            crate::ErrorKind::WorkerFailed,
-                            "worker did not publish the Periodic readiness deadline",
-                            source,
-                        )
-                    })?;
-                if request == WorkerWaitRequest::ActivityOrDeadline(PERIODIC_READY_AT) {
-                    self.clock.set(PERIODIC_READY_AT);
-                    self.activity.notify();
-                    break;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-fn pair_driver_error(source: crate::runtime::transport::TransportError) -> Error {
-    Error::with_source(
-        crate::ErrorKind::ConnectionFailed,
-        "fake pairing event could not be injected",
-        source,
-    )
 }
 
 #[derive(Clone)]
@@ -1730,9 +1679,10 @@ impl MonotonicClock for ManualClock {
     }
 }
 
-struct ObservedWaiter {
+struct PeriodicReadyWaiter {
     inner: ChannelWorkerWaiter,
-    requests: SyncSender<WorkerWaitRequest>,
+    clock: ManualClock,
+    periodic: bool,
 }
 
 struct DrainFailingTransport {
@@ -1742,12 +1692,8 @@ struct DrainFailingTransport {
 struct TerminalPairTransport {
     inner: TestTransport,
     fail_poll: Arc<AtomicBool>,
+    fail_on_start_pairing: bool,
     cleanup_trace: Arc<Mutex<Vec<TerminalPairTrace>>>,
-}
-
-struct TerminalPairDriver {
-    fail_poll: Arc<AtomicBool>,
-    activity: ActivityNotifier,
 }
 
 struct PartiallyOpeningTransport {
@@ -1813,11 +1759,77 @@ enum PartialCleanupTrace {
     Close,
 }
 
-impl PairDriver for TerminalPairDriver {
-    fn after_pair_enqueued(&mut self) -> crate::Result<()> {
-        self.fail_poll.store(true, Ordering::SeqCst);
-        self.activity.notify();
-        Ok(())
+impl TransportPort for FakePairTransport {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
+        self.inner.open(activity)
+    }
+
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        self.inner.start_pairing()?;
+        self.control.inject_connected()?;
+        self.control
+            .inject_hid_channel_opened(HidChannel::Control)?;
+        self.control
+            .inject_hid_channel_opened(HidChannel::Interrupt)?;
+        if self.request_device_info {
+            self.control
+                .inject_hid_output(HidChannel::Control, &subcommand_report(0x02, &[]))?;
+        }
+        self.control
+            .inject_hid_output(HidChannel::Control, &subcommand_report(0x03, &[0x30]))?;
+        self.control
+            .inject_hid_output(HidChannel::Interrupt, &subcommand_report(0x30, &[0x01]))
+    }
+
+    fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+        self.inner.poll(timeout)
+    }
+
+    fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
+        self.inner.send_interrupt(payload)
+    }
+
+    fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+        self.inner.drain_interrupt(timeout)
+    }
+
+    fn disconnect(&mut self) -> TransportResult<()> {
+        self.inner.disconnect()
+    }
+
+    fn close(&mut self) -> TransportResult<()> {
+        self.inner.close()
+    }
+}
+
+impl TransportPort for DisconnectingPairTransport {
+    fn open(&mut self, activity: ActivityNotifier) -> TransportResult<TransportCapabilities> {
+        self.inner.open(activity)
+    }
+
+    fn start_pairing(&mut self) -> TransportResult<()> {
+        self.inner.start_pairing()?;
+        self.control.inject_disconnected(Some(0x13))
+    }
+
+    fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
+        self.inner.poll(timeout)
+    }
+
+    fn send_interrupt(&mut self, payload: &[u8]) -> TransportResult<SendAcceptance> {
+        self.inner.send_interrupt(payload)
+    }
+
+    fn drain_interrupt(&mut self, timeout: Duration) -> TransportResult<()> {
+        self.inner.drain_interrupt(timeout)
+    }
+
+    fn disconnect(&mut self) -> TransportResult<()> {
+        self.inner.disconnect()
+    }
+
+    fn close(&mut self) -> TransportResult<()> {
+        self.inner.close()
     }
 }
 
@@ -1908,7 +1920,11 @@ impl TransportPort for TerminalPairTransport {
     }
 
     fn start_pairing(&mut self) -> TransportResult<()> {
-        self.inner.start_pairing()
+        self.inner.start_pairing()?;
+        if self.fail_on_start_pairing {
+            self.fail_poll.store(true, Ordering::SeqCst);
+        }
+        Ok(())
     }
 
     fn poll(&mut self, timeout: Duration) -> TransportResult<Vec<TransportEvent>> {
@@ -2198,13 +2214,15 @@ impl ProfileCreatePort for MemoryProfileStore {
     }
 }
 
-impl WorkerWaiter for ObservedWaiter {
+impl WorkerWaiter for PeriodicReadyWaiter {
     fn wait(
         &mut self,
         request: WorkerWaitRequest,
         clock: &dyn MonotonicClock,
     ) -> Result<(), WorkerWaitError> {
-        let _ = self.requests.try_send(request);
+        if self.periodic && request == WorkerWaitRequest::ActivityOrDeadline(PERIODIC_READY_AT) {
+            self.clock.set(PERIODIC_READY_AT);
+        }
         self.inner.wait(request, clock)
     }
 }

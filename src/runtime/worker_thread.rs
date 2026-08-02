@@ -471,6 +471,13 @@ impl<C> WorkerOwner<C> {
             .finish()
     }
 
+    #[cfg_attr(
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not finish terminal worker owners"
+        )
+    )]
     pub(crate) fn finish_terminal(mut self) -> WorkerThreadOutcome {
         drop(self.commands.take());
         self.thread

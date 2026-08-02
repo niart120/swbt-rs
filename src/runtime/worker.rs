@@ -166,6 +166,13 @@ pub(crate) struct WorkerBudget {
 }
 
 impl WorkerBudget {
+    #[cfg_attr(
+        not(any(test, feature = "bumble")),
+        allow(
+            dead_code,
+            reason = "feature-disabled builds do not construct controller workers"
+        )
+    )]
     pub(crate) const fn new(poll_batches: usize) -> Self {
         assert!(poll_batches > 0, "worker poll batch count must be positive");
         Self { poll_batches }

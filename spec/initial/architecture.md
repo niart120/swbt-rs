@@ -307,8 +307,8 @@ builder validation
 ControllerBuilder<M, R>::create_profile(options)
   1. profile_path必須を検査
   2. pathが存在しないことを検査
-  3. M::KINDとidentityを持つvalid empty envelopeをcreate-new
-  4. PairingProfile<M>として再読込・検証
+  3. M::KINDとidentityを持つvalid empty PairingProfile<M>を生成してcreate-new
+  4. 同じPairingProfile<M>をruntime configへ移譲
   5. Controller<M, R>を構築
   6. worker / adapterをopen
   7. pair to normal-input readiness
@@ -318,6 +318,8 @@ ControllerBuilder<M, R>::create_profile(options)
 重要な順序:
 
 - envelope persistenceはadapter openより先
+- 同じcreate呼出しでは保存直後に再読込せず、保存bytesとruntime configを同じ型付き値から作る
+- 後続のbuild/open/reconnectは保存済みprofileを再読込し、persisted identityを使う
 - explicit local addressを実装する場合も、identity確定前にcontrollerをpower onしない
 - pairing failureでもempty envelopeは残す
 - failure時は内部controllerをcleanupし、partial objectは返さない

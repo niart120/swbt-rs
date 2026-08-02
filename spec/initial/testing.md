@@ -239,7 +239,7 @@ fake filesystemとfake transportを使い、順序をevent logで検査する。
 ```text
 profile_validate_target
 profile_create_empty
-profile_reopen_typed
+profile_configure_typed
 transport_open
 pairing_start
 protocol_ready
@@ -252,6 +252,7 @@ return_controller
 - target existingは`ProfileAlreadyExists`、上書きなし
 - invalid identityはtransport open前に失敗
 - empty envelope persistenceがtransport openより先
+- 同じcreate呼出しでは保存後のprofile readを行わず、保存bytesとruntime configが同じ型付きprofileから作られる
 - envelopeのcontroller kindが`M::KIND`
 - pairing failureでもvalid empty envelopeが残る
 - failure時にworker / transportをcleanup

@@ -513,6 +513,13 @@ pub struct PairingProfile<M: ControllerModel> {
 }
 
 impl<M: ControllerModel> PairingProfile<M> {
+    pub(crate) fn empty(identity: ProfileIdentity) -> Self {
+        Self {
+            document: ProfileDocument::empty::<M>(identity),
+            _model: PhantomData,
+        }
+    }
+
     /// Parses and validates a UTF-8 schema v2 profile document.
     ///
     /// # Errors
